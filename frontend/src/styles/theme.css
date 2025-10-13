@@ -1,0 +1,261 @@
+/*
+ * 全局浅色主题与动效覆盖
+ * 说明：设计给出的颜色集中包含 #FAFAFB（背景）、#EFB7BA（粉）、#E5COC8（疑似有误）、#194F92（蓝）。
+ * 注意：#E5COC8 中包含字母 O，非合法十六进制；此处暂以接近色 #E5C0C8 代替，可按需微调。
+ */
+
+/* 主题设计变量（浅色） */
+:root {
+  /* 基础色 */
+  --color-bg: #FAFAFB;
+  --color-surface: #FFFFFF;
+  --color-surface-2: #F7F8FA;
+  --color-border: #E9EDF3;
+  --color-text: #1F2937;
+  --color-text-secondary: #6B7280;
+  --el-header-height: 64px; /* 统一顶栏高度 */
+
+  /* 品牌色 */
+  --brand-primary: #77B5FE; /* 指定品牌蓝 */
+  --brand-accent: #EFB7BA;  /* 粉 */
+  /* 注：#E5COC8（含 O）为非法色值，临时替换为接近色 #E5C0C8 */
+  --brand-soft: #E5C0C8;     /* 柔和粉/淡蓝调 */
+  --brand-sky: #A6C8F0;      /* 浅蓝（用于右上角渐变点缀） */
+
+  /* 阴影与圆角 */
+  --shadow-sm: 0 2px 8px rgba(119,181,254,0.08);
+  --shadow-md: 0 12px 32px rgba(119,181,254,0.12);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  /* 动效 */
+  --ease-standard: cubic-bezier(.22,.61,.36,1);
+  --t-fast: .18s var(--ease-standard);
+  --t-base: .25s var(--ease-standard);
+  --t-slow: .35s var(--ease-standard);
+
+  /* Element Plus 主题变量覆盖 */
+  --el-color-primary: var(--brand-primary);
+  --el-color-primary-light-3: #98C7FE; /* approx lighten-3 */
+  --el-color-primary-light-5: #B9D7FF; /* approx lighten-5 */
+  --el-color-primary-light-7: #D7E8FF; /* approx lighten-7 */
+  --el-color-primary-light-9: #F3F9FF; /* approx lighten-9 */
+  --el-text-color-primary: var(--color-text);
+  --el-text-color-regular: var(--color-text);
+  --el-text-color-secondary: var(--color-text-secondary);
+  --el-border-color: var(--color-border);
+  --el-bg-color: var(--color-surface);
+  --el-fill-color-blank: var(--color-surface);
+  --el-border-radius-base: var(--radius-sm);
+}
+
+/* 全局基线样式 */
+html, body, #app { height: 100%; }
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Noto Sans',sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background var(--t-base), color var(--t-base);
+}
+
+/* 顶层布局背景渐变（统一作用于侧边栏与主视图，避免断层） */
+.main-layout {
+  background:
+    radial-gradient(600px 260px at 3% 0%, rgba(239,183,186,0.18), rgba(239,183,186,0) 60%),
+    radial-gradient(600px 260px at 97% 0%, rgba(166,200,240,0.16), rgba(166,200,240,0) 60%),
+    var(--color-bg);
+}
+
+/* 卡片与容器 */
+.el-card {
+  border-radius: var(--radius-md) !important;
+  border: 1px solid var(--color-border) !important;
+  background: var(--color-surface) !important;
+  transition: box-shadow var(--t-base), transform var(--t-base);
+}
+.el-card.is-hover-shadow,
+.el-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+/* 复用型：表格卡片容器（圆角+描边+悬浮阴影） */
+.table-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden; /* 确保圆角裁切内层边框 */
+  transition: box-shadow var(--t-base), transform var(--t-base), border-color var(--t-base);
+}
+.table-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+.table-card :is(.el-table, .el-descriptions) {
+  /* 移除内层默认外框，由外层 table-card 统一控制描边与圆角 */
+  border: none !important;
+  background: transparent;
+}
+.table-card :deep(.el-table__inner-wrapper),
+.table-card :deep(.el-table__header-wrapper),
+.table-card :deep(.el-table__body-wrapper),
+.table-card :deep(.el-descriptions__table) {
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* 按钮 */
+.el-button {
+  border-radius: 10px;
+  transition: transform var(--t-fast), box-shadow var(--t-fast), background-color var(--t-fast), border-color var(--t-fast);
+}
+.el-button:hover { transform: translateY(-1px); }
+.el-button--primary {
+  background-color: var(--brand-primary) !important;
+  border-color: var(--brand-primary) !important;
+}
+.el-button--primary.is-plain:hover {
+  color: var(--brand-primary);
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-7);
+}
+
+/* 输入框聚焦态 */
+.el-input__wrapper,
+.el-textarea__inner {
+  transition: box-shadow var(--t-fast), border-color var(--t-fast), background-color var(--t-fast);
+}
+.el-input__wrapper.is-focus,
+.el-textarea__inner:focus {
+  box-shadow: 0 0 0 4px rgba(119,181,254,.16);
+  border-color: var(--el-color-primary);
+}
+
+/* 标签 Tag */
+.el-tag { border-radius: 999px; }
+
+/* 滚动条美化（WebKit） */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--brand-soft), var(--brand-accent));
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* 页面与路由过渡 */
+.page-fade-enter-active,
+.page-fade-leave-active { transition: opacity var(--t-slow), transform var(--t-slow); }
+.page-fade-enter-from,
+.page-fade-leave-to { opacity: 0; transform: translateY(8px); }
+
+/* 标题与分隔 */
+h1, h2, h3, h4, h5, h6 { color: var(--color-text); }
+
+/* 布局相关（侧边栏与头部的通用样式） */
+.app-aside {
+  /* 侧边栏改为透明，以承接父级(main-layout)的统一渐变背景 */
+  background: transparent;
+  border-right: 1px solid var(--color-border);
+}
+.app-header {
+  background: rgba(255,255,255,0.75);
+  -webkit-backdrop-filter: saturate(180%) blur(8px);
+  backdrop-filter: saturate(180%) blur(8px);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* 菜单颜色（使用 Element Plus CSS 变量） */
+.el-menu { background-color: transparent !important; }
+.el-menu-item, .el-sub-menu__title { transition: background-color var(--t-fast), color var(--t-fast); }
+.el-menu-item.is-active {
+  color: var(--brand-primary) !important;
+  background: linear-gradient(180deg, rgba(119,181,254,0.12), rgba(119,181,254,0.06)) !important;
+  border-radius: 8px;
+}
+.el-menu-item:hover, .el-sub-menu__title:hover { background: var(--el-color-primary-light-9) !important; }
+
+/* 服务器列表头部操作区：提高“批量操作”对比度并加入浅渐变 */
+.server-list-container .card-header .el-button--primary.is-plain {
+  color: var(--brand-primary);
+  background: linear-gradient(180deg, rgba(119,181,254,0.12), rgba(119,181,254,0.06));
+  border-color: rgba(119,181,254,0.30);
+}
+.server-list-container .card-header .el-button--primary.is-plain:hover {
+  background: linear-gradient(180deg, rgba(119,181,254,0.16), rgba(119,181,254,0.08));
+  border-color: rgba(119,181,254,0.36);
+}
+.server-list-container .card-header .header-left span {
+  color: var(--color-text);
+}
+
+/* 主按钮轻度渐变（保持良好可读性） */
+.el-button--primary:not(.is-plain) {
+  background-image: linear-gradient(180deg, #77B5FE, #5AA5FE);
+}
+:root.dark {
+  /* 暗色主题变量 */
+  --color-bg: #0f172a;           /* 深蓝灰背景 */
+  --color-surface: #111827;      /* 卡片/容器底色 */
+  --color-surface-2: #0b1220;    /* 更深的分层底色 */
+  --color-border: #263341;       /* 暗色边框 */
+  --color-text: #e5e7eb;         /* 主文字 */
+  --color-text-secondary: #94a3b8; /* 次要文字 */
+
+  /* 品牌色（保持统一，暗色下对比良好） */
+  --brand-primary: #77B5FE;
+  --brand-accent: #EFB7BA;
+  --brand-soft: #E5C0C8;
+  --brand-sky: #8FB6EA;
+
+  /* Element Plus 主题变量覆盖（暗色） */
+  --el-color-primary: var(--brand-primary);
+  --el-text-color-primary: var(--color-text);
+  --el-text-color-regular: var(--color-text);
+  --el-text-color-secondary: var(--color-text-secondary);
+  --el-border-color: var(--color-border);
+  --el-bg-color: var(--color-surface);
+  --el-fill-color-blank: var(--color-surface);
+}
+
+/* 暗色：整体背景渐变与可读性优化 */
+.dark .main-layout {
+  background:
+    radial-gradient(600px 260px at 3% 0%, rgba(239,183,186,0.10), rgba(239,183,186,0) 60%),
+    radial-gradient(600px 260px at 97% 0%, rgba(119,181,254,0.12), rgba(119,181,254,0) 60%),
+    var(--color-bg);
+}
+
+/* 暗色：通用容器/卡片阴影更内敛 */
+.dark .el-card {
+  border: 1px solid var(--color-border) !important;
+  background: var(--color-surface) !important;
+  box-shadow: 0 8px 26px rgba(0,0,0,0.28);
+}
+
+/* 暗色：表格/描述等容器 */
+.dark .table-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+
+/* 暗色：菜单交互（保持对比） */
+.dark .el-menu-item.is-active {
+  color: var(--brand-primary) !important;
+  background: linear-gradient(180deg, rgba(119,181,254,0.16), rgba(119,181,254,0.08)) !important;
+}
+.dark .el-menu-item:hover,
+.dark .el-sub-menu__title:hover {
+  background: rgba(119,181,254,0.10) !important;
+}
+
+/* 暗色：滚动条更暗 */
+.dark *::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(229,192,200,0.8), rgba(239,183,186,0.9));
+}

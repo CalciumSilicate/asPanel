@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.so
+.venv/
+venv/
+env/
+.Python
+
+# Node/Vue/Vite
+node_modules/
+dist/
+*.log
+
+# IDE/OS
+.idea/
+frontend/.vscode/
+.DS_Store
+
+# App data
+storages/
+
+
+# Local config
+.env
+.env.*
+
+reference/

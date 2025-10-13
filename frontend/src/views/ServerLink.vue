@@ -1,0 +1,302 @@
+<template>
+  <div class="sl-page">
+    <div class="left-wrap" :class="{ 'is-collapsed': asideCollapsed, 'is-collapsing': asideCollapsing }">
+      <!-- 左侧：服务器组列表（仿 PrimeBackup 左侧列表） -->
+      <div class="table-card left-panel">
+        <el-card shadow="never">
+          <template #header>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-base font-medium">Server Link</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <el-button type="primary" size="small" @click="handleCreateGroup">新建组</el-button>
+              </div>
+            </div>
+          </template>
+
+          <el-input v-model="groupQuery" placeholder="搜索服务器组" clearable class="mb-2">
+            <template #prefix><el-icon><Search/></el-icon></template>
+          </el-input>
+
+          <el-table :data="filteredGroups" size="small" stripe @row-click="selectGroup">
+            <el-table-column label="组名" min-width="180">
+              <template #default="{ row }">
+                <div class="flex items-center justify-between w-full">
+                  <div class="server-cell">
+                    <div class="name">{{ row.name }}</div>
+                    <div class="muted">ID: {{ row.id }}</div>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="120" align="center">
+              <template #default="{ row }">
+                <el-button size="small" type="danger" @click.stop="deleteGroup(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </div>
+
+      <!-- 右侧：组详情与配置（仿 PrimeBackup 右侧卡片 + 表格布局） -->
+      <div class="right-panel">
+        <el-card shadow="never" class="mb-3">
+          <template #header>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-base font-medium">{{ activeGroup ? activeGroup.name : '请选择服务器组' }}</span>
+                <el-tag v-if="activeGroup" size="small" type="info">服务器数：{{ selectedServersCount }}</el-tag>
+                <el-tag v-if="activeGroup" size="small" type="success">已连接群聊：{{ connectedChatsCount }}</el-tag>
+              </div>
+              <div class="flex items-center gap-2">
+                <el-button v-if="activeGroup" size="small" :disabled="saving" type="primary" @click="saveGroup">保存</el-button>
+              </div>
+            </div>
+          </template>
+
+          <div v-if="!activeGroup" class="placeholder">请选择左侧“服务器组”，或点击右上角“新建组”。</div>
+          <div v-else>
+            <el-form label-position="top" :model="activeGroup" class="mb-3">
+              <el-form-item label="组名" required>
+                <el-input v-model="activeGroup.name" placeholder="请输入组名"/>
+              </el-form-item>
+
+              <el-form-item label="选择服务器（多选）" required>
+                <el-select v-model="activeGroup.serverIds" multiple filterable placeholder="请选择服务器" style="width: 100%;" :loading="serversLoading">
+                  <el-option
+                    v-for="s in servers"
+                    :key="s.id"
+                    :label="s.name"
+                    :value="s.id"
+                    :disabled="(s.core_config?.server_type || s.core_config?.serverType) === 'velocity'"
+                  />
+                </el-select>
+              </el-form-item>
+
+              <el-form-item label="QQ群聊链接（群号，回车添加）">
+                <div class="chat-bindings">
+                  <el-input
+                    v-model="chatInput"
+                    placeholder="请输入QQ群号，回车添加"
+                    @keyup.enter.native="handleAddChatBinding"
+                    clearable
+                    style="max-width: 360px;"
+                  />
+                  <div class="chat-tags">
+                    <el-tag
+                      v-for="q in (activeGroup.chatBindings || [])"
+                      :key="q"
+                      size="small"
+                      closable
+                      @close="removeChatBinding(q)"
+                      class="mr-1 mb-1"
+                    >
+                      QQ群：{{ q }}
+                    </el-tag>
+                  </div>
+                </div>
+              </el-form-item>
+
+              <!-- 预留：更多选项（后续扩展） -->
+              <!-- <el-form-item label="其他选项"> ... </el-form-item> -->
+            </el-form>
+          </div>
+        </el-card>
+
+        <!-- 右侧下方可扩展区域：比如展示组内服务器详情、拓扑等。先留空。 -->
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Search } from '@element-plus/icons-vue'
+import apiClient from '@/api'
+import { asideCollapsed, asideCollapsing } from '@/store/ui'
+
+// 服务器列表（来自 /api/servers）
+const servers = ref([])
+const serversLoading = ref(false)
+
+// 组列表（后端对接）
+const groups = ref([])
+const groupQuery = ref('')
+const activeGroup = ref(null)
+const saving = ref(false)
+
+const filteredGroups = computed(() => {
+  const q = groupQuery.value.trim().toLowerCase()
+  if (!q) return groups.value
+  return groups.value.filter(g => g.name?.toLowerCase().includes(q) || String(g.id).includes(q))
+})
+
+const selectedServersCount = computed(() => activeGroup.value?.serverIds?.length || 0)
+// 预留字段：后续可接入真实群聊绑定统计
+const connectedChatsCount = computed(() => (activeGroup.value?.chatBindings?.length || 0))
+
+const chatInput = ref('')
+
+const handleCreateGroup = async () => {
+  try {
+    const id = Date.now()
+    const name = `新建组-${id % 100000}`
+    const payload = { name, server_ids: [], chat_bindings: [] }
+    const { data } = await apiClient.post('/api/tools/server-link/groups', payload)
+    const created = toUIGroup(data)
+    groups.value.unshift(created)
+    activeGroup.value = created
+    ElMessage.success('已创建服务器组')
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || '创建服务器组失败')
+  }
+}
+
+const deleteGroup = (row) => {
+  ElMessageBox.confirm(`确定删除服务器组 “${row.name}” 吗？`, '确认删除', { type: 'warning' })
+    .then(async () => {
+      try {
+        await apiClient.delete(`/api/tools/server-link/groups/${row.id}`)
+        const idx = groups.value.findIndex(g => g.id === row.id)
+        if (idx >= 0) groups.value.splice(idx, 1)
+        if (activeGroup.value?.id === row.id) activeGroup.value = null
+        ElMessage.success('已删除')
+      } catch (e) {
+        ElMessage.error(e?.response?.data?.detail || '删除失败')
+      }
+    })
+    .catch(() => {})
+}
+
+const selectGroup = (row) => { activeGroup.value = row }
+
+const ensureActiveGroup = () => {
+  if (!activeGroup.value) return false
+  if (!activeGroup.value.serverIds) activeGroup.value.serverIds = []
+  if (!activeGroup.value.chatBindings) activeGroup.value.chatBindings = []
+  return true
+}
+
+const handleAddChatBinding = () => {
+  if (!ensureActiveGroup()) return
+  const raw = String(chatInput.value || '').trim()
+  if (!raw) return
+  // 只允许 5-12 位数字（常见QQ群号），放宽也可
+  if (!/^\d{5,12}$/.test(raw)) {
+    ElMessage.warning('请输入有效的QQ群号（5-12位数字）')
+    return
+  }
+  const set = new Set(activeGroup.value.chatBindings)
+  if (set.has(raw)) {
+    chatInput.value = ''
+    return
+  }
+  set.add(raw)
+  activeGroup.value.chatBindings = Array.from(set)
+  chatInput.value = ''
+}
+
+const removeChatBinding = (q) => {
+  if (!ensureActiveGroup()) return
+  activeGroup.value.chatBindings = (activeGroup.value.chatBindings || []).filter(x => x !== q)
+}
+
+const saveGroup = async () => {
+  if (!activeGroup.value) return
+  if (!activeGroup.value.name?.trim()) return // 避免每次输入时弹提示，交由失焦/点击保存时提示
+  if (!activeGroup.value.serverIds || activeGroup.value.serverIds.length === 0) return
+  try {
+    saving.value = true
+    const payload = toAPIPayload(activeGroup.value)
+    const { data } = await apiClient.put(`/api/tools/server-link/groups/${activeGroup.value.id}`, payload)
+    const updated = toUIGroup(data)
+    const idx = groups.value.findIndex(g => g.id === updated.id)
+    if (idx >= 0) groups.value[idx] = updated
+    activeGroup.value = updated
+  } catch (e) {
+    // 静默失败，避免在频繁自动保存期间干扰用户
+  } finally {
+    saving.value = false
+  }
+}
+
+// 500ms 防抖自动保存
+let saveTimer = null
+const scheduleAutoSave = () => {
+  if (!activeGroup.value) return
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    saveGroup()
+  }, 500)
+}
+
+watch(() => activeGroup.value && activeGroup.value.name, scheduleAutoSave)
+watch(() => activeGroup.value && JSON.stringify(activeGroup.value.serverIds || []), scheduleAutoSave)
+watch(() => activeGroup.value && JSON.stringify(activeGroup.value.chatBindings || []), scheduleAutoSave)
+
+const loadServers = async () => {
+  serversLoading.value = true
+  try {
+    const { data } = await apiClient.get('/api/servers')
+    servers.value = data || []
+  } catch (e) {
+    ElMessage.error('加载服务器列表失败')
+    servers.value = []
+  } finally {
+    serversLoading.value = false
+  }
+}
+
+onMounted(() => {
+  loadServers()
+  loadGroups()
+})
+
+// 映射工具：API <-> UI
+const toUIGroup = (g) => ({ id: g.id, name: g.name, serverIds: g.server_ids || [], chatBindings: g.chat_bindings || [], created_at: g.created_at })
+const toAPIPayload = (g) => ({ name: g.name, server_ids: g.serverIds || [], chat_bindings: g.chatBindings || [] })
+
+const loadGroups = async () => {
+  try {
+    const { data } = await apiClient.get('/api/tools/server-link/groups')
+    groups.value = Array.isArray(data) ? data.map(toUIGroup) : []
+    if (!activeGroup.value && groups.value.length > 0) activeGroup.value = groups.value[0]
+  } catch (e) {
+    groups.value = []
+  }
+}
+</script>
+
+<style scoped>
+.sl-page { }
+.left-wrap { display: flex; gap: 16px; align-items: stretch; height: calc(100vh - var(--el-header-height) - 48px); overflow: hidden; min-height: 0; }
+.left-panel { width: 320px; flex-shrink: 0; align-self: flex-start; }
+.left-panel { transition: width 0.32s cubic-bezier(.34,1.56,.64,1); will-change: width; overflow: hidden; }
+.is-collapsed .left-panel, .is-collapsing .left-panel { width: 0 !important; }
+.is-collapsing .left-panel :deep(.el-card__body), .is-collapsing .left-panel :deep(.el-card__header) { display: none !important; }
+.left-panel :deep(.el-card) { display: block; }
+.left-panel :deep(.el-card__body) { padding: 8px; }
+.left-panel :deep(.el-input), .left-panel :deep(.el-input__wrapper) { width: 100%; }
+.left-panel :deep(.el-table__inner-wrapper) { width: 100%; }
+.right-panel { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.right-panel :deep(.el-descriptions) { border-radius: 8px; overflow: hidden; }
+/* 隐藏右侧滚动条但保留滚动 */
+.right-panel::-webkit-scrollbar { width: 0; height: 0; }
+.right-panel { scrollbar-width: none; -ms-overflow-style: none; }
+/* 工具类 */
+.mb-2 { margin-bottom: 8px; }
+.mb-3 { margin-bottom: 12px; }
+.mt-3 { margin-top: 12px; }
+.flex { display: flex; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.justify-end { justify-content: flex-end; }
+.gap-2 { gap: 8px; }
+.w-full { width: 100%; }
+.text-base { font-size: 14px; }
+.font-medium { font-weight: 600; }
+.muted { color: #909399; font-size: 12px; }
+.server-cell .name { line-height: 18px; }
+</style>
