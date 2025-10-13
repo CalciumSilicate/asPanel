@@ -300,6 +300,7 @@
 import {ref, computed, onMounted} from 'vue'
 import {ElMessage, ElNotification} from 'element-plus'
 import {Search, Star, Download, Upload} from '@element-plus/icons-vue'
+import apiClient from '@/api'
 
 // --- Interfaces ---
 interface Asset {
@@ -649,9 +650,8 @@ async function confirmInstall() {
 
 async function fetchServers() {
   try {
-    const res = await fetch('/api/servers', {headers: getAuthHeaders()});
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    servers.value = await res.json();
+    const res = await apiClient.get('/api/servers');
+    servers.value = res.data;
   } catch (e: any) {
     ElMessage.error(`加载服务器列表失败: ${e.message || String(e)}`);
   }
@@ -661,9 +661,8 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const res = await fetch('/api/plugins/mcdr/versions', {headers: getAuthHeaders()});
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
+    const res = await apiClient.get('/api/plugins/mcdr/versions');
+    const data = res.data
     items.value = normalize(data)
     stats.value.total = items.value.length
     stats.value.updatedAt = new Date().toLocaleString()
