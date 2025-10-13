@@ -11,17 +11,7 @@ export default defineConfig({
     }
   },
   server: {
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true
-      },
-      '/socket.io': {
-        target: 'http://localhost:8000/ws',
-        ws: true,
-        changeOrigin:true
-      }
-    },
+    // 不使用 Vite 代理；请通过 .env 的 VITE_API_URL 直连后端
     allowedHosts: ['*']
   }
 })
