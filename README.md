@@ -1,5 +1,9 @@
 # AS Panel
 
+# 该项目还处在初期修BUG阶段，先不要部署以及使用。
+
+# 以下内容为AI生成
+
 一个基于 FastAPI + Vue3 的 Minecraft 服务器面板。
 
 ## 特性概览
