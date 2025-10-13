@@ -1,13 +1,14 @@
 import axios from 'axios';
 import {ElMessage} from 'element-plus';
 import router from '@/router'; // 引入 router
+import { API_BASE_URL } from '@/config';
 
 // 创建 Axios 实例
 const apiClient = axios.create({
     // VITE_API_URL 是在 .env.development 或 .env.production 文件中定义的基础 URL
     // 例如: VITE_API_URL = http://localhost:8000
     // 如果没有设置，它会默认使用当前窗口的 origin，这在前后端同源部署时非常有用
-    baseURL: import.meta.env.VITE_API_URL || window.location.origin,
+    baseURL: API_BASE_URL,
     timeout: 10000, // 请求超时时间
 });
 
