@@ -19,3 +19,4 @@ cachetools
 packaging
 argon2-cffi
 async-cache
+mcdreforged
