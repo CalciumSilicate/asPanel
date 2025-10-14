@@ -28,7 +28,7 @@
           </el-radio-group>
           <el-popover placement="bottom-start" trigger="click" width="260">
             <template #reference>
-              <el-button class="btn-scope-like" type="primary">时长来源 ({{ selectedServers.length }})</el-button>
+              <el-button class="btn-scope-like" type="primary">数据来源 ({{ selectedServers.length }})</el-button>
             </template>
             <el-checkbox-group v-model="selectedServers" @change="onServersFilterChange" class="server-checkboxes">
               <el-checkbox v-for="s in serverNames" :key="s" :label="s">{{ s }}</el-checkbox>
@@ -129,8 +129,16 @@ const playtimeSort = ref<'none' | 'desc'>('none')
 const loadServers = async () => {
   const { data } = await api.get('/api/servers')
   servers.value = data || []
-  // 默认全选
+  // 默认全选（先赋值，后尝试从服务器取上次保存的选择覆盖）
   selectedServers.value = serverNames.value.slice()
+  try {
+    const { data: saved } = await api.get('/api/players/data-source-selection')
+    if (Array.isArray(saved)) {
+      const set = new Set(serverNames.value)
+      const picked = saved.filter((x: any) => set.has(String(x)))
+      if (picked.length > 0) selectedServers.value = picked
+    }
+  } catch (e) { /* 忽略错误，维持默认全选 */ }
 }
 
 const load = async () => {
@@ -143,8 +151,7 @@ const refreshPlayTime = async () => {
   busyTicks.value = true
   try {
     await api.post('/api/players/refresh-playtime')
-    await load()
-    ElMessage.success('已刷新时长')
+    ElMessage.success('已开始后台刷新时长')
   } finally { busyTicks.value = false }
 }
 
@@ -152,8 +159,7 @@ const refreshOfficialNames = async () => {
   busyNames.value = true
   try {
     await api.post('/api/players/refresh-names-official')
-    await load()
-    ElMessage.success('已刷新正版玩家名')
+    ElMessage.success('已开始后台刷新正版玩家名')
   } finally { busyNames.value = false }
 }
 
@@ -219,7 +225,12 @@ const submitEdit = async (row: Player) => {
 }
 
 const onScopeChange = async () => { await load() }
-const onServersFilterChange = () => { /* 仅用于触发视图更新，sumTicks 将自动使用 selectedServers */ }
+const onServersFilterChange = async () => {
+  // 触发视图更新，并保存选择到服务器
+  try {
+    await api.patch('/api/players/data-source-selection', { servers: selectedServers.value })
+  } catch (e) { /* 忽略错误 */ }
+}
 const onWhitelistToggle = () => { page.value = 1 }
 const togglePlaytimeSort = () => {
   playtimeSort.value = playtimeSort.value === 'none' ? 'desc' : 'none'
@@ -280,7 +291,7 @@ onMounted(async () => {
 .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .server-checkboxes { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow: auto; }
 
-/* 将“时长来源”按钮视觉上与单选组拼接，统一样式 */
+/* 将“数据来源”按钮视觉上与单选组拼接，统一样式 */
 .scope-group { display: inline-flex; align-items: center; }
 .scope-group :deep(.el-radio-button__inner) { border-radius: 0 !important; }
 .btn-scope-like { border-radius: 0 !important; margin-left: -1px; }

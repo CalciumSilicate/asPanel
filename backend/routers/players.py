@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from pathlib import Path
 import json
@@ -9,6 +9,7 @@ from backend import crud, models, schemas
 from backend.auth import require_role
 from backend.database import get_db
 from backend.schemas import Role
+from pydantic import BaseModel
 from backend.services import player_manager
 
 router = APIRouter(
@@ -35,9 +36,13 @@ async def refresh_uuids(_user: models.User = Depends(require_role(Role.ADMIN))):
 
 
 @router.post("/refresh-names-official")
-async def refresh_names_official(_user: models.User = Depends(require_role(Role.ADMIN))):
-    """逻辑2（触发）：为 player_name 为空且 is_offline=False 的记录尝试解析正版玩家名；失败则标记 is_offline=True。"""
-    return await player_manager.refresh_missing_official_names()
+async def refresh_names_official(background_tasks: BackgroundTasks,
+                                _user: models.User = Depends(require_role(Role.ADMIN))):
+    """逻辑2（触发）：为 player_name 为空且 is_offline=False 的记录尝试解析正版玩家名；失败则标记 is_off线=True。
+    后台异步执行，避免阻塞请求。
+    """
+    background_tasks.add_task(player_manager.refresh_missing_official_names)
+    return {"scheduled": True, "task": "refresh-names-official"}
 
 
 @router.post("/refresh-names-offline")
@@ -47,9 +52,13 @@ async def refresh_names_offline(_user: models.User = Depends(require_role(Role.A
 
 
 @router.post("/refresh-playtime")
-async def refresh_playtime(_user: models.User = Depends(require_role(Role.ADMIN))):
-    """逻辑4（触发）：为所有玩家重算各服务器的时长（读取 world/stats/<uuid>.json）。"""
-    return player_manager.recalc_all_play_time()
+async def refresh_playtime(background_tasks: BackgroundTasks,
+                          _user: models.User = Depends(require_role(Role.ADMIN))):
+    """逻辑4（触发）：为所有玩家重算各服务器的时长（读取 world/stats/<uuid>.json）。
+    后台异步执行，避免阻塞请求。
+    """
+    background_tasks.add_task(player_manager.recalc_all_play_time)
+    return {"scheduled": True, "task": "refresh-playtime"}
 
 
 @router.get("/whitelist-uuids", response_model=List[str])
@@ -78,6 +87,31 @@ async def get_whitelist_uuids(db: Session = Depends(get_db),
             # 单个服务器异常忽略，继续收集其他服务器
             continue
     return sorted(uuids)
+
+class DataSourceSelectionUpdate(BaseModel):
+    servers: List[str]
+
+@router.get("/data-source-selection", response_model=List[str])
+async def get_data_source_selection(db: Session = Depends(get_db),
+                                    _user: models.User = Depends(require_role(Role.USER))):
+    """获取玩家管理页面最近一次保存的数据来源（服务器名列表）。"""
+    data = crud.get_system_settings_data(db)
+    lst = data.get('player_manager_selected_servers') or []
+    if isinstance(lst, list):
+        return [str(x) for x in lst]
+    return []
+
+@router.patch("/data-source-selection", response_model=List[str])
+async def set_data_source_selection(payload: DataSourceSelectionUpdate,
+                                   db: Session = Depends(get_db),
+                                   _user: models.User = Depends(require_role(Role.USER))):
+    """保存玩家管理页面数据来源（服务器名列表）。"""
+    # 存入系统设置 JSON 中
+    current = crud.update_system_settings(db, { 'player_manager_selected_servers': payload.servers or [] })
+    lst = current.get('player_manager_selected_servers') or []
+    if isinstance(lst, list):
+        return [str(x) for x in lst]
+    return []
 
 
 @router.patch("/{player_id}/name", response_model=schemas.Player)
