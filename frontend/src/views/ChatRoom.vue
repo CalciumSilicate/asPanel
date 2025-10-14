@@ -1,43 +1,42 @@
 <template>
   <div class="sl-page">
     <div class="left-wrap" :class="{ 'is-collapsed': asideCollapsed, 'is-collapsing': asideCollapsing }">
-      <!-- 左侧：服务器组列表（照搬 ServerLink 左侧） -->
-      <div class="table-card left-panel">
-        <el-card shadow="never">
-          <template #header>
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <span class="text-base font-medium">聊天室</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <el-button type="danger" size="small" @click="sendAlert">全局通知</el-button>
-              </div>
+      <!-- 左侧：服务器组列表（去除套娃 el-card，仅保留一个卡片） -->
+      <el-card class="left-panel" shadow="never">
+        <template #header>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-base font-medium">聊天室</span>
             </div>
-          </template>
+            <div class="flex items-center gap-2">
+              <el-button type="danger" size="small" @click="sendAlert">全局通知</el-button>
+            </div>
+          </div>
+        </template>
 
-          <el-input v-model="groupQuery" placeholder="搜索服务器组" clearable class="mb-2">
-            <template #prefix><el-icon><Search/></el-icon></template>
-          </el-input>
+        <el-input v-model="groupQuery" placeholder="搜索服务器组" clearable class="mb-2">
+          <template #prefix><el-icon><Search/></el-icon></template>
+        </el-input>
 
-          <el-table :data="filteredGroups" size="small" stripe @row-click="selectGroup" :row-class-name="row => (activeGroup && row.row.id===activeGroup.id) ? 'active-row' : ''" :fit="true" style="width: 100%;">
-            <el-table-column label="组名" min-width="160">
-              <template #default="{ row }">
-                <div class="flex items-center justify-between w-full">
-                  <div class="server-cell">
-                    <div class="name">{{ row.name }}</div>
-                    <div class="muted">ID: {{ row.id }}</div>
-                  </div>
+        <el-table :data="filteredGroups" size="small" stripe @row-click="selectGroup" :row-class-name="row => (activeGroup && row.row.id===activeGroup.id) ? 'active-row' : ''" :fit="true" style="width: 100%;"
+                  :max-height="'calc(100vh - var(--el-header-height) - 180px)'">
+          <el-table-column label="组名" min-width="160">
+            <template #default="{ row }">
+              <div class="flex items-center justify-between w-full">
+                <div class="server-cell">
+                  <div class="name">{{ row.name }}</div>
+                  <div class="muted">ID: {{ row.id }}</div>
                 </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="在线服务器数" width="120" align="center">
-              <template #default="{ row }">
-                <el-tag type="success">{{ onlineCount(row) }}</el-tag>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="在线服务器数" width="120" align="center">
+            <template #default="{ row }">
+              <el-tag type="success">{{ onlineCount(row) }}</el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-card>
 
       <!-- 右侧：聊天窗口 -->
       <div class="right-panel">

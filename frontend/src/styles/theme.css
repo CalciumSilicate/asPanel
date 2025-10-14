@@ -260,13 +260,20 @@ h1, h2, h3, h4, h5, h6 { color: var(--color-text); }
   background: linear-gradient(180deg, rgba(229,192,200,0.8), rgba(239,183,186,0.9));
 }
 
-/* 通用：左侧选择列表（限制在 MainLayout 内容容器内，自动隐藏纵向滚动条） */
+/* 通用：左侧选择列表（限制在 MainLayout 内容容器内，滚动在表格内，而非整面板） */
 .left-wrap { height: calc(100vh - var(--el-header-height) - 48px) !important; overflow: hidden !important; min-height: 0 !important; display: flex; align-items: stretch; }
-.left-wrap .left-panel { height: 100% !important; overflow-y: auto !important; overflow-x: hidden !important; }
-/* WebKit 自动隐藏：hover 时显示 */
-.left-wrap .left-panel::-webkit-scrollbar { width: 0; height: 0; }
-.left-wrap .left-panel:hover::-webkit-scrollbar { width: 8px; height: 8px; }
-.left-wrap .left-panel::-webkit-scrollbar-thumb { background: rgba(0,0,0,.25); border-radius: 4px; }
-/* Firefox/标准属性：尽量收敛 */
-.left-wrap .left-panel { scrollbar-width: none; }
-.left-wrap .left-panel:hover { scrollbar-width: thin; }
+.left-wrap .left-panel { max-height: calc(100vh - var(--el-header-height) - 48px); overflow: hidden; display: flex; flex-direction: column; }
+
+/* 表格内部滚动与细线浅色滚动条（覆盖全局滚动条样式） */
+.left-panel :deep(.el-table__body-wrapper) { overflow-y: auto !important; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; }
+.left-panel :deep(.el-table__body-wrapper::-webkit-scrollbar) { width: 6px; height: 6px; }
+.left-panel :deep(.el-table__body-wrapper::-webkit-scrollbar-thumb) { background: rgba(0,0,0,.18); border-radius: 3px; }
+.left-panel :deep(.el-table__body-wrapper::-webkit-scrollbar-track) { background: transparent; }
+.left-panel :deep(.el-table__body-wrapper::-webkit-scrollbar-button) { display: none; }
+
+/* 也为所有表格统一细滚动条方案（DbPluginExplorer 等页面） */
+:deep(.el-table__body-wrapper) { scrollbar-gutter: stable; scrollbar-width: thin; }
+:deep(.el-table__body-wrapper::-webkit-scrollbar) { width: 6px; height: 6px; }
+:deep(.el-table__body-wrapper::-webkit-scrollbar-thumb) { background: rgba(0,0,0,.18); border-radius: 3px; }
+:deep(.el-table__body-wrapper::-webkit-scrollbar-track) { background: transparent; }
+:deep(.el-table__body-wrapper::-webkit-scrollbar-button) { display: none; }

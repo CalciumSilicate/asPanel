@@ -46,7 +46,7 @@
 
     <!-- List -->
     <div class="table-card">
-      <el-table :data="paged" v-loading="loading" stripe size="small">
+      <el-table :data="paged" v-loading="loading" stripe size="small" height="60vh">
       <el-table-column label="插件" min-width="260">
         <template #default="{ row }">
           <div class="flex items-start gap-2">
