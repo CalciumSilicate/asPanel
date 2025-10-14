@@ -31,9 +31,12 @@ from backend.dependencies import mcdr_manager
 # 服务器在线玩家：key=服务器目录名，value=玩家名集合
 PLAYERS_BY_SERVER: Dict[str, Set[str]] = {}
 # 最近一次为玩家累计 1200 ticks 的时间戳：{ server_name: { player_name: last_ts } }
+# 注：不再在循环中写入，仅在早期兼容与离线收尾时可读；后续以 SERVER_LAST_BOUNDARY + JOINED_TIME 为准
 LAST_ADDED_TIME: Dict[str, Dict[str, float]] = {}
 # 玩家加入时间（用于首个满60秒判断）：{ server_name: { player_name: joined_ts } }
 JOINED_TIME: Dict[str, Dict[str, float]] = {}
+# 每个服务器最后一次“分钟边界”时间（对齐 floor(now/60)*60）
+SERVER_LAST_BOUNDARY: Dict[str, float] = {}
 _PLAYTIME_TASK: Optional[asyncio.Task] = None
 
 
@@ -77,38 +80,37 @@ async def _playtime_tick_loop():
                                     _crud.remove_server_from_player_play_time(db, rec, server_name)
                         except Exception:
                             pass
+                        # 边界对齐也推进，避免后续离开时过大尾差
+                        SERVER_LAST_BOUNDARY[server_name] = float(now)
                         continue
+                    # 计算本轮分钟边界：以本次循环时刻为边界（不与整点对齐，避免漂移造成尾差异常）
+                    boundary_now = float(now)
+                    boundary_prev = SERVER_LAST_BOUNDARY.get(server_name, boundary_now - 60.0)
+                    # 对上一完整周期 [boundary_prev, boundary_now) 进行累加：仅对整分钟内全程在线的玩家
                     for p in list(players):
                         try:
                             rec = _crud.get_player_by_name(db, p)
                             if not rec or rec.player_name is None:
                                 continue
-                            # 仅当已有该 server 的键时才累计（满足“play_time 不为空且包含该 server”）
                             try:
                                 pt = json.loads(rec.play_time or '{}')
                             except Exception:
                                 pt = {}
                             if server_name not in pt:
                                 continue
-                            # 以最后一次累计时间或加入时间作为基准，仅对满60秒的整段进行累计
-                            base = (LAST_ADDED_TIME.get(server_name, {}) or {}).get(p)
-                            if base is None:
-                                base = (JOINED_TIME.get(server_name, {}) or {}).get(p)
-                                if base is None:
-                                    # 若未记录加入时间，则初始化并跳过本轮
-                                    JOINED_TIME.setdefault(server_name, {})[p] = now
-                                    continue
-                            elapsed = max(0.0, now - float(base))
-                            if elapsed >= 60:
-                                n = int(elapsed // 60)
-                                ticks = 1200 * n
-                                _crud.add_player_play_time_ticks(db, rec, server_name, ticks)
-                                logger.debug(f"[MCDR-WS] 为玩家 {p} 在服务器 {server_name} 累计了 {ticks} ticks（{n} 分钟）")
-                                increments_total += n
-                                per_server[server_name] = per_server.get(server_name, 0) + n
-                                LAST_ADDED_TIME.setdefault(server_name, {})[p] = float(base) + 60.0 * n
+                            joined = (JOINED_TIME.get(server_name, {}) or {}).get(p)
+                            if joined is None:
+                                # 未记录加入时间，跳过
+                                continue
+                            if float(joined) <= boundary_prev:
+                                _crud.add_player_play_time_ticks(db, rec, server_name, 1200)
+                                logger.debug(f"[MCDR-WS] 为玩家 {p} 在服务器 {server_name} 累计了 1200 ticks（完整分钟）")
+                                increments_total += 1
+                                per_server[server_name] = per_server.get(server_name, 0) + 1
                         except Exception:
                             continue
+                    # 推进服务器分钟边界
+                    SERVER_LAST_BOUNDARY[server_name] = boundary_now
             logger.debug(
                 f"[MCDR-WS] 本轮时长结算完成 | 活跃服务器={len(PLAYERS_BY_SERVER)} 累计次数={increments_total} 明细={per_server}"
             )
@@ -400,12 +402,12 @@ async def _handle_single(payload: Dict[str, Any]):
                             pass
                 except Exception:
                     pass
-                # 刷新该玩家最后一次累计后的尾差（秒*20）
+                # 刷新该玩家最后一次“整分钟边界”后的尾差（秒*20）
                 try:
                     now = time.time()
-                    last = LAST_ADDED_TIME.get(server_name, {}).get(player)
-                    joined = JOINED_TIME.get(server_name, {}).get(player)
-                    base = last if last is not None else joined
+                    boundary = SERVER_LAST_BOUNDARY.get(server_name, float(now))
+                    joined = (JOINED_TIME.get(server_name, {}) or {}).get(player)
+                    base = max(float(joined) if joined is not None else now, float(boundary))
                     with get_db_context() as db:
                         rec = crud.get_player_by_name(db, player)
                         if rec and rec.player_name is not None:
@@ -416,14 +418,15 @@ async def _handle_single(payload: Dict[str, Any]):
                             except Exception:
                                 pt = {}
                             has_key = server_name in pt
-                            if base is not None and world_exists and has_key:
-                                delta_ticks = int(max(0, (now - float(base)) * 20))
+                            if world_exists and has_key:
+                                delta_ticks = int(max(0.0, (now - base) * 20.0))
                                 if delta_ticks > 0:
                                     crud.add_player_play_time_ticks(db, rec, server_name, delta_ticks)
                                     logger.debug(f"[MCDR-WS] 为玩家 {player} 在服务器 {server_name} 累计了 {delta_ticks} ticks（离开尾差）")
                             else:
                                 # 不满足累计条件：删除该 server 键
                                 crud.remove_server_from_player_play_time(db, rec, server_name)
+                    # 清理加入时间与旧的 per-player last 映射
                     try:
                         LAST_ADDED_TIME.get(server_name, {}).pop(player, None)
                     except Exception:
@@ -441,12 +444,42 @@ async def _handle_single(payload: Dict[str, Any]):
                     # 启动时清空（重新学习）
                     PLAYERS_BY_SERVER[server_name] = set()
                     JOINED_TIME[server_name] = {}
+                    SERVER_LAST_BOUNDARY[server_name] = float(time.time())
                     try:
                         logger.info(f"[MCDR-WS] 服务器启动事件：在线表已清空 | server={server_name}")
                     except Exception:
                         pass
                 else:
                     # 停止时清空
+                    # 在清空前对仍在线玩家进行尾差累计（以分钟边界为基准）
+                    try:
+                        now = time.time()
+                        boundary = SERVER_LAST_BOUNDARY.get(server_name, float(now))
+                        joined_map = JOINED_TIME.get(server_name) or {}
+                        with get_db_context() as db:
+                            sp = _get_server_path_by_name(server_name)
+                            world_exists = bool(sp and (Path(sp) / 'server' / 'world').exists())
+                            for player, joined in list(joined_map.items()):
+                                try:
+                                    rec = crud.get_player_by_name(db, player)
+                                    if not rec or rec.player_name is None:
+                                        continue
+                                    try:
+                                        pt = json.loads(rec.play_time or '{}')
+                                    except Exception:
+                                        pt = {}
+                                    if world_exists and server_name in pt:
+                                        base = max(float(joined), float(boundary))
+                                        delta_ticks = int(max(0.0, (now - base) * 20.0))
+                                        if delta_ticks > 0:
+                                            crud.add_player_play_time_ticks(db, rec, server_name, delta_ticks)
+                                    else:
+                                        crud.remove_server_from_player_play_time(db, rec, server_name)
+                                except Exception:
+                                    continue
+                    except Exception:
+                        pass
+                    # 最后清空在线与时间表
                     PLAYERS_BY_SERVER.pop(server_name, None)
                     JOINED_TIME[server_name] = {}
                     try:
@@ -454,63 +487,11 @@ async def _handle_single(payload: Dict[str, Any]):
                     except Exception:
                         pass
                 await _emit_presence_for_server(server_name)
-                # 针对该服务器所有记录做一次尾差累计/清理
-                try:
-                    now = time.time()
-                    last_map = LAST_ADDED_TIME.get(server_name) or {}
-                    joined_map = JOINED_TIME.get(server_name) or {}
-                    with get_db_context() as db:
-                        sp = _get_server_path_by_name(server_name)
-                        world_exists = bool(sp and (Path(sp) / 'server' / 'world').exists())
-                        # 先处理有 last 的玩家：做尾差累计（若 world 不存在则删除键）
-                        for player, last in list(last_map.items()):
-                            try:
-                                rec = crud.get_player_by_name(db, player)
-                                if not rec or rec.player_name is None:
-                                    continue
-                                if world_exists:
-                                    delta_ticks = int(max(0, (now - float(last)) * 20))
-                                    crud.add_player_play_time_ticks(db, rec, server_name, delta_ticks)
-                                    try:
-                                        logger.debug(f"[MCDR-WS] 服务器事件尾差累计 | server={server_name} player={player} +{delta_ticks}gt")
-                                    except Exception:
-                                        pass
-                                else:
-                                    crud.remove_server_from_player_play_time(db, rec, server_name)
-                                    try:
-                                        logger.debug(f"[MCDR-WS] world 不存在，移除键 | server={server_name} player={player}")
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                continue
-                        # 再处理仅有 join 的玩家：按 join 时间累计一次性尾差
-                        for player, joined in list(joined_map.items()):
-                            if player in last_map:
-                                continue
-                            try:
-                                rec = crud.get_player_by_name(db, player)
-                                if not rec or rec.player_name is None:
-                                    continue
-                                try:
-                                    pt = json.loads(rec.play_time or '{}')
-                                except Exception:
-                                    pt = {}
-                                if world_exists and server_name in pt:
-                                    delta_ticks = int(max(0, (now - float(joined)) * 20))
-                                    if delta_ticks > 0:
-                                        crud.add_player_play_time_ticks(db, rec, server_name, delta_ticks)
-                                        try:
-                                            logger.debug(f"[MCDR-WS] 服务器事件基于 join 尾差累计 | server={server_name} player={player} +{delta_ticks}gt")
-                                        except Exception:
-                                            pass
-                                else:
-                                    crud.remove_server_from_player_play_time(db, rec, server_name)
-                            except Exception:
-                                continue
-                    LAST_ADDED_TIME[server_name] = {}
-                    JOINED_TIME[server_name] = {}
-                except Exception:
-                    pass
+                # 推进服务器边界，防止后续尾差偏大
+                SERVER_LAST_BOUNDARY[server_name] = float(time.time())
+                # 清理旧映射
+                LAST_ADDED_TIME[server_name] = {}
+                JOINED_TIME[server_name] = {}
     except Exception:
         pass
 
