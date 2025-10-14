@@ -265,14 +265,28 @@ h1, h2, h3, h4, h5, h6 { color: var(--color-text); }
 .left-wrap .left-panel { max-height: calc(100vh - var(--el-header-height) - 48px); overflow: hidden; display: flex; flex-direction: column; }
 
 /* 表格内部滚动与细线浅色滚动条（覆盖全局滚动条样式） */
-.left-panel .el-table__body-wrapper { overflow-y: auto !important; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; }
+.left-panel .el-table__body-wrapper {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  padding-right: 6px;           /* 预留滚动条区域，避免横向滚动 */
+  box-sizing: content-box;
+  scrollbar-width: thin;        /* Firefox 细滚动条 */
+  scrollbar-color: rgba(0,0,0,.18) transparent;
+}
 .left-panel .el-table__body-wrapper::-webkit-scrollbar { width: 6px; height: 6px; }
 .left-panel .el-table__body-wrapper::-webkit-scrollbar-thumb { background: rgba(0,0,0,.18); border-radius: 3px; }
 .left-panel .el-table__body-wrapper::-webkit-scrollbar-track { background: transparent; }
 .left-panel .el-table__body-wrapper::-webkit-scrollbar-button { display: none; }
 
 /* 也为所有表格统一细滚动条方案（DbPluginExplorer 等页面） */
-.el-table__body-wrapper { scrollbar-gutter: stable; scrollbar-width: thin; }
+.el-table__body-wrapper {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,.18) transparent;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;           /* 预留滚动条区域，避免横向滚动 */
+  box-sizing: content-box;
+}
 .el-table__body-wrapper::-webkit-scrollbar { width: 6px; height: 6px; }
 .el-table__body-wrapper::-webkit-scrollbar-thumb { background: rgba(0,0,0,.18); border-radius: 3px; }
 .el-table__body-wrapper::-webkit-scrollbar-track { background: transparent; }
