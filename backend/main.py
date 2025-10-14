@@ -154,6 +154,7 @@ async def startup_event():
         from backend.services import player_manager as _pm
         _pm.ensure_players_from_worlds()
         _pm.refresh_missing_official_names()
+        _pm.ensure_play_time_if_empty()
     except Exception:
         pass
     # 设置 asyncio 事件循环异常处理，捕获后台任务未处理错误

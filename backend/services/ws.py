@@ -32,6 +32,8 @@ from backend.dependencies import mcdr_manager
 PLAYERS_BY_SERVER: Dict[str, Set[str]] = {}
 # 最近一次为玩家累计 1200 ticks 的时间戳：{ server_name: { player_name: last_ts } }
 LAST_ADDED_TIME: Dict[str, Dict[str, float]] = {}
+# 玩家加入时间（用于首个满60秒判断）：{ server_name: { player_name: joined_ts } }
+JOINED_TIME: Dict[str, Dict[str, float]] = {}
 _PLAYTIME_TASK: Optional[asyncio.Task] = None
 
 
@@ -60,6 +62,8 @@ async def _playtime_tick_loop():
         try:
             await asyncio.sleep(60)
             now = time.time()
+            increments_total = 0
+            per_server: Dict[str, int] = {}
             with _db_ctx() as db:
                 for server_name, players in list(PLAYERS_BY_SERVER.items()):
                     server_path = _get_server_path_by_name(server_name)
@@ -86,11 +90,28 @@ async def _playtime_tick_loop():
                                 pt = {}
                             if server_name not in pt:
                                 continue
-                            _crud.add_player_play_time_ticks(db, rec, server_name, 1200)
-                            logger.debug(f"[MCDR-WS] 为玩家 {p} 在服务器 {server_name} 累计了 1200 ticks")
-                            LAST_ADDED_TIME.setdefault(server_name, {})[p] = now
+                            # 以最后一次累计时间或加入时间作为基准，仅对满60秒的整段进行累计
+                            base = (LAST_ADDED_TIME.get(server_name, {}) or {}).get(p)
+                            if base is None:
+                                base = (JOINED_TIME.get(server_name, {}) or {}).get(p)
+                                if base is None:
+                                    # 若未记录加入时间，则初始化并跳过本轮
+                                    JOINED_TIME.setdefault(server_name, {})[p] = now
+                                    continue
+                            elapsed = max(0.0, now - float(base))
+                            if elapsed >= 60:
+                                n = int(elapsed // 60)
+                                ticks = 1200 * n
+                                _crud.add_player_play_time_ticks(db, rec, server_name, ticks)
+                                logger.debug(f"[MCDR-WS] 为玩家 {p} 在服务器 {server_name} 累计了 {ticks} ticks（{n} 分钟）")
+                                increments_total += n
+                                per_server[server_name] = per_server.get(server_name, 0) + n
+                                LAST_ADDED_TIME.setdefault(server_name, {})[p] = float(base) + 60.0 * n
                         except Exception:
                             continue
+            logger.debug(
+                f"[MCDR-WS] 本轮时长结算完成 | 活跃服务器={len(PLAYERS_BY_SERVER)} 累计次数={increments_total} 明细={per_server}"
+            )
         except asyncio.CancelledError:
             break
         except Exception:
@@ -143,10 +164,18 @@ async def _update_status_from_event(event: str, data: Dict[str, Any]) -> None:
         # 更新 mcdr_manager 的外部状态视图
         if event in ["mcdr.mcdr_start", "mcdr.server_start_pre", "mcdr.server_start"]:
             mcdr_manager.set_external_status(server_id, "pending", None)
+            try:
+                logger.info(f"[MCDR-WS] 状态标记为 pending | server={server_name} id={server_id} event={event}")
+            except Exception:
+                pass
         elif event == "mcdr.server_startup":
             mcdr_manager.set_external_status(server_id, "running", None)
             # 启动成功后清理非零返回码
             mcdr_manager.return_code.pop(server_id, None)
+            try:
+                logger.info(f"[MCDR-WS] 服务器已启动 | server={server_name} id={server_id}")
+            except Exception:
+                pass
         elif event == "mcdr.server_stop":
             # 仅按 return_code 判别错误与否
             rc = None
@@ -158,6 +187,10 @@ async def _update_status_from_event(event: str, data: Dict[str, Any]) -> None:
                 mcdr_manager.return_code[server_id] = rc
             # 结束后撤销外部状态覆盖（交由 get_status + return_code 判定）
             mcdr_manager.clear_external_status(server_id)
+            try:
+                logger.info(f"[MCDR-WS] 服务器已停止 | server={server_name} id={server_id} return_code={rc}")
+            except Exception:
+                pass
         else:
             return
 
@@ -322,9 +355,25 @@ async def _handle_single(payload: Dict[str, Any]):
             if server_name and player:
                 PLAYERS_BY_SERVER.setdefault(server_name, set()).add(player)
                 await _emit_presence_for_server(server_name)
+                try:
+                    online_cnt = len(PLAYERS_BY_SERVER.get(server_name, set()))
+                    logger.info(f"[MCDR-WS] 玩家加入 | server={server_name} player={player} 在线={online_cnt}")
+                except Exception:
+                    pass
+                # 记录玩家加入的时间，用于满60秒判断
+                try:
+                    JOINED_TIME.setdefault(server_name, {})[player] = time.time()
+                except Exception:
+                    pass
                 # 补齐可能新增的 UUID 记录
                 try:
-                    _pm.ensure_players_from_worlds()
+                    stats = _pm.ensure_players_from_worlds()
+                    if (stats or {}).get('added'):
+                        logger.info(f"[MCDR-WS] 新增玩家UUID记录 | 新增={stats.get('added')} 总计扫描={stats.get('found')}")
+                        try:
+                            _pm.ensure_play_time_if_empty()
+                        except Exception:
+                            pass
                 except Exception:
                     pass
         elif event == "mcdr.player_left" and isinstance(data, dict):
@@ -335,29 +384,52 @@ async def _handle_single(payload: Dict[str, Any]):
                 if player:
                     s.discard(player)
                 await _emit_presence_for_server(server_name)
+                try:
+                    online_cnt = len(PLAYERS_BY_SERVER.get(server_name, set()))
+                    logger.info(f"[MCDR-WS] 玩家离开 | server={server_name} player={player} 在线={online_cnt}")
+                except Exception:
+                    pass
                 # 同步补齐可能新增的 UUID（例如玩家首次出现后立即离开）
                 try:
-                    _pm.ensure_players_from_worlds()
+                    stats = _pm.ensure_players_from_worlds()
+                    if (stats or {}).get('added'):
+                        logger.info(f"[MCDR-WS] 新增玩家UUID记录 | 新增={stats.get('added')} 总计扫描={stats.get('found')}")
+                        try:
+                            _pm.ensure_play_time_if_empty()
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 # 刷新该玩家最后一次累计后的尾差（秒*20）
                 try:
                     now = time.time()
                     last = LAST_ADDED_TIME.get(server_name, {}).get(player)
+                    joined = JOINED_TIME.get(server_name, {}).get(player)
+                    base = last if last is not None else joined
                     with get_db_context() as db:
                         rec = crud.get_player_by_name(db, player)
                         if rec and rec.player_name is not None:
                             sp = _get_server_path_by_name(server_name)
                             world_exists = bool(sp and (Path(sp) / 'server' / 'world').exists())
-                            if last is not None and world_exists:
-                                delta_ticks = int(max(0, (now - last) * 20))
-                                crud.add_player_play_time_ticks(db, rec, server_name, delta_ticks)
-                                logger.debug(f"[MCDR-WS] 为玩家 {player} 在服务器 {server_name} 累计了 {delta_ticks} ticks（离线尾差）")
+                            try:
+                                pt = json.loads(rec.play_time or '{}')
+                            except Exception:
+                                pt = {}
+                            has_key = server_name in pt
+                            if base is not None and world_exists and has_key:
+                                delta_ticks = int(max(0, (now - float(base)) * 20))
+                                if delta_ticks > 0:
+                                    crud.add_player_play_time_ticks(db, rec, server_name, delta_ticks)
+                                    logger.debug(f"[MCDR-WS] 为玩家 {player} 在服务器 {server_name} 累计了 {delta_ticks} ticks（离开尾差）")
                             else:
-                                # 未产生过 1200 的累计，则按规则删除该 server 键
+                                # 不满足累计条件：删除该 server 键
                                 crud.remove_server_from_player_play_time(db, rec, server_name)
                     try:
                         LAST_ADDED_TIME.get(server_name, {}).pop(player, None)
+                    except Exception:
+                        pass
+                    try:
+                        JOINED_TIME.get(server_name, {}).pop(player, None)
                     except Exception:
                         pass
                 except Exception:
@@ -368,43 +440,75 @@ async def _handle_single(payload: Dict[str, Any]):
                 if event == "mcdr.server_startup":
                     # 启动时清空（重新学习）
                     PLAYERS_BY_SERVER[server_name] = set()
+                    JOINED_TIME[server_name] = {}
+                    try:
+                        logger.info(f"[MCDR-WS] 服务器启动事件：在线表已清空 | server={server_name}")
+                    except Exception:
+                        pass
                 else:
                     # 停止时清空
                     PLAYERS_BY_SERVER.pop(server_name, None)
+                    JOINED_TIME[server_name] = {}
+                    try:
+                        logger.info(f"[MCDR-WS] 服务器停止事件：在线表已清空 | server={server_name}")
+                    except Exception:
+                        pass
                 await _emit_presence_for_server(server_name)
                 # 针对该服务器所有记录做一次尾差累计/清理
                 try:
                     now = time.time()
                     last_map = LAST_ADDED_TIME.get(server_name) or {}
+                    joined_map = JOINED_TIME.get(server_name) or {}
                     with get_db_context() as db:
                         sp = _get_server_path_by_name(server_name)
                         world_exists = bool(sp and (Path(sp) / 'server' / 'world').exists())
-                        # 针对已记录过 last 的玩家：做尾差累计（若 world 不存在则删除键）
+                        # 先处理有 last 的玩家：做尾差累计（若 world 不存在则删除键）
                         for player, last in list(last_map.items()):
                             try:
                                 rec = crud.get_player_by_name(db, player)
                                 if not rec or rec.player_name is None:
                                     continue
                                 if world_exists:
-                                    delta_ticks = int(max(0, (now - last) * 20))
+                                    delta_ticks = int(max(0, (now - float(last)) * 20))
                                     crud.add_player_play_time_ticks(db, rec, server_name, delta_ticks)
+                                    try:
+                                        logger.debug(f"[MCDR-WS] 服务器事件尾差累计 | server={server_name} player={player} +{delta_ticks}gt")
+                                    except Exception:
+                                        pass
+                                else:
+                                    crud.remove_server_from_player_play_time(db, rec, server_name)
+                                    try:
+                                        logger.debug(f"[MCDR-WS] world 不存在，移除键 | server={server_name} player={player}")
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                continue
+                        # 再处理仅有 join 的玩家：按 join 时间累计一次性尾差
+                        for player, joined in list(joined_map.items()):
+                            if player in last_map:
+                                continue
+                            try:
+                                rec = crud.get_player_by_name(db, player)
+                                if not rec or rec.player_name is None:
+                                    continue
+                                try:
+                                    pt = json.loads(rec.play_time or '{}')
+                                except Exception:
+                                    pt = {}
+                                if world_exists and server_name in pt:
+                                    delta_ticks = int(max(0, (now - float(joined)) * 20))
+                                    if delta_ticks > 0:
+                                        crud.add_player_play_time_ticks(db, rec, server_name, delta_ticks)
+                                        try:
+                                            logger.debug(f"[MCDR-WS] 服务器事件基于 join 尾差累计 | server={server_name} player={player} +{delta_ticks}gt")
+                                        except Exception:
+                                            pass
                                 else:
                                     crud.remove_server_from_player_play_time(db, rec, server_name)
                             except Exception:
                                 continue
-                        # 针对没有 last 记录但当前服务器的在线集可能含有的玩家，按规则删除该 server 键
-                        if world_exists:
-                            pass  # world 存在但无 last 不做强制处理
-                        else:
-                            # world 不存在，一并删除该 server 键
-                            for player in list(PLAYERS_BY_SERVER.get(server_name, set())):
-                                try:
-                                    rec = crud.get_player_by_name(db, player)
-                                    if rec and rec.player_name is not None:
-                                        crud.remove_server_from_player_play_time(db, rec, server_name)
-                                except Exception:
-                                    continue
                     LAST_ADDED_TIME[server_name] = {}
+                    JOINED_TIME[server_name] = {}
                 except Exception:
                     pass
     except Exception:
@@ -460,6 +564,7 @@ async def _forward_event_to_plugins(event: str, data: Dict[str, Any], original_p
     # 将原始 payload 转发给符合条件的客户端
     dead: List[WebSocket] = []
     text = json.dumps(original_payload, ensure_ascii=False)
+    forwarded = 0
     for ws, bound_name in list(_PLUGIN_CLIENTS.items()):
         try:
             if not bound_name or bound_name == src_server:
@@ -468,10 +573,18 @@ async def _forward_event_to_plugins(event: str, data: Dict[str, Any], original_p
                 dst_groups = _get_groups_for_server_name(db, bound_name)
             if any(g in src_groups for g in dst_groups):
                 await ws.send_text(text)
+                forwarded += 1
         except Exception:
             dead.append(ws)
     for ws in dead:
         _PLUGIN_CLIENTS.pop(ws, None)
+    try:
+        if forwarded:
+            logger.info(f"[MCDR-WS] 事件转发 | event={event} 源服务器={src_server} 转发客户端数={forwarded}")
+        else:
+            logger.debug(f"[MCDR-WS] 事件无需转发 | event={event} 源服务器={src_server}")
+    except Exception:
+        pass
 
 
 @router.websocket("/aspanel/mcdr")
@@ -546,14 +659,20 @@ async def broadcast_server_link_update(server_name: str, group_names: List[str])
         "ts": "-",
         "data": {"server": server_name, "server_groups": group_names}
     }, ensure_ascii=False)
+    sent = 0
     for ws, bound in list(_PLUGIN_CLIENTS.items()):
         try:
             if bound == server_name:
                 await ws.send_text(msg)
+                sent += 1
         except Exception:
             dead.append(ws)
     for ws in dead:
         _PLUGIN_CLIENTS.pop(ws, None)
+    try:
+        logger.debug(f"[MCDR-WS] 推送组更新 | server={server_name} 组={group_names} 客户端数={sent}")
+    except Exception:
+        pass
 
 
 def get_group_players(group_id: int) -> List[dict]:
@@ -600,5 +719,9 @@ async def _emit_presence_for_server(server_name: str):
             web_users = list((CHAT_USERS.get(gid) or {}).values())
             players = get_group_players(gid)
             await sio.emit('chat_presence', { 'group_id': gid, 'web_users': web_users, 'players': players }, room=f'chat_group_{gid}')
+        try:
+            logger.debug(f"[MCDR-WS] 广播在线列表 | server={server_name} 目标组={gid_list}")
+        except Exception:
+            pass
     except Exception:
         pass
