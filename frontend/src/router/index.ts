@@ -3,6 +3,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import MainLayout from '../layout/MainLayout.vue';
 import { hasRole, fetchUser } from '@/store/user';
+import { ElMessage } from 'element-plus';
 
 const routes = [
     {
@@ -139,13 +140,16 @@ router.beforeEach(async (to, from, next) => {
     const publicPages = ['/login', '/register'];
     const authRequired = to.matched.some(record => record.meta.requiresAuth);
 
+    // 未登录访问受保护路由：提示并回到上一个页面；若无来源（直达），跳转登录
     if (authRequired && !token) {
-        return next({
-            path: '/login',
-            query: { redirect: to.fullPath }
-        });
+        ElMessage.warning('请先登录');
+        if (from && from.name) {
+            return next(false); // 取消本次导航，停留在上一个页面
+        }
+        return next({ path: '/login', query: { redirect: to.fullPath } });
     }
 
+    // 已登录访问登录/注册：直接去仪表盘
     if (publicPages.includes(to.path) && token) {
         return next('/dashboard');
     }
@@ -159,8 +163,13 @@ router.beforeEach(async (to, from, next) => {
         // 忽略用户信息拉取失败，后端会最终裁决
     }
 
+    // 角色不足：提示并回到上一个页面；若无来源（直达），回到仪表盘
     const requiredRole = (to.meta as any)?.requiredRole as string | undefined;
     if (requiredRole && !hasRole(requiredRole)) {
+        ElMessage.error('无权限访问该页面');
+        if (from && from.name) {
+            return next(false); // 取消本次导航，停留在上一个页面
+        }
         return next('/dashboard');
     }
 
