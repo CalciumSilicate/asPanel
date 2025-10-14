@@ -143,10 +143,12 @@ async def pb_list(db: Session, server_id: int) -> List[schemas.PBBackupItem]:
     server = _get_server(db, server_id)
     pb_dir, db_path = _get_pb_env_paths(Path(server.path))
     if not pb_dir.exists() or not db_path.exists():
+        print("PB database not found")
         return []
     cli = _resolve_pb_cli_path(Path(server.path))
     rc, out, err = await _run_pb(cli, pb_dir, ['list'])
     if rc != 0:
+        print(f"pb list failed: {err or out}")
         return []
     return _parse_list(out + "\n" + err)
 
