@@ -259,3 +259,14 @@ h1, h2, h3, h4, h5, h6 { color: var(--color-text); }
 .dark *::-webkit-scrollbar-thumb {
   background: linear-gradient(180deg, rgba(229,192,200,0.8), rgba(239,183,186,0.9));
 }
+
+/* 通用：左侧选择列表（限制在 MainLayout 内容容器内，自动隐藏纵向滚动条） */
+.left-wrap { height: calc(100vh - var(--el-header-height) - 48px) !important; overflow: hidden !important; min-height: 0 !important; display: flex; align-items: stretch; }
+.left-wrap .left-panel { height: 100% !important; overflow-y: auto !important; overflow-x: hidden !important; }
+/* WebKit 自动隐藏：hover 时显示 */
+.left-wrap .left-panel::-webkit-scrollbar { width: 0; height: 0; }
+.left-wrap .left-panel:hover::-webkit-scrollbar { width: 8px; height: 8px; }
+.left-wrap .left-panel::-webkit-scrollbar-thumb { background: rgba(0,0,0,.25); border-radius: 4px; }
+/* Firefox/标准属性：尽量收敛 */
+.left-wrap .left-panel { scrollbar-width: none; }
+.left-wrap .left-panel:hover { scrollbar-width: thin; }
