@@ -12,6 +12,7 @@ from backend.logger import logger
 import hashlib
 import zipfile
 import subprocess
+from typing import Iterable
 
 
 def get_size_bytes(path: Union[str, Path], *, prefer_du: bool = True, timeout: float = 3.0) -> int:
@@ -227,3 +228,97 @@ class Timer:
             logger.info(f"[{self.name}] 当前已用时 {elapsed:.4f} 秒")
         else:
             logger.info(f"[{self.name}.{point}] 当前已用时 {elapsed:.4f} 秒")
+
+
+# ============ 低占用可断点续传复制 ============
+
+def _bw_sleep(start_ts: float, bytes_written: int, limit_bps: float):
+    """按带宽上限进行自适应 sleep。"""
+    if limit_bps <= 0:
+        return
+    elapsed = time.perf_counter() - start_ts
+    expected = bytes_written / limit_bps
+    if expected > elapsed:
+        time.sleep(expected - elapsed)
+
+
+def copy_file_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 128.0, preserve_stat: bool = True):
+    """
+    将单个文件以限速方式复制，支持从已存在的部分大小处断点续传（通过 size 对齐）。
+    - 若 dst 存在且大小等于 src，跳过
+    - 若 dst 存在且大小小于 src，从该偏移位置继续复制
+    - 若 dst 大于 src，重写 dst
+    """
+    src = Path(src)
+    dst = Path(dst)
+    if not src.is_file():
+        return
+
+    src_size = src.stat().st_size
+    dst_parent = dst.parent
+    dst_parent.mkdir(parents=True, exist_ok=True)
+
+    start = time.perf_counter()
+    limit_bps = max(0.0, float(os.getenv('ASP_IMPORT_BWLIMIT_MBPS', max_mbps)) * 1024 * 1024)
+
+    existing = 0
+    if dst.exists():
+        try:
+            existing = dst.stat().st_size
+        except OSError:
+            existing = 0
+        if existing > src_size:
+            # 目标异常，重新写入
+            existing = 0
+
+    mode = 'ab' if existing > 0 else 'wb'
+
+    with open(src, 'rb') as s, open(dst, mode) as d:
+        if existing > 0:
+            s.seek(existing)
+        written = existing
+        chunk = 1024 * 1024  # 1MB 块
+        while True:
+            buf = s.read(chunk)
+            if not buf:
+                break
+            d.write(buf)
+            written += len(buf)
+            _bw_sleep(start, written - existing, limit_bps)
+
+    if preserve_stat:
+        try:
+            shutil.copystat(src, dst, follow_symlinks=False)
+        except OSError:
+            pass
+
+
+def copytree_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 128.0):
+    """
+    受限速且可断点续传的目录复制：
+    - 逐文件复制，已存在且大小一致的文件跳过
+    - 已存在且更小的文件从大小偏移处续写
+    - 自动创建目标目录结构
+    - 忽略符号链接
+    """
+    src = Path(src)
+    dst = Path(dst)
+    if not src.exists():
+        raise FileNotFoundError(f"源目录不存在: {src}")
+
+    for root, dirs, files in os.walk(src):
+        root_p = Path(root)
+        rel = root_p.relative_to(src)
+        # 创建对应子目录
+        (dst / rel).mkdir(parents=True, exist_ok=True)
+        # 文件复制
+        for name in files:
+            sp = root_p / name
+            if sp.is_symlink():
+                # 跳过符号链接
+                continue
+            dp = (dst / rel / name)
+            try:
+                copy_file_resumable_throttled(sp, dp, max_mbps=max_mbps)
+            except Exception as e:
+                logger.error(f"复制文件失败: {sp} -> {dp}：{e}")
