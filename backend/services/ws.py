@@ -167,7 +167,8 @@ async def _update_status_from_event(event: str, data: Dict[str, Any]) -> None:
         if event in ["mcdr.mcdr_start", "mcdr.server_start_pre", "mcdr.server_start"]:
             mcdr_manager.set_external_status(server_id, "pending", None)
             try:
-                logger.info(f"[MCDR-WS] 服务器正在启动 | server={server_name} id={server_id} event={event}")
+                if event == "mcdr.server_start_pre":
+                    logger.info(f"[MCDR-WS] 服务器正在启动 | server={server_name} id={server_id} event={event}")
             except Exception:
                 pass
         elif event == "mcdr.server_startup":
@@ -451,10 +452,6 @@ async def _handle_single(payload: Dict[str, Any]):
                     PLAYERS_BY_SERVER[server_name] = set()
                     JOINED_TIME[server_name] = {}
                     SERVER_LAST_BOUNDARY[server_name] = float(time.time())
-                    try:
-                        logger.info(f"[MCDR-WS] 服务器启动 | server={server_name}")
-                    except Exception:
-                        pass
                 else:
                     # 停止时清空
                     # 在清空前对仍在线玩家进行尾差累计（以分钟边界为基准）
@@ -488,10 +485,6 @@ async def _handle_single(payload: Dict[str, Any]):
                     # 最后清空在线与时间表
                     PLAYERS_BY_SERVER.pop(server_name, None)
                     JOINED_TIME[server_name] = {}
-                    try:
-                        logger.info(f"[MCDR-WS] 服务器停止 | server={server_name}")
-                    except Exception:
-                        pass
                 await _emit_presence_for_server(server_name)
                 # 推进服务器边界，防止后续尾差偏大
                 SERVER_LAST_BOUNDARY[server_name] = float(time.time())
