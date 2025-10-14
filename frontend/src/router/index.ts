@@ -86,6 +86,11 @@ const routes = [
                 component: () => import('../views/ChatRoom.vue')
             },
             {
+                path: 'settings',
+                name: 'Settings',
+                component: () => import('../views/Settings.vue')
+            },
+            {
                 // 【新增】存档管理页面的路由
                 // 它必须作为 MainLayout 的子路由，才能被正确渲染在布局内部
                 path: 'tools/archives',

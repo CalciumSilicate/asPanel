@@ -64,7 +64,7 @@ async def _update_status_from_event(event: str, data: Dict[str, Any]) -> None:
             server_id = matched.id
 
         # 更新 mcdr_manager 的外部状态视图
-        if event == "mcdr.mcdr_start":
+        if event in ["mcdr.mcdr_start", "mcdr.server_start_pre", "mcdr.server_start"]:
             mcdr_manager.set_external_status(server_id, "pending", None)
         elif event == "mcdr.server_startup":
             mcdr_manager.set_external_status(server_id, "running", None)
@@ -117,7 +117,7 @@ async def _handle_single(payload: Dict[str, Any]):
         return
     # 记录日志：接收到的单条事件
     try:
-        logger.info(f"[MCDR-WS] 收到事件: {event} | 内容: {json.dumps(payload, ensure_ascii=False)}")
+        logger.debug(f"[MCDR-WS] 收到事件: {event} | 内容: {json.dumps(payload, ensure_ascii=False)}")
     except Exception:
         pass
 
@@ -342,7 +342,7 @@ async def mcdr_ws_endpoint(ws: WebSocket):
             text = await ws.receive_text()
             try:
                 # 记录原始消息内容
-                logger.info(f"[MCDR-WS] 收到原始消息: {text}")
+                logger.debug(f"[MCDR-WS] 收到原始消息: {text}")
             except Exception:
                 pass
             payload = _safe_json_loads(text)
@@ -352,7 +352,7 @@ async def mcdr_ws_endpoint(ws: WebSocket):
             if isinstance(payload, dict) and payload.get("batch") is True:
                 items: List[Dict[str, Any]] = payload.get("items", []) or []
                 try:
-                    logger.info(f"[MCDR-WS] 批量消息，数量={len(items)}")
+                    logger.debug(f"[MCDR-WS] 批量消息，数量={len(items)}")
                 except Exception:
                     pass
                 for it in items:

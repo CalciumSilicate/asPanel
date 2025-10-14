@@ -2,6 +2,7 @@ import threading
 import uuid
 from typing import Dict, Optional
 from backend.schemas import Task, TaskType, TaskStatus  # 假设你的schemas里有Tasks模型
+from backend.logger import logger
 
 
 class TaskManager:
@@ -42,9 +43,9 @@ class TaskManager:
             ]:
                 task = self.tasks[task_id]
                 if task.error:
-                    print(f'{task_id} ERROR: {task.error}')
+                    logger.error(f"任务 {task_id} 出错：{task.error}")
                 del self.tasks[task_id]
-                print(f"Cleaned up ended archive task: {task_id}")
+                logger.info(f"已清理完成的归档任务：{task_id}")
 
         timer = threading.Timer(delay_seconds, remove_task)
         timer.start()

@@ -20,6 +20,7 @@ from backend.core.config import (
 )
 
 from backend.routers import users, system, archives, servers, versions, plugins, tools
+from backend.routers import settings as settings_router
 from backend.routers import mods as mods_router
 from backend.routers import configuration as configuration_router
 from backend.services.ws import router as ws_router
@@ -136,6 +137,7 @@ app.include_router(tools.router)
 app.include_router(mods_router.router)
 app.include_router(configuration_router.router)
 app.include_router(ws_router)
+app.include_router(settings_router.router)
 
 
 @app.on_event("startup")

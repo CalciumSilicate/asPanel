@@ -262,7 +262,7 @@
             </el-icon>
             <span>玩家管理</span>
           </el-menu-item>
-          <el-menu-item index="/settings" disabled>
+          <el-menu-item index="/settings">
             <el-icon>
               <Setting/>
             </el-icon>

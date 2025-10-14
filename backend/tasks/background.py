@@ -34,7 +34,6 @@ def download_file(dest_path: Path, download_url: str, task: Task = None, start: 
                     task.progress = round(end, 2)
                     return
                 else:
-                    print(2)
                     crud.delete_download_file(db, file.id)
     with get_db_context() as db:
         os.makedirs(dest_path.parent, exist_ok=True)

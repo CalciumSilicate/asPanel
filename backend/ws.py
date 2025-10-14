@@ -4,6 +4,7 @@ from typing import Dict, List
 from backend.database import get_db_context
 from backend.dependencies import mcdr_manager
 from backend import crud
+from backend.logger import logger
 
 # Socket.IO 实例
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
@@ -20,7 +21,7 @@ async def join_console_room(sid, data):
     server_id = data.get('server_id')
     if server_id is not None:
         await sio.enter_room(sid, f'server_console_{server_id}')
-        print(f"Socket {sid} joined room for server {server_id}")
+        logger.info(f"Socket {sid} joined room for server {server_id}")
 
 
 @sio.on('console_command')

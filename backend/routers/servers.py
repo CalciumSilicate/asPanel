@@ -100,10 +100,10 @@ async def force_kill_server(server_id: int, db: Session = Depends(get_db),
     # PERMISSION: ADMIN
     server = crud.get_server_by_id(db, server_id)
     server_status, _ = await mcdr_manager.get_status(server_id, server.path)
-    if server_status != "running":
+    if str(server_status) not in ["running", "pending"]:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="服务器未处于运行状态，无法强制关闭。"
+            detail="服务器未处于运行或启动中状态，无法强制关闭。"
         )
     success, message = await mcdr_manager.force_kill(server)
     if not success:
@@ -276,7 +276,12 @@ async def save_server_config(
         jvm = config_data.jvm
         launcher_jar = core_config.launcher_jar
         jvm_args_list = [f"-Xms{jvm.min_memory}", f"-Xmx{jvm.max_memory}", *filter(None, jvm.extra_args.split())]
-        mcdr_config['start_command'] = ' '.join(["java", *jvm_args_list, "-jar", launcher_jar])
+        # 读取系统设置中的 java 命令（默认 'java'）
+        try:
+            java_cmd = crud.get_system_settings_data(db).get('java_command', 'java')
+        except Exception:
+            java_cmd = 'java'
+        mcdr_config['start_command'] = ' '.join([java_cmd, *jvm_args_list, "-jar", launcher_jar])
         mcdr_config['handler'] = f"{config_data.core_config.server_type.lower()}_handler"
         mcdr_config['working_directory'] = 'server'
         mcdr_config['plugin_directories'] = PUBLIC_PLUGINS_DIRECTORIES

@@ -265,7 +265,6 @@ async def pb_restore(db: Session, source_server_id: int, backup_id: int, target_
     # 运行中的服务器不允许
     target = crud.get_server_by_id(db, target_server_id)
     if not target:
-        print(1)
         raise HTTPException(status_code=404, detail="Target server not found")
     st, _ = await server_service.get_status(target)
     if str(st) == schemas.ServerStatus.RUNNING or st == schemas.ServerStatus.RUNNING:
@@ -276,7 +275,6 @@ async def pb_restore(db: Session, source_server_id: int, backup_id: int, target_
     cli = _resolve_pb_cli_path(Path(source.path))
     pb_dir, db_path = _get_pb_env_paths(Path(source.path))
     if not pb_dir.exists() or not db_path.exists():
-        print(2)
         raise HTTPException(status_code=404, detail="PB database not found on source server")
 
     temp_out = TEMP_PATH / f"pb_extract_{uuid.uuid4().hex}"
@@ -293,7 +291,6 @@ async def pb_restore(db: Session, source_server_id: int, backup_id: int, target_
                 world_dir = Path(dirpath)
                 break
         if world_dir is None:
-            print(3)
             raise HTTPException(status_code=404, detail="在备份中未找到 level.dat")
 
         target_server_path = Path(target.path)

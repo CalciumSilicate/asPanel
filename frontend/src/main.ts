@@ -15,6 +15,8 @@ import router from './router';
 
 const app = createApp(App);
 
+// 预加载系统设置（时区、java命令等）
+import('./store/settings').then(m => m.loadSettings()).catch(() => {})
 
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
     app.component(key, component);

@@ -80,7 +80,7 @@
           <el-table :data="pagedBackups" size="small" stripe v-loading="loadingBackups" empty-text="暂无备份">
             <el-table-column prop="id" label="ID" width="80"/>
             <el-table-column prop="date" label="创建时间" min-width="180">
-              <template #default="{ row }">{{ row.date }}</template>
+              <template #default="{ row }">{{ formatPBDate(row.date) }}</template>
             </el-table-column>
             <el-table-column label="压缩大小" width="140" align="center">
               <template #default="{ row }">{{ formatBytes(row.stored_size || 0) }}</template>
@@ -154,6 +154,8 @@ import {ElMessage, ElMessageBox, ElNotification} from 'element-plus'
 import { Search, Refresh, Download } from '@element-plus/icons-vue'
 import apiClient from '@/api'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
+import { settings } from '@/store/settings'
+import { settings } from '@/store/settings'
 
 const PB_PLUGIN_META_ID = 'prime_backup'
 
@@ -177,6 +179,10 @@ const pagedBackups = computed(() => {
   const start = (page.value - 1) * pageSize.value
   return backups.value.slice(start, start + pageSize.value)
 })
+
+const formatPBDate = (d) => {
+  try { return new Date(d).toLocaleString('zh-CN', { timeZone: settings.timezone || 'Asia/Shanghai' }) } catch { return d || '' }
+}
 
 // 总占用（来自后端总量接口，失败时回退到聚合）
 const usageTotal = ref(0)

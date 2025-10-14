@@ -244,6 +244,7 @@ import {useRoute} from 'vue-router';
 import {ElMessage, ElMessageBox} from 'element-plus';
 import {Upload, Download, QuestionFilled, Delete, WarningFilled, FolderAdd} from '@element-plus/icons-vue';
 import apiClient from '@/api';
+import { settings } from '@/store/settings'
 
 // --- 状态 ---
 const allArchives = ref([]);
@@ -291,7 +292,7 @@ const getDownloadUrl = (archiveId) => {
 const formatDateTime = (isoString) => {
   if (!isoString) return 'N/A';
   const date = new Date(isoString);
-  return date.toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'});
+  return date.toLocaleString('zh-CN', { timeZone: settings.timezone || 'Asia/Shanghai' });
 };
 
 // [新增] 格式化服务器选择项的标签

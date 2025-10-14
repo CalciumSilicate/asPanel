@@ -124,6 +124,7 @@ import apiClient from '@/api'
 import { io } from 'socket.io-client'
 import { API_BASE_URL } from '@/config'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
+import { settings } from '@/store/settings'
 
 const defaultAvatar = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="24" r="14" fill="#bbb"/><rect x="12" y="40" width="40" height="18" rx="9" fill="#bbb"/></svg>'
 
@@ -347,20 +348,17 @@ const resolveAvatar = (url) => {
   if (!url) return null
   if (url.startsWith('http://') || url.startsWith('https://')) return url
   const path = url.startsWith('/') ? url : `/${url}`
-  return `${BASE_URL}${path}`
+  return `${API_BASE_URL}${path}`
 }
 
 const mcAvatar = (name) => {
   if (!name) return defaultAvatar;
   try { return `https://mc-heads.net/avatar/${encodeURIComponent(name)}` } catch { return `https://mc-heads.net/avatar/${name}` }
 }
-const pad = (n) => String(n).padStart(2, '0')
 const formatTime = (dt) => {
   try {
     const d = new Date(dt)
-    const Y = d.getFullYear(), M = pad(d.getMonth()+1), D = pad(d.getDate())
-    const h = pad(d.getHours()), m = pad(d.getMinutes()), s = pad(d.getSeconds())
-    return `${Y}-${M}-${D} ${h}:${m}:${s}`
+    return d.toLocaleString('zh-CN', { timeZone: settings.timezone || 'Asia/Shanghai' })
   } catch { return '' }
 }
 </script>

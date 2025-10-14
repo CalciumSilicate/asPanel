@@ -273,6 +273,15 @@
                   </div>
                 </div>
               </el-form-item>
+              <el-form-item>
+                <div class="form-item-wrapper">
+                  <div class="form-item-label"><span>Java 命令</span><small>来自系统设置</small></div>
+                  <div class="form-item-control">
+                    <el-input class="input-long" :model-value="settings.java_command" disabled></el-input>
+                    <div class="form-tip">如需修改，请前往 设置 → 系统设置</div>
+                  </div>
+                </div>
+              </el-form-item>
             </el-form>
           </div>
 
@@ -1082,6 +1091,7 @@ import {useRouter} from 'vue-router';
 import {ElMessage, ElMessageBox, ElLoading, ElNotification} from 'element-plus';
 import ConfigEditor from '@/components/ConfigEditor.vue';
 import draggable from 'vuedraggable';
+import { settings } from '@/store/settings'
 
 const router = useRouter();
 const serverList = ref([]);

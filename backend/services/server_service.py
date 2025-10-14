@@ -17,6 +17,7 @@ from ..core.config import MCDR_ROOT_PATH
 from ..core.utils import get_size_mb, poll_copy_progress
 from ..schemas import ServerCoreConfig, Task, TaskStatus
 from ..server_parser import infer_server_type_and_analyze_core_config
+from backend.logger import logger
 
 
 class ServerService:
@@ -123,7 +124,7 @@ class ServerService:
         db_server = crud.get_server_by_id(db, server_id)
         if not db_server:
             # Server might already be deleted from DB but folder exists. Proceed gracefully.
-            print(f"Server with ID {server_id} not found in DB. Skipping DB-related cleanup.")
+            logger.warning(f"ID 为 {server_id} 的服务器在数据库中未找到，跳过数据库清理。")
         else:
             st, _ = await self.mcdr_manager.get_status(server_id, db_server.path)
             if st == 'running':
@@ -131,7 +132,7 @@ class ServerService:
 
         server = crud.get_server_by_id(db, server_id)
         if not server:
-            print(f"Server with ID {server_id} not found in the database for deletion.")
+            logger.warning(f"删除时在数据库中未找到服务器 {server_id}，直接返回。")
             return
 
         server_path_str = server.path
@@ -148,8 +149,7 @@ class ServerService:
             if server_path.is_dir():
                 shutil.rmtree(server_path)
         except Exception as e:
-            print(
-                f"Warning: Database record for server {server_id} deleted, but failed to remove directory {server_path_str}: {e}")
+            logger.warning(f"已删除服务器 {server_id} 的数据库记录，但删除目录 {server_path_str} 失败：{e}")
 
     async def import_server(self, server_import: schemas.ServerImport, db: Session, user: models.User, task: Task,
                             task_manager: TaskManager) -> models.Server:

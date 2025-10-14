@@ -14,6 +14,7 @@ from backend.dependencies import task_manager
 from backend.schemas import TaskType, TaskStatus
 from backend.tasks.background import \
     background_create_archive, background_restore_archive, background_process_upload
+from backend.logger import logger
 
 router = APIRouter(
     prefix="/api",
@@ -170,7 +171,7 @@ def batch_delete_archives(payload: schemas.BatchActionPayload, db: Session = Dep
                 elif file_path.is_dir():
                     shutil.rmtree(file_path)
             except OSError as e:
-                print(f"Error deleting file {file_path} for archive ID {db_archive.id}: {e}")
+                logger.warning(f"删除存档文件 {file_path}（ID={db_archive.id}）失败：{e}")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

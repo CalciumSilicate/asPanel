@@ -1,6 +1,8 @@
 # mcdr_manager.py
 
 import asyncio
+from venv import logger
+
 import socketio
 import re
 import os
@@ -13,6 +15,8 @@ import psutil
 from backend.database import SessionLocal
 from backend.core.config import LOG_EMIT_INTERVAL_MS
 from backend import schemas, models
+from backend import crud
+from backend.logger import logger
 
 if TYPE_CHECKING:
     from backend.services.server_service import ServerService
@@ -73,10 +77,9 @@ class MCDRManager:
 
     async def _notify_server_update(self, server_id: int):
         if not self.sio or not self.server_service:
-            print("Warning: SIO or ServerService not available. Skipping notification.")
+            logger.warning("SIO 或 ServerService 未就绪，跳过状态通知")
             return
 
-        print(f"Notifying update for server {server_id}...")
         try:
             with SessionLocal() as db:
                 server_details = await self.server_service.get_server_details_by_id(server_id, db)
@@ -89,9 +92,8 @@ class MCDRManager:
                     {'status': server_details.status},
                     room=f'server_console_{server_id}'
                 )
-                print(f"Broadcasted 'server_status_update' for server {server_id} with status {server_details.status}")
         except Exception as e:
-            print(f"Error during server update notification for server {server_id}: {e}")
+            logger.error(f"通知服务器 {server_id} 状态更新时出错：{e}")
 
     # [新增] 定时批量发送日志的后台任务
     async def _emit_log_batch_periodically(self, server_id: int):
@@ -117,7 +119,7 @@ class MCDRManager:
 
     async def _monitor_and_notify_on_exit(self, server_id: int, process: asyncio.subprocess.Process):
         await process.wait()
-        print(f"Process for server {server_id} (PID: {process.pid}) has exited with code {process.returncode}.")
+        logger.info(f"[MCDR] 服务器 {server_id} (PID: {process.pid}) 已退出 (code={process.returncode})")
 
         # [修改] 停止并清理日志发送器任务，并进行最后一次日志刷新
         if server_id in self.log_emitter_tasks:
@@ -146,10 +148,10 @@ class MCDRManager:
             is_adding: bool = True
     ):
         if not self.sio or not self.server_service:
-            print("Warning: SIO or ServerService not available. Skipping notification.")
+            logger.warning("SIO 或 ServerService 未就绪，跳过服务器列表通知")
             return
 
-        print(f"Notifying server list update.")
+        logger.info("广播服务器列表更新通知")
         try:
             with SessionLocal() as db:
                 if server_details is None and server.id is not None:
@@ -161,7 +163,7 @@ class MCDRManager:
                     server_details.model_dump(mode='json') if server_details is not None else None
                 )
         except Exception as e:
-            print(f"Error during server update notification for server {server.id}: {e}")
+            logger.error(f"服务器 {server.id} 列表更新通知失败：{e}")
 
     def _clean_log_line(self, line: str) -> Optional[str]:
         # ... (此方法无变化)
@@ -193,7 +195,7 @@ class MCDRManager:
                                 # 每次写入后检查是否需要轮转
                                 self._rotate_log_if_needed(server)
                             except Exception as e:
-                                print(f"Error writing to log file for server {server.id}: {e}")
+                                logger.error(f"写入 SERVER {server.id} 日志文件失败：{e}")
 
                         if server.id not in self.java_pid and "Server is running at PID" in cleaned_line:
                             self.return_code.pop(server.id, None)
@@ -207,13 +209,13 @@ class MCDRManager:
                             self.log_buffers[server.id].append(cleaned_line)
 
                 except Exception as e:
-                    print(f"Error reading log for SERVER {server.id}: {e}")
+                    logger.error(f"读取 SERVER {server.id} 日志时出错：{e}")
                     break
 
             for future in pending: future.cancel()
             if process.returncode is not None: break
 
-        print(f"Log reading for SERVER {server.id} has concluded.")
+        logger.info(f"SERVER {server.id} 日志读取结束")
         if self.sio:
             await self.sio.emit('status_update', {'status': 'stopped'}, room=f'server_console_{server.id}')
 
@@ -225,9 +227,12 @@ class MCDRManager:
             if not server_path.is_dir():
                 return False, f"Server path {server_path} does not exist."
 
-            print(f"Executing 'python -m mcdreforged init' in {server_path}")
+            # 解析系统设置中的 venv，推导 python 可执行路径
+            py_exec = MCDRManager._resolve_python_executable(server_path)
+
+            logger.info(f"在 {server_path} 执行初始化命令：{py_exec} -m mcdreforged init")
             process = await asyncio.create_subprocess_exec(
-                'python', '-m', 'mcdreforged', 'init',
+                py_exec, '-m', 'mcdreforged', 'init',
                 cwd=str(server_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
@@ -238,18 +243,48 @@ class MCDRManager:
             full_log = (output_log + "\n" + error_log).strip()
 
             if process.returncode == 0:
-                print(f"Server at {server_path} initialized successfully.")
+                logger.info(f"服务器 {server_path} 初始化成功")
                 eula_path = server_path / 'server' / 'eula.txt'
                 eula_path.parent.mkdir(exist_ok=True)
                 with open(eula_path, 'w', encoding='utf-8') as f:
                     f.write("eula=true")
                 return True, f"Successful initialization.\n{full_log}"
             else:
-                print(f"Failed to initialize server at {server_path}, return code: {process.returncode}")
+                logger.error(f"服务器 {server_path} 初始化失败，返回码：{process.returncode}")
                 return False, f"Fail initialization, return code: {process.returncode}\n{full_log}"
 
         except Exception as e:
             return False, f"An unexpected error occurred during initialization: {e}"
+
+    @staticmethod
+    def _resolve_python_executable(server_path: Path) -> str:
+        """
+        根据系统设置推导 python 可执行路径：
+        - 若设置了 python_executable：
+          - 绝对路径：直接使用
+          - 相对路径：相对于 server_path 解析
+        - 若未设置或不可用：尝试 server_path/.venv/bin/python
+        - 最后回退 'python'
+        """
+        try:
+            with SessionLocal() as db:
+                settings = crud.get_system_settings_data(db)
+        except Exception:
+            settings = {}
+        try:
+            py_cfg = (settings or {}).get('python_executable')
+            if py_cfg:
+                p = Path(py_cfg)
+                if not p.is_absolute():
+                    p = (server_path / p).resolve()
+                if p.exists():
+                    return str(p)
+            guess = (server_path / '.venv' / 'bin' / 'python')
+            if guess.exists():
+                return str(guess)
+        except Exception:
+            pass
+        return 'python'
 
     async def start(self, server: models.Server) -> tuple[bool, str]:
         server_path = Path(server.path)
@@ -267,7 +302,7 @@ class MCDRManager:
                     self.log_file_handles[server.id] = open(log_file_path, 'a', encoding='utf-8')
                     self._archive_and_reopen(server)
                 except Exception as e:
-                    print(f"Pre-start log rotation failed for server {server.id}: {e}")
+                    logger.warning(f"SERVER {server.id} 预启动日志轮转失败：{e}")
                     # 回退：若轮转失败，仍尝试继续
                     self.log_file_handles[server.id] = open(log_file_path, 'a', encoding='utf-8')
             else:
@@ -275,15 +310,18 @@ class MCDRManager:
         except OSError as e:
             return False, f"Failed to open log file: {e}"
 
+        # 解析 python 可执行文件（遵循系统设置 venv）
+        py_exec = MCDRManager._resolve_python_executable(server_path)
+
         process = await asyncio.create_subprocess_exec(
-            'python', '-m', 'mcdreforged',
+            py_exec, '-m', 'mcdreforged',
             cwd=server_path, stdout=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
         self.return_code.pop(server.id, None)
         self.processes[server.id] = process
         self.log_tasks[server.id] = asyncio.create_task(self._read_logs(server, process))
-        print(f"MCDR process for SERVER {server.id} started with PID {process.pid}")
+        logger.info(f"SERVER {server.id} 的 MCDR 进程已启动，PID={process.pid}")
 
         # [修改] 初始化日志缓冲区并启动定时发送任务
         self.log_buffers[server.id] = []
@@ -294,7 +332,7 @@ class MCDRManager:
             self.set_external_status(server.id, 'pending')
             asyncio.create_task(self._notify_server_update(server.id))
         except Exception as e:
-            print(f"Failed to set pending status for server {server.id}: {e}")
+            logger.warning(f"设置 SERVER {server.id} 的 pending 状态失败：{e}")
 
         asyncio.create_task(self._notify_server_update(server.id))
         asyncio.create_task(self._monitor_and_notify_on_exit(server.id, process))
@@ -312,7 +350,7 @@ class MCDRManager:
                 if len(contents) <= 1 and 'eula.txt' in contents:
                     is_new_setup = True
             except OSError as e:
-                print(f"无法读取目录 {server_path}: {e}")
+                logger.error(f"无法读取目录 {server_path}：{e}")
                 is_new_setup = False
 
         if is_new_setup:
@@ -345,11 +383,11 @@ class MCDRManager:
             process.stdin.write(b'stop\n')
             await process.stdin.drain()
         except (BrokenPipeError, ConnectionResetError):
-            print(f"Warning: Stdin pipe for SERVER {server.id} was already closed.")
+            logger.warning(f"SERVER {server.id} 的标准输入管道已关闭")
         return True, "Stop command sent."
 
     async def restart(self, server: models.Server, server_path: str) -> tuple[bool, str]:
-        print(f"Restarting SERVER {server.id}...")
+        logger.info(f"正在重启 SERVER {server.id} ...")
         await self.stop(server)
         await asyncio.sleep(2)
 
@@ -357,7 +395,7 @@ class MCDRManager:
         if process and process.returncode is None:
             await process.wait()
 
-        print(f"Start phase for SERVER {server.id} beginning...")
+        logger.info(f"SERVER {server.id} 开始启动阶段 ...")
         return await self.start(server)
 
     async def send_command(self, server: models.Server, command: str):
@@ -416,11 +454,11 @@ class MCDRManager:
                                     a_cleaned.append(cl)
                             cleaned_logs = a_cleaned + cleaned_logs
                         except Exception as e:
-                            print(f"Error reading archive log for path {server_path}: {e}")
+                            logger.error(f"读取归档日志失败（路径：{server_path}）：{e}")
 
             return cleaned_logs
         except Exception as e:
-            print(f"Error reading historical log for path {server_path}: {e}")
+            logger.error(f"读取历史日志失败（路径：{server_path}）：{e}")
             return []
 
     async def force_kill(self, server: models.Server) -> tuple[bool, str]:
@@ -466,13 +504,13 @@ class MCDRManager:
                 try:
                     self.log_file_handles[server.id] = open(path, 'a', encoding='utf-8')
                 except Exception as e:
-                    print(f"Reopen missing active log failed for server {server.id}: {e}")
+                    logger.error(f"重新打开活动日志失败（SERVER {server.id}）：{e}")
                 return
             size = path.stat().st_size
             if size >= self.LOG_MAX_BYTES:
                 self._archive_and_reopen(server)
         except Exception as e:
-            print(f"Error during log rotation check for server {server.id}: {e}")
+            logger.error(f"日志轮转检查出错（SERVER {server.id}）：{e}")
 
     def _archive_and_reopen(self, server: models.Server):
         """将当前活动日志归档并压缩，并重新打开新的活动日志。"""
@@ -501,7 +539,7 @@ class MCDRManager:
                 try:
                     os.replace(active_path, dst_plain)
                 except Exception as e:
-                    print(f"Move active log to archive failed for server {server.id}: {e}")
+                    logger.error(f"移动活动日志到归档失败（SERVER {server.id}）：{e}")
                     # 若移动失败，尝试复制退而求其次
                     try:
                         with open(active_path, 'rb') as src, open(dst_plain, 'wb') as dst:
@@ -509,7 +547,7 @@ class MCDRManager:
                         # 清空原文件
                         open(active_path, 'w').close()
                     except Exception as e2:
-                        print(f"Fallback copy active log failed for server {server.id}: {e2}")
+                        logger.error(f"复制活动日志以归档失败（SERVER {server.id}）：{e2}")
 
             try:
                 if dst_plain.exists():
@@ -525,18 +563,18 @@ class MCDRManager:
                     except Exception:
                         pass
             except Exception as e:
-                print(f"Compress archive log failed for server {server.id}: {e}")
+                logger.error(f"压缩归档日志失败（SERVER {server.id}）：{e}")
 
             # 重新打开新的活动日志
             try:
                 self.log_file_handles[server.id] = open(active_path, 'a', encoding='utf-8')
             except Exception as e:
-                print(f"Reopen active log failed for server {server.id}: {e}")
+                logger.error(f"重新打开活动日志失败（SERVER {server.id}）：{e}")
 
             # 清理归档
             self._prune_archives(archive_dir)
         except Exception as e:
-            print(f"Unexpected error during archive & reopen for server {server.id}: {e}")
+            logger.error(f"归档与重开日志过程出现异常（SERVER {server.id}）：{e}")
 
     def _prune_archives(self, archive_dir: Path):
         """按照数量与天数清理归档文件。"""
@@ -565,4 +603,4 @@ class MCDRManager:
                     except Exception:
                         pass
         except Exception as e:
-            print(f"Prune archives failed in {archive_dir}: {e}")
+            logger.error(f"清理归档失败（目录：{archive_dir}）：{e}")

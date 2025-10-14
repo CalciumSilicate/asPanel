@@ -200,7 +200,7 @@ async def delete_db_plugin(plugin_db_id: int, db: Session = Depends(get_db)):
             os.remove(file_path)
         except OSError as e:
             # 即使文件删除失败，也继续删除数据库记录，但要发出警告
-            print(f"Warning: Failed to delete plugin file {file_path}: {e}")
+            logger.warning(f"删除插件文件失败 {file_path}：{e}")
 
     # 删除数据库记录
     crud.delete_plugin_record(db, plugin_db_id)

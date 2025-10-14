@@ -655,7 +655,6 @@ async def change_version(
                     'game_versions': ver.get('game_versions', []),
                     'loaders': ver.get('loaders', []),
                 }
-                print(meta)
                 existing = crud.get_mod_by_path(db, str(target))
                 md5 = get_file_md5(target)
                 sha256 = get_file_sha256(target)

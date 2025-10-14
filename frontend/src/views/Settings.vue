@@ -1,0 +1,126 @@
+<template>
+  <div class="pb-page">
+    <div class="left-wrap" :class="{ 'is-collapsed': asideCollapsed, 'is-collapsing': asideCollapsing }">
+      <div class="right-panel">
+        <div class="center-wrap">
+          <el-card shadow="never" class="settings-card">
+            <template #header>
+              <div class="flex items-center justify-between">
+                <span>系统设置</span>
+                <span class="muted" v-if="savedAt">已自动保存 {{ savedAt }}</span>
+              </div>
+            </template>
+
+            <el-form label-position="left" label-width="320px" :model="form" class="cfg-form">
+              <el-form-item>
+                <template #label>
+                  <div class="form-item-label">
+                    <span>服务器 Python 路径</span>
+                    <small>建议将虚拟环境放在服务器目录 .venv；相对路径以服务器目录为基准。</small>
+                  </div>
+                </template>
+                <div class="form-item-control">
+                  <el-input v-model="form.python_executable" placeholder="例如：.venv/bin/python 或 /usr/bin/python3" />
+                </div>
+              </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <div class="form-item-label">
+                    <span>服务器 Java 命令</span>
+                    <small>保存后，服务器配置中的 start_command 将使用该 Java 命令。</small>
+                  </div>
+                </template>
+                <div class="form-item-control">
+                  <el-input v-model="form.java_command" placeholder="例如：java 或 /usr/bin/java" />
+                </div>
+              </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <div class="form-item-label">
+                    <span>时间时区</span>
+                    <small>用于前端显示时间（聊天室、存档管理、Prime Backup 等）。</small>
+                  </div>
+                </template>
+                <div class="form-item-control">
+                  <el-select v-model="form.timezone" filterable style="width: 280px;">
+                    <el-option v-for="tz in tzOptions" :key="tz.value" :label="tz.label" :value="tz.value" />
+                  </el-select>
+                </div>
+              </el-form-item>
+            </el-form>
+          </el-card>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { reactive, onMounted, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import { settings, loadSettings, updateSettings, COMMON_TIMEZONES } from '@/store/settings'
+import { asideCollapsed, asideCollapsing } from '@/store/ui'
+
+const form = reactive({
+  python_executable: settings.python_executable,
+  java_command: settings.java_command,
+  timezone: settings.timezone,
+})
+const tzOptions = COMMON_TIMEZONES
+const saving = ref(false)
+const savedAt = ref('')
+
+let timer = null
+const autoSave = () => {
+  if (timer) clearTimeout(timer)
+  timer = setTimeout(async () => {
+    try {
+      saving.value = true
+      await updateSettings({
+        python_executable: form.python_executable,
+        java_command: form.java_command,
+        timezone: form.timezone,
+      })
+      const d = new Date()
+      savedAt.value = d.toLocaleTimeString('zh-CN')
+    } catch (e) {
+      ElMessage.error(e?.response?.data?.detail || '自动保存失败')
+    } finally {
+      saving.value = false
+    }
+  }, 600)
+}
+
+onMounted(async () => {
+  await loadSettings()
+  Object.assign(form, settings)
+})
+
+watch(() => ({...form}), autoSave, { deep: true })
+</script>
+
+<style scoped>
+.pb-page { }
+.left-wrap { display: flex; gap: 16px; align-items: stretch; height: calc(100vh - var(--el-header-height) - 48px); overflow: hidden; min-height: 0; }
+.left-panel { width: 320px; flex-shrink: 0; align-self: flex-start; }
+.left-panel { transition: width 0.32s cubic-bezier(.34,1.56,.64,1); will-change: width; overflow: hidden; }
+.is-collapsed .left-panel, .is-collapsing .left-panel { width: 0 !important; }
+.is-collapsing .left-panel :deep(.el-card__body), .is-collapsing .left-panel :deep(.el-card__header) { display: none !important; }
+.right-panel { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.center-wrap { max-width: 820px; margin: 0 auto; padding: 12px 0; }
+.settings-card { }
+.muted { color: #909399; font-size: 12px; }
+.flex { display: flex; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.help { color: var(--el-text-color-secondary); font-size: 12px; margin-top: 6px; }
+/* 参考 PrimeBackupConfig 的表单布局样式 */
+.cfg-form :deep(.el-form-item) { margin-bottom: 18px; padding-bottom: 10px; display: flex; flex-wrap: wrap; }
+.form-item-label { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding-left: 3%; padding-right: 12px; white-space: normal; }
+.form-item-label > span { font-size: 14px; color: var(--el-text-color-regular); line-height: 1.3; }
+.form-item-label > small { margin-top: 2px; color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.2; }
+.form-item-control { display: inline-flex; align-items: center; }
+</style>
+

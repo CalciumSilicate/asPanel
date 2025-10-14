@@ -131,3 +131,19 @@ class ChatMessage(Base):
     server_name = Column(String, nullable=True)
     player_name = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class SystemSettings(Base):
+    """
+    系统级设置（单行表）：
+    - data: JSON 字符串，保存键值，如：
+      {
+        "python_executable": ".venv/bin/python",
+        "java_command": "java",
+        "timezone": "Asia/Shanghai"
+      }
+    """
+    __tablename__ = "system_settings"
+    id = Column(Integer, primary_key=True, index=True)
+    data = Column(String, default="{}")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

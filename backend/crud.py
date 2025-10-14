@@ -500,3 +500,53 @@ def cleanup_server_link_groups_for_server(db: Session, server_id: int) -> int:
             continue
     db.commit()
     return updated
+
+
+# --- System Settings CRUD ---
+DEFAULT_SYSTEM_SETTINGS = {
+    "python_executable": ".venv/bin/python",
+    "java_command": "java",
+    "timezone": "Asia/Shanghai",
+}
+
+
+def _ensure_system_settings_row(db: Session) -> models.SystemSettings:
+    rec = db.query(models.SystemSettings).first()
+    if not rec:
+        rec = models.SystemSettings(data=json.dumps(DEFAULT_SYSTEM_SETTINGS))
+        db.add(rec)
+        db.commit()
+        db.refresh(rec)
+    return rec
+
+
+def get_system_settings(db: Session) -> models.SystemSettings:
+    return _ensure_system_settings_row(db)
+
+
+def get_system_settings_data(db: Session) -> dict:
+    rec = _ensure_system_settings_row(db)
+    try:
+        data = json.loads(rec.data or "{}")
+    except json.JSONDecodeError:
+        data = {}
+    # 用默认值填充缺失项
+    merged = {**DEFAULT_SYSTEM_SETTINGS, **(data or {})}
+    return merged
+
+
+def update_system_settings(db: Session, patch: dict) -> dict:
+    rec = _ensure_system_settings_row(db)
+    try:
+        current = json.loads(rec.data or "{}")
+    except json.JSONDecodeError:
+        current = {}
+    current = current or {}
+    current.update({k: v for k, v in (patch or {}).items() if v is not None})
+    rec.data = json.dumps(current)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    # 返回合并后的全量配置（带默认值）
+    merged = {**DEFAULT_SYSTEM_SETTINGS, **current}
+    return merged
