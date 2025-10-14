@@ -41,7 +41,7 @@
                 @selection-change="handleSelectionChange" class="table">
         <el-table-column type="selection" width="55" align="center" fixed/>
 
-        <el-table-column prop="name" label="服务器名称" width="140" sortable fixed>
+        <el-table-column prop="name" label="服务器名称" width="160" sortable fixed>
           <template #default="scope">
             <el-tooltip
                 effect="dark"
