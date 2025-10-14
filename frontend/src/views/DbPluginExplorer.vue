@@ -125,8 +125,7 @@
       <el-upload
           ref="uploadRef"
           drag
-          :action="uploadUrl"
-          :headers="authHeaders"
+          :http-request="customUploadRequest"
           :limit="1"
           :on-exceed="handleExceed"
           :on-success="handleUploadSuccess"
@@ -297,10 +296,26 @@ const isFetchingServerPlugins = ref(false);
 const uploadDialogVisible = ref(false);
 const isUploading = ref(false);
 const uploadRef = ref(null);
-const uploadUrl = '/api/plugins/upload';
-const authHeaders = computed(() => ({
-  Authorization: `Bearer ${localStorage.getItem('token')}`
-}));
+
+// 使用 apiClient 的自定义上传请求，统一走拦截器与基地址
+const customUploadRequest = async (options) => {
+  try {
+    const formData = new FormData();
+    formData.append('file', options.file);
+    const res = await apiClient.post('/api/plugins/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (e) => {
+        if (e && e.total) {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          options.onProgress && options.onProgress({ percent });
+        }
+      },
+    });
+    options.onSuccess && options.onSuccess(res.data);
+  } catch (err) {
+    options.onError && options.onError(err);
+  }
+};
 
 // Install Dialog
 const installDialogVisible = ref(false);
