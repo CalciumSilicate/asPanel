@@ -20,6 +20,7 @@ from backend.core.config import (
 )
 
 from backend.routers import users, system, archives, servers, versions, plugins, tools
+from backend.routers import players as players_router
 from backend.routers import settings as settings_router
 from backend.routers import mods as mods_router
 from backend.routers import configuration as configuration_router
@@ -138,6 +139,7 @@ app.include_router(mods_router.router)
 app.include_router(configuration_router.router)
 app.include_router(ws_router)
 app.include_router(settings_router.router)
+app.include_router(players_router.router)
 
 
 @app.on_event("startup")
@@ -147,6 +149,13 @@ async def startup_event():
     await get_velocity_versions_raw()
     await get_fabric_game_version_list()
     await get_mcdr_plugins_catalogue()
+    # 启动时收集/补全玩家 UUID 列表
+    try:
+        from backend.services import player_manager as _pm
+        _pm.ensure_players_from_worlds()
+        _pm.refresh_missing_official_names()
+    except Exception:
+        pass
     # 设置 asyncio 事件循环异常处理，捕获后台任务未处理错误
     loop = asyncio.get_running_loop()
 

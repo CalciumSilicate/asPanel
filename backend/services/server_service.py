@@ -18,6 +18,7 @@ from ..core.utils import get_size_mb, poll_copy_progress, copytree_resumable_thr
 from ..schemas import ServerCoreConfig, Task, TaskStatus
 from ..server_parser import infer_server_type_and_analyze_core_config
 from backend.logger import logger
+from backend.services import player_manager
 
 
 class ServerService:
@@ -113,6 +114,12 @@ class ServerService:
                 shutil.rmtree(server_path, ignore_errors=True)
                 raise HTTPException(status_code=500, detail=f"Failed to initialize server files: {message}")
             await self.mcdr_manager.notify_server_list_update(db_server, is_adding=True)
+            # 玩家游玩时长映射：创建服务器后，为所有玩家添加 {server_name: 0}（当 world 存在时）
+            try:
+                server_name = Path(db_server.path).name
+                player_manager.on_server_created(server_name, db_server.path)
+            except Exception:
+                pass
         except Exception as e:
             crud.delete_server(db, db_server.id)
             shutil.rmtree(server_path, ignore_errors=True)
@@ -146,6 +153,11 @@ class ServerService:
 
         try:
             server_path = Path(server_path_str)
+            # 玩家游玩时长映射：删除服务器后，从所有玩家中移除该 server 键
+            try:
+                player_manager.on_server_deleted(server_path.name)
+            except Exception:
+                pass
             if server_path.is_dir():
                 shutil.rmtree(server_path)
         except Exception as e:
@@ -182,6 +194,11 @@ class ServerService:
                 await asyncio.to_thread(copytree_resumable_throttled, source_path, target_path)
                 task.progress = 100
                 crud.update_server_core_config(db, db_server.id, infer_server_type_and_analyze_core_config(db_server))
+                # 导入完成：根据是否存在 world，为所有玩家添加 {server_name: 0}
+                try:
+                    player_manager.on_server_created(Path(db_server.path).name, db_server.path)
+                except Exception:
+                    pass
                 return db_server
             except Exception as e:
                 crud.delete_server(db, db_server.id)

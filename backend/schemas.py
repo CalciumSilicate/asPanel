@@ -666,3 +666,37 @@ class SystemSettingsUpdate(BaseModel):
     python_executable: str | None = None
     java_command: str | None = None
     timezone: str | None = None
+
+
+# --- Player Schemas ---
+class PlayerBase(BaseModel):
+    uuid: str
+    player_name: Optional[str] = None
+    # 键为服务器名，值为 ticks（gt = 1/20 秒）
+    play_time: Dict[str, int] = Field(default_factory=dict)
+    is_offline: bool = False
+
+    @field_validator('play_time', mode='before')
+    @classmethod
+    def parse_play_time(cls, v: Any):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:
+                return {}
+        return v or {}
+
+    class Config:
+        from_attributes = True
+
+
+class PlayerCreate(PlayerBase):
+    pass
+
+
+class Player(PlayerBase):
+    id: int
+
+
+class PlayerNameUpdate(BaseModel):
+    name: str

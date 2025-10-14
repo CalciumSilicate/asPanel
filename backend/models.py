@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Enum as SQLAlchemyEnum, Text
+from sqlalchemy import Column, Integer, String, DateTime, Enum as SQLAlchemyEnum, Text, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 import json
@@ -147,3 +147,16 @@ class SystemSettings(Base):
     id = Column(Integer, primary_key=True, index=True)
     data = Column(String, default="{}")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Player(Base):
+    __tablename__ = "players"
+    id = Column(Integer, primary_key=True, index=True)
+    # 作为唯一标识符（从 world/playerdata/*.dat 文件名提取）
+    uuid = Column(String, unique=True, index=True, nullable=False)
+    # 玩家名（可为空，在线/正版账号可通过 API 获取；离线服允许手动设置）
+    player_name = Column(String, nullable=True)
+    # 各服务器游玩时长（JSON 字符串：{server_name: ticks}，单位为 gt=1/20 秒）
+    play_time = Column(String, default="{}")
+    # 是否为离线/盗版（当从官方接口无法解析时标记为 True）
+    is_offline = Column(Boolean, default=False, nullable=False)

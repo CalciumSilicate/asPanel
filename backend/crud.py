@@ -550,3 +550,103 @@ def update_system_settings(db: Session, patch: dict) -> dict:
     # 返回合并后的全量配置（带默认值）
     merged = {**DEFAULT_SYSTEM_SETTINGS, **current}
     return merged
+
+
+# --- Player CRUD ---
+def get_player_by_uuid(db: Session, uuid: str) -> Optional[models.Player]:
+    return db.query(models.Player).filter(models.Player.uuid == uuid).first()
+
+
+def get_player_by_name(db: Session, name: str) -> Optional[models.Player]:
+    return db.query(models.Player).filter(models.Player.player_name == name).first()
+
+
+def list_players(db: Session, *, scope: str = "all") -> list[models.Player]:
+    q = db.query(models.Player)
+    if scope == "official_only":
+        # 仅正版：is_offline == False
+        q = q.filter(models.Player.is_offline == False)  # noqa: E712
+    elif scope == "include_cracked":
+        # 包括盗版：is_offline == False 或者 已设置名字（允许离线服手动命名）
+        q = q.filter(((models.Player.is_offline == False) | (models.Player.player_name.isnot(None))))  # noqa: E712
+    else:
+        # all
+        pass
+    return q.all()
+
+
+def create_player(db: Session, *, uuid: str, player_name: Optional[str] = None,
+                  play_time: Optional[dict] = None, is_offline: bool = False) -> models.Player:
+    rec = models.Player(uuid=uuid, player_name=player_name, play_time=json.dumps(play_time or {}), is_offline=is_offline)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
+def update_player_name(db: Session, rec: models.Player, *, name: Optional[str], is_offline: Optional[bool] = None) -> models.Player:
+    rec.player_name = name
+    if is_offline is not None:
+        rec.is_offline = bool(is_offline)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
+def set_player_play_time_for_server(db: Session, rec: models.Player, server_name: str, ticks: int) -> models.Player:
+    try:
+        pt = json.loads(rec.play_time or '{}')
+    except Exception:
+        pt = {}
+    pt[server_name] = int(max(0, ticks))
+    rec.play_time = json.dumps(pt)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
+def add_player_play_time_ticks(db: Session, rec: models.Player, server_name: str, ticks_delta: int) -> models.Player:
+    try:
+        pt = json.loads(rec.play_time or '{}')
+    except Exception:
+        pt = {}
+    current = int(pt.get(server_name, 0) or 0)
+    pt[server_name] = max(0, current + int(ticks_delta))
+    rec.play_time = json.dumps(pt)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
+def remove_server_from_player_play_time(db: Session, rec: models.Player, server_name: str) -> models.Player:
+    try:
+        pt = json.loads(rec.play_time or '{}')
+    except Exception:
+        pt = {}
+    if server_name in pt:
+        del pt[server_name]
+    rec.play_time = json.dumps(pt)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
+def bulk_remove_server_from_all_players(db: Session, server_name: str) -> int:
+    updated = 0
+    players = db.query(models.Player).all()
+    for rec in players:
+        try:
+            pt = json.loads(rec.play_time or '{}')
+        except Exception:
+            pt = {}
+        if server_name in pt:
+            del pt[server_name]
+            rec.play_time = json.dumps(pt)
+            db.add(rec)
+            updated += 1
+    db.commit()
+    return updated

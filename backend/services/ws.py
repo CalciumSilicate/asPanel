@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict, List, Optional, Tuple, Set
+import asyncio
+import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import socketio
@@ -28,6 +30,81 @@ from backend.dependencies import mcdr_manager
 
 # 服务器在线玩家：key=服务器目录名，value=玩家名集合
 PLAYERS_BY_SERVER: Dict[str, Set[str]] = {}
+# 最近一次为玩家累计 1200 ticks 的时间戳：{ server_name: { player_name: last_ts } }
+LAST_ADDED_TIME: Dict[str, Dict[str, float]] = {}
+_PLAYTIME_TASK: Optional[asyncio.Task] = None
+
+
+def _get_server_path_by_name(server_name: str) -> Optional[str]:
+    try:
+        with get_db_context() as db:
+            for s in crud.get_all_servers(db):
+                try:
+                    if Path(s.path).name == server_name:
+                        return s.path
+                except Exception:
+                    continue
+    except Exception:
+        return None
+    return None
+
+
+async def _playtime_tick_loop():
+    """
+    每分钟遍历在线表，将在线满 60s 的玩家对应服务器的 play_time += 1200（gt）。
+    仅当该玩家在数据库中存在记录且其 play_time[server_name] 键存在时才累计。
+    """
+    from backend.database import get_db_context as _db_ctx
+    from backend import crud as _crud
+    while True:
+        try:
+            await asyncio.sleep(60)
+            now = time.time()
+            with _db_ctx() as db:
+                for server_name, players in list(PLAYERS_BY_SERVER.items()):
+                    server_path = _get_server_path_by_name(server_name)
+                    world_dir = Path(server_path) / 'server' / 'world' if server_path else None
+                    if not server_path or not world_dir.exists():
+                        # world 不存在则清理键
+                        try:
+                            for p in players:
+                                rec = _crud.get_player_by_name(db, p)
+                                if rec:
+                                    _crud.remove_server_from_player_play_time(db, rec, server_name)
+                        except Exception:
+                            pass
+                        continue
+                    for p in list(players):
+                        try:
+                            rec = _crud.get_player_by_name(db, p)
+                            if not rec or rec.player_name is None:
+                                continue
+                            # 仅当已有该 server 的键时才累计（满足“play_time 不为空且包含该 server”）
+                            try:
+                                pt = json.loads(rec.play_time or '{}')
+                            except Exception:
+                                pt = {}
+                            if server_name not in pt:
+                                continue
+                            _crud.add_player_play_time_ticks(db, rec, server_name, 1200)
+                            logger.debug(f"[MCDR-WS] 为玩家 {p} 在服务器 {server_name} 累计了 1200 ticks")
+                            LAST_ADDED_TIME.setdefault(server_name, {})[p] = now
+                        except Exception:
+                            continue
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            try:
+                logger.exception("[MCDR-WS] playtime_tick_loop 异常")
+            except Exception:
+                pass
+
+
+def _ensure_playtime_task():
+    global _PLAYTIME_TASK
+    if _PLAYTIME_TASK is None or _PLAYTIME_TASK.done():
+        loop = asyncio.get_event_loop()
+        _PLAYTIME_TASK = loop.create_task(_playtime_tick_loop())
 
 
 async def _update_status_from_event(event: str, data: Dict[str, Any]) -> None:
@@ -235,14 +312,21 @@ async def _handle_single(payload: Dict[str, Any]):
         except Exception:
             pass
 
-    # 7) 玩家在线表维护：基于 player_joined/left & server_startup/stop
+    # 7) 玩家在线表维护与游玩时长累计：基于 player_joined/left & server_startup/stop
     try:
+        from backend.services import player_manager as _pm
+        _ensure_playtime_task()
         if event == "mcdr.player_joined" and isinstance(data, dict):
             server_name = str(data.get("server") or "")
             player = str(data.get("player") or "")
             if server_name and player:
                 PLAYERS_BY_SERVER.setdefault(server_name, set()).add(player)
                 await _emit_presence_for_server(server_name)
+                # 补齐可能新增的 UUID 记录
+                try:
+                    _pm.ensure_players_from_worlds()
+                except Exception:
+                    pass
         elif event == "mcdr.player_left" and isinstance(data, dict):
             server_name = str(data.get("server") or "")
             player = str(data.get("player") or "")
@@ -251,6 +335,33 @@ async def _handle_single(payload: Dict[str, Any]):
                 if player:
                     s.discard(player)
                 await _emit_presence_for_server(server_name)
+                # 同步补齐可能新增的 UUID（例如玩家首次出现后立即离开）
+                try:
+                    _pm.ensure_players_from_worlds()
+                except Exception:
+                    pass
+                # 刷新该玩家最后一次累计后的尾差（秒*20）
+                try:
+                    now = time.time()
+                    last = LAST_ADDED_TIME.get(server_name, {}).get(player)
+                    with get_db_context() as db:
+                        rec = crud.get_player_by_name(db, player)
+                        if rec and rec.player_name is not None:
+                            sp = _get_server_path_by_name(server_name)
+                            world_exists = bool(sp and (Path(sp) / 'server' / 'world').exists())
+                            if last is not None and world_exists:
+                                delta_ticks = int(max(0, (now - last) * 20))
+                                crud.add_player_play_time_ticks(db, rec, server_name, delta_ticks)
+                                logger.debug(f"[MCDR-WS] 为玩家 {player} 在服务器 {server_name} 累计了 {delta_ticks} ticks（离线尾差）")
+                            else:
+                                # 未产生过 1200 的累计，则按规则删除该 server 键
+                                crud.remove_server_from_player_play_time(db, rec, server_name)
+                    try:
+                        LAST_ADDED_TIME.get(server_name, {}).pop(player, None)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
         elif event in ("mcdr.server_startup", "mcdr.server_stop") and isinstance(data, dict):
             server_name = str(data.get("server") or "")
             if server_name:
@@ -261,6 +372,41 @@ async def _handle_single(payload: Dict[str, Any]):
                     # 停止时清空
                     PLAYERS_BY_SERVER.pop(server_name, None)
                 await _emit_presence_for_server(server_name)
+                # 针对该服务器所有记录做一次尾差累计/清理
+                try:
+                    now = time.time()
+                    last_map = LAST_ADDED_TIME.get(server_name) or {}
+                    with get_db_context() as db:
+                        sp = _get_server_path_by_name(server_name)
+                        world_exists = bool(sp and (Path(sp) / 'server' / 'world').exists())
+                        # 针对已记录过 last 的玩家：做尾差累计（若 world 不存在则删除键）
+                        for player, last in list(last_map.items()):
+                            try:
+                                rec = crud.get_player_by_name(db, player)
+                                if not rec or rec.player_name is None:
+                                    continue
+                                if world_exists:
+                                    delta_ticks = int(max(0, (now - last) * 20))
+                                    crud.add_player_play_time_ticks(db, rec, server_name, delta_ticks)
+                                else:
+                                    crud.remove_server_from_player_play_time(db, rec, server_name)
+                            except Exception:
+                                continue
+                        # 针对没有 last 记录但当前服务器的在线集可能含有的玩家，按规则删除该 server 键
+                        if world_exists:
+                            pass  # world 存在但无 last 不做强制处理
+                        else:
+                            # world 不存在，一并删除该 server 键
+                            for player in list(PLAYERS_BY_SERVER.get(server_name, set())):
+                                try:
+                                    rec = crud.get_player_by_name(db, player)
+                                    if rec and rec.player_name is not None:
+                                        crud.remove_server_from_player_play_time(db, rec, server_name)
+                                except Exception:
+                                    continue
+                    LAST_ADDED_TIME[server_name] = {}
+                except Exception:
+                    pass
     except Exception:
         pass
 

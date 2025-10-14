@@ -87,6 +87,12 @@ const routes = [
             { path: 'server-config/join-motd-config', name: 'JoinMOTDConfig', component: () => import('../views/plugin-config/JoinMOTDConfig.vue'), meta: { requiredRole: 'ADMIN' } },
             { path: 'server-config/quick-backup-multi-config', name: 'QuickBackupMultiConfig', component: () => import('../views/plugin-config/QuickBackupMultiConfig.vue'), meta: { requiredRole: 'ADMIN' } },
             {
+                path: 'players',
+                name: 'PlayerManager',
+                component: () => import('../views/PlayerManager.vue'),
+                meta: { requiredRole: 'ADMIN' }
+            },
+            {
                 path: 'tools/litematica',
                 name: 'Litematica',
                 component: () => import('../views/Litematica.vue'),

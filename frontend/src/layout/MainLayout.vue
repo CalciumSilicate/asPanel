@@ -256,7 +256,7 @@
             </el-icon>
             <span>数据统计</span>
           </el-menu-item>
-          <el-menu-item index="/player-management" disabled v-if="hasRole('ADMIN')">
+          <el-menu-item index="/players" v-if="hasRole('ADMIN')">
             <el-icon>
               <User/>
             </el-icon>
