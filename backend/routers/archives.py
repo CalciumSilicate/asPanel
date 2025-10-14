@@ -9,7 +9,7 @@ import os
 
 from backend import crud, schemas
 from backend.database import get_db
-from backend.core.config import ARCHIVE_STORAGE_PATH
+from backend.core.config import ARCHIVE_STORAGE_PATH, to_local_dt
 from backend.dependencies import task_manager
 from backend.schemas import TaskType, TaskStatus, Role
 from backend.tasks.background import \
@@ -26,7 +26,15 @@ router = APIRouter(
 @router.get("/archives", response_model=List[schemas.Archive])
 def read_archives(db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
     db_archives = crud.get_archives(db)
-    response_archives = [schemas.Archive.model_validate(archive) for archive in db_archives]
+    response_archives = []
+    for archive in db_archives:
+        out = schemas.Archive.model_validate(archive)
+        try:
+            if getattr(archive, 'created_at', None):
+                out = out.model_copy(update={"created_at": to_local_dt(archive.created_at)})
+        except Exception:
+            pass
+        response_archives.append(out)
     return response_archives
 
 

@@ -60,6 +60,64 @@ LOG_LEVEL = "DEBUG"
 LOG_FILE_LEVEL = "DEBUG"
 LOG_STORAGE = STORAGE_ROOT_PATH / "logs"
 
+# --- Timezone Setting ---
+# 默认使用 UTC+8（Asia/Shanghai）；可通过环境变量 ASPANEL_TIMEZONE 覆盖，如 "UTC", "Asia/Tokyo" 等
+TIMEZONE = os.getenv("ASPANEL_TIMEZONE", "Asia/Shanghai")
+
+# 提供统一的 tzinfo 获取与格式化工具
+from datetime import timezone as _dt_timezone, timedelta as _dt_timedelta
+try:
+    from zoneinfo import ZoneInfo as _ZoneInfo  # Python 3.9+
+except Exception:  # pragma: no cover
+    _ZoneInfo = None
+
+def get_tzinfo():
+    """返回配置时区对应的 tzinfo；若不可用，回退为 UTC+8 固定偏移。"""
+    if _ZoneInfo:
+        try:
+            return _ZoneInfo(TIMEZONE)
+        except Exception:
+            pass
+    # 简单解析形如 UTC+8 / UTC+08:00
+    try:
+        if TIMEZONE.upper().startswith("UTC"):
+            s = TIMEZONE[3:].strip()
+            sign = 1
+            if s.startswith("+"):
+                s = s[1:]
+            elif s.startswith("-"):
+                s = s[1:]
+                sign = -1
+            if ":" in s:
+                hh, mm = s.split(":", 1)
+                hours, minutes = int(hh), int(mm)
+            else:
+                hours, minutes = int(s), 0
+            return _dt_timezone(sign * _dt_timedelta(hours=hours, minutes=minutes))
+    except Exception:
+        pass
+    # 最终回退 Asia/Shanghai 等价偏移
+    return _dt_timezone(_dt_timedelta(hours=8))
+
+def to_local_dt(dt):
+    """将 datetime 转换为配置时区的 aware datetime；None 直接返回 None。
+    若 dt 为 naive，按 UTC 解释后转换；若已带 tz，直接 astimezone。
+    """
+    if dt is None:
+        return None
+    tz = get_tzinfo()
+    try:
+        if getattr(dt, "tzinfo", None) is None:
+            # 假设存储为 UTC 时间（常见后端约定）；再转换到配置时区
+            dt = dt.replace(tzinfo=_dt_timezone.utc)
+        return dt.astimezone(tz)
+    except Exception:
+        return dt
+
+def to_local_iso(dt):
+    x = to_local_dt(dt)
+    return x.isoformat() if x else None
+
 # --- Security and verification ---
 # 优先从环境变量读取 JWT 密钥；未提供时从 storages/secret.key 读取/生成并持久化（不纳入 git）。
 _SECRET_KEY_ENV = os.getenv("ASPANEL_SECRET_KEY") or os.getenv("SECRET_KEY")

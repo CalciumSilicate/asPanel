@@ -22,6 +22,9 @@ from backend.tools.litematic_parser import (
 from backend.core.config import (
     UPLOADED_LITEMATIC_PATH,
     LITEMATIC_COMMAND_LIST_PATH,
+    to_local_dt,
+    to_local_iso,
+    get_tzinfo,
 )
 from fastapi.responses import FileResponse
 import uuid
@@ -318,14 +321,14 @@ async def litematic_list(db: Session = Depends(get_db), _user=Depends(require_ro
             src = Path(r.path)
             info = {
                 "file_name": r.file_name,
-                "created_at": r.created_at.isoformat() if hasattr(r.created_at, 'isoformat') and r.created_at else None,
+                "created_at": to_local_iso(r.created_at) if r.created_at else None,
                 "cl_generated": has_command_list_for(src),
                 "cl_file_path": get_command_list_output_file_name_for(src)
             }
         except Exception:
             info = {
                 "file_name": r.file_name,
-                "created_at": r.created_at.isoformat() if hasattr(r.created_at, 'isoformat') and r.created_at else None,
+                "created_at": to_local_iso(r.created_at) if r.created_at else None,
                 "cl_generated": False,
                 "cl_file_path": None
             }
@@ -557,6 +560,12 @@ async def chat_history(group_id: int, limit: int = 200, offset: int = 0, db: Ses
     result: list[schemas.ChatMessageOut] = []
     for r in reversed(rows):
         out = schemas.ChatMessageOut.model_validate(r)
+        # 统一时区
+        try:
+            if out.created_at:
+                out = out.model_copy(update={"created_at": to_local_dt(out.created_at)})
+        except Exception:
+            pass
         avatar = None
         try:
             if r.source == 'web' and r.sender_user_id:
@@ -586,7 +595,8 @@ async def chat_send(payload: schemas.ChatSendPayload, db: Session = Depends(get_
     msg = crud.create_chat_message(db, msg)
     # 运行时补充 sender_avatar 用于响应与广播
     out = schemas.ChatMessageOut.model_validate(msg).model_copy(update={
-        "sender_avatar": current_user.avatar_url
+        "sender_avatar": current_user.avatar_url,
+        "created_at": to_local_dt(msg.created_at) if getattr(msg, 'created_at', None) else None,
     })
     # 广播给 Web 前端
     await sio.emit("chat_message", out.model_dump(mode='json'))
