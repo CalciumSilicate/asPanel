@@ -3,25 +3,43 @@
     <el-card shadow="never">
       <template #header>
         <div class="flex items-center justify-between">
-          <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2">
             <span class="text-base font-medium">玩家管理</span>
-            <el-radio-group v-model="scope" size="small" @change="load">
-              <el-radio-button label="official_only">仅正版玩家</el-radio-button>
-              <el-radio-button label="include_cracked">包括盗版玩家</el-radio-button>
-              <el-radio-button label="all">所有玩家</el-radio-button>
-            </el-radio-group>
-            <el-select v-model="selectedServers" multiple collapse-tags collapse-tags-tooltip placeholder="时长数据来源" size="small" style="min-width: 260px" @change="noop">
-              <el-option v-for="s in serverNames" :key="s" :label="s" :value="s" />
-            </el-select>
+            <el-tag type="info">共 {{ filteredRows.length }} 个玩家</el-tag>
           </div>
           <div class="flex items-center gap-2">
-            <el-button size="small" :loading="busyTicks" @click="refreshPlayTime">刷新时长</el-button>
-            <el-button size="small" type="primary" :loading="busyNames" @click="refreshOfficialNames">刷新正版玩家名</el-button>
+            <el-button-group>
+              <el-button size="small" :loading="busyTicks" @click="refreshPlayTime">刷新时长</el-button>
+              <el-button size="small" type="primary" :loading="busyNames" @click="refreshOfficialNames">刷新正版玩家名</el-button>
+            </el-button-group>
           </div>
         </div>
       </template>
 
-      <el-table :data="rows" size="small" stripe :max-height="'calc(100vh - var(--el-header-height) - 220px)'">
+      <div class="flex items-center gap-2 mb-2">
+        <el-input v-model="query" placeholder="搜索玩家名 / UUID" clearable style="max-width: 300px;">
+          <template #prefix><el-icon><Search/></el-icon></template>
+        </el-input>
+        <el-radio-group v-model="scope" @change="onScopeChange">
+          <el-radio-button label="all">所有玩家</el-radio-button>
+          <el-radio-button label="official_only">仅正版玩家</el-radio-button>
+          <el-radio-button label="include_cracked">包括盗版玩家</el-radio-button>
+        </el-radio-group>
+        <el-popover placement="bottom-start" trigger="click" width="260">
+          <template #reference>
+            <el-button size="small" plain>时长来源</el-button>
+          </template>
+          <div class="flex items-center justify-between mb-1">
+            <el-button link type="primary" size="small" @click="selectAllServers">全选</el-button>
+            <el-button link type="danger" size="small" @click="clearServers">清空</el-button>
+          </div>
+          <el-checkbox-group v-model="selectedServers" @change="onServersFilterChange">
+            <el-checkbox v-for="s in serverNames" :key="s" :label="s">{{ s }}</el-checkbox>
+          </el-checkbox-group>
+        </el-popover>
+      </div>
+
+      <el-table :data="pagedRows" size="small" stripe :max-height="'calc(100vh - var(--el-header-height) - 260px)'">
         <el-table-column label="头像" width="80" align="center">
           <template #default="{ row }">
             <img class="avatar" :src="avatarUrl(row.uuid)" alt="avatar" />
@@ -46,15 +64,30 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <!-- Pagination -->
+      <div class="mt-3 flex items-center justify-end">
+        <el-pagination
+            background
+            layout="prev, pager, next, sizes, total"
+            :page-sizes="[10, 20, 50, 100]"
+            :page-size="pageSize"
+            :current-page="page"
+            :total="filteredRows.length"
+            @current-change="p => page = p"
+            @size-change="s => { pageSize = s; page = 1; }"
+        />
+      </div>
     </el-card>
   </div>
   
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/api'
 import { ElMessage } from 'element-plus'
+import { Search } from '@element-plus/icons-vue'
 
 type Player = {
   id: number,
@@ -68,10 +101,14 @@ const rows = ref<Player[]>([])
 const servers = ref<{id:number,name:string,path:string}[]>([])
 const serverNames = computed(() => servers.value.map(s => s.path.split('/').pop() || s.name))
 const selectedServers = ref<string[]>([])
+const query = ref('')
 const scope = ref<'official_only'|'include_cracked'|'all'>('official_only')
 
 const busyTicks = ref(false)
 const busyNames = ref(false)
+
+const page = ref(1)
+const pageSize = ref(20)
 
 const loadServers = async () => {
   const { data } = await api.get('/api/servers')
@@ -83,6 +120,7 @@ const loadServers = async () => {
 const load = async () => {
   const { data } = await api.get('/api/players', { params: { scope: scope.value } })
   rows.value = (data || []).map((x: any) => ({ ...x, play_time: x.play_time || {} }))
+  page.value = 1
 }
 
 const refreshPlayTime = async () => {
@@ -107,11 +145,26 @@ const avatarUrl = (uuid: string) => `https://mc-heads.net/avatar/${encodeURIComp
 
 const sumTicks = (row: Player) => {
   const pt = row.play_time || {}
-  const picks = selectedServers.value.length ? selectedServers.value : serverNames.value
+  const picks = selectedServers.value
   let total = 0
   for (const s of picks) { total += Number(pt[s] || 0) }
   return total
 }
+
+const filteredRows = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  if (!q) return rows.value
+  return rows.value.filter(r => {
+    const name = (r.player_name || '').toLowerCase()
+    const uuid = (r.uuid || '').toLowerCase()
+    return (name && name.includes(q)) || uuid.includes(q)
+  })
+})
+
+const pagedRows = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filteredRows.value.slice(start, start + pageSize.value)
+})
 
 const formatDuration = (ticks: number) => {
   const seconds = Math.floor(ticks / 20)
@@ -137,7 +190,15 @@ const submitEdit = async (row: Player) => {
   await load()
 }
 
-const noop = () => {}
+const onScopeChange = async () => { await load() }
+const selectAllServers = () => { selectedServers.value = serverNames.value.slice() }
+const clearServers = () => { selectedServers.value = [] }
+const onServersFilterChange = () => { /* 仅用于触发视图更新，sumTicks 将自动使用 selectedServers */ }
+
+watch(serverNames, (list) => {
+  // 当服务器列表变化时，默认全选
+  if (selectedServers.value.length === 0) selectedServers.value = list.slice()
+})
 
 onMounted(async () => {
   await loadServers()
@@ -152,5 +213,8 @@ onMounted(async () => {
 .name-cell .pname { font-weight: 600; color: var(--el-text-color-primary); }
 .name-cell .uuid { color: var(--el-text-color-secondary); font-size: 12px; }
 .clickable { cursor: pointer; }
+
+/* 让筛选工具行与表格距离更舒适 */
+.mb-2 { margin-bottom: 8px; }
 </style>
 

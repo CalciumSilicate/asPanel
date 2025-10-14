@@ -24,8 +24,8 @@ storages/
 
 
 # Local config
-.env
-.env.*
+.env.development
+.env.production
 
 reference/
 openapi_endpoints
