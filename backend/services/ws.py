@@ -167,7 +167,7 @@ async def _update_status_from_event(event: str, data: Dict[str, Any]) -> None:
         if event in ["mcdr.mcdr_start", "mcdr.server_start_pre", "mcdr.server_start"]:
             mcdr_manager.set_external_status(server_id, "pending", None)
             try:
-                logger.info(f"[MCDR-WS] 状态标记为 pending | server={server_name} id={server_id} event={event}")
+                logger.info(f"[MCDR-WS] 服务器正在启动 | server={server_name} id={server_id} event={event}")
             except Exception:
                 pass
         elif event == "mcdr.server_startup":
@@ -341,7 +341,13 @@ async def _handle_single(payload: Dict[str, Any]):
                         row = _crud.create_chat_message(db, row)
                         # 使用 Pydantic 模型进行 JSON 序列化，避免 datetime 直接传递导致的序列化问题
                         from backend import schemas as _schemas
+                        from backend.core.config import to_local_dt
                         out_model = _schemas.ChatMessageOut.model_validate(row)
+                        try:
+                            if getattr(row, 'created_at', None):
+                                out_model = out_model.model_copy(update={"created_at": to_local_dt(row.created_at)})
+                        except Exception:
+                            pass
                         out = out_model.model_dump(mode='json')
                         await sio.emit("chat_message", out)
         except Exception:
@@ -446,7 +452,7 @@ async def _handle_single(payload: Dict[str, Any]):
                     JOINED_TIME[server_name] = {}
                     SERVER_LAST_BOUNDARY[server_name] = float(time.time())
                     try:
-                        logger.info(f"[MCDR-WS] 服务器启动事件：在线表已清空 | server={server_name}")
+                        logger.info(f"[MCDR-WS] 服务器启动 | server={server_name}")
                     except Exception:
                         pass
                 else:
@@ -483,7 +489,7 @@ async def _handle_single(payload: Dict[str, Any]):
                     PLAYERS_BY_SERVER.pop(server_name, None)
                     JOINED_TIME[server_name] = {}
                     try:
-                        logger.info(f"[MCDR-WS] 服务器停止事件：在线表已清空 | server={server_name}")
+                        logger.info(f"[MCDR-WS] 服务器停止 | server={server_name}")
                     except Exception:
                         pass
                 await _emit_presence_for_server(server_name)
@@ -561,7 +567,7 @@ async def _forward_event_to_plugins(event: str, data: Dict[str, Any], original_p
         _PLUGIN_CLIENTS.pop(ws, None)
     try:
         if forwarded:
-            logger.info(f"[MCDR-WS] 事件转发 | event={event} 源服务器={src_server} 转发客户端数={forwarded}")
+            logger.debug(f"[MCDR-WS] 事件转发 | event={event} 源服务器={src_server} 转发客户端数={forwarded}")
         else:
             logger.debug(f"[MCDR-WS] 事件无需转发 | event={event} 源服务器={src_server}")
     except Exception:
@@ -592,7 +598,8 @@ async def mcdr_ws_endpoint(ws: WebSocket):
             if isinstance(payload, dict) and payload.get("batch") is True:
                 items: List[Dict[str, Any]] = payload.get("items", []) or []
                 try:
-                    logger.debug(f"[MCDR-WS] 批量消息，数量={len(items)}")
+                    if items > 1:
+                        logger.debug(f"[MCDR-WS] 批量消息，数量={len(items)}")
                 except Exception:
                     pass
                 for it in items:

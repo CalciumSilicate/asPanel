@@ -144,10 +144,15 @@ app.include_router(players_router.router)
 
 @app.on_event("startup")
 async def startup_event():
+    logger.warning(f"服务器启动中")
     asyncio.create_task(cpu_sampler())
+    logger.debug(f"正在获取Vanilla版本列表...")
     await get_minecraft_versions_raw()
+    logger.debug(f"正在获取Velocity版本列表...")
     await get_velocity_versions_raw()
+    logger.debug(f"正在获取Fabric支持版本列表...")
     await get_fabric_game_version_list()
+    logger.debug(f"正在获取MCDR插件列表...")
     await get_mcdr_plugins_catalogue()
     # 启动时收集/补全玩家 UUID 列表
     try:
