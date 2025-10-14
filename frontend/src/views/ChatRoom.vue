@@ -352,7 +352,7 @@ const resolveAvatar = (url) => {
 
 const mcAvatar = (name) => {
   if (!name) return defaultAvatar;
-  try { return `https://crafatar.com/avatars/${encodeURIComponent(name)}` } catch { return `https://crafatar.com/avatars/${name}` }
+  try { return `https://mc-heads.net/avatar/${encodeURIComponent(name)}` } catch { return `https://mc-heads.net/avatar/${name}` }
 }
 const formatTime = (dt) => {
   try {
