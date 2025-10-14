@@ -34,7 +34,7 @@ async def get_mcdr_catalogue(_user=Depends(require_role(Role.HELPER))):
 
 
 @router.get("/plugins/server/{server_id}", response_model=schemas.ServerPlugins)
-async def get_server_plugins(server_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
+async def get_server_plugins(server_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.USER))):
     """获取指定服务器已安装的插件列表"""
     catalogue = await get_mcdr_catalogue()
     server_plugins = await server_service.get_server_plugins_info_by_id(server_id, db)

@@ -217,7 +217,7 @@
               </el-icon>
               <span>超平坦世界</span>
             </el-menu-item>
-            <el-menu-item index="/tools/server-link" v-if="hasRole('USER')">
+            <el-menu-item index="/tools/server-link" v-if="hasRole('ADMIN')">
               <el-icon>
                 <Link/>
               </el-icon>
