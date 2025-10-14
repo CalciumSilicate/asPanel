@@ -59,6 +59,9 @@
             </template>
           </el-table-column>
           <el-table-column label="游玩时长" width="200" align="center">
+            <template #header>
+              <span class="pt-sort-header" @click="togglePlaytimeSort">游玩时长<span v-if="playtimeSort==='desc'"> ↓</span><span v-else> —</span></span>
+            </template>
             <template #default="{ row }">
               <span>{{ formatDuration(sumTicks(row)) }}</span>
             </template>
@@ -120,6 +123,9 @@ const busyNames = ref(false)
 const page = ref(1)
 const pageSize = ref(20)
 
+// 游玩时长排序：'desc' 或 'none'
+const playtimeSort = ref<'none' | 'desc'>('none')
+
 const loadServers = async () => {
   const { data } = await api.get('/api/servers')
   servers.value = data || []
@@ -175,9 +181,17 @@ const filteredRows = computed(() => {
   })
 })
 
+const sortedRows = computed(() => {
+  const arr = filteredRows.value.slice()
+  if (playtimeSort.value === 'desc') {
+    return arr.sort((a, b) => sumTicks(b) - sumTicks(a))
+  }
+  return arr
+})
+
 const pagedRows = computed(() => {
   const start = (page.value - 1) * pageSize.value
-  return filteredRows.value.slice(start, start + pageSize.value)
+  return sortedRows.value.slice(start, start + pageSize.value)
 })
 
 const formatDuration = (ticks: number) => {
@@ -207,6 +221,10 @@ const submitEdit = async (row: Player) => {
 const onScopeChange = async () => { await load() }
 const onServersFilterChange = () => { /* 仅用于触发视图更新，sumTicks 将自动使用 selectedServers */ }
 const onWhitelistToggle = () => { page.value = 1 }
+const togglePlaytimeSort = () => {
+  playtimeSort.value = playtimeSort.value === 'none' ? 'desc' : 'none'
+  page.value = 1
+}
 
 watch(serverNames, (list) => {
   // 当服务器列表变化时，默认全选
@@ -231,7 +249,7 @@ onMounted(async () => {
 
 <style scoped>
 .page { display: flex; flex-direction: column; gap: 12px; height: 100%; overflow: hidden; }
-.avatar { width: 42px; height: 42px; border-radius: 6px; }
+.avatar { width: 36px; height: 36px; border-radius: 6px; }
 .name-cell { display: flex; flex-direction: column; }
 .name-cell .pname { font-weight: 600; color: var(--el-text-color-primary); }
 .name-cell .uuid { color: var(--el-text-color-secondary); font-size: 12px; }
@@ -252,6 +270,11 @@ onMounted(async () => {
 :deep(.el-card) { height: 100%; display: flex; flex-direction: column; }
 :deep(.el-card__body) { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .table-container { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+
+/* 紧凑表格行高 */
+:deep(.el-table--small .el-table__cell) { padding-top: 4px; padding-bottom: 4px; }
+:deep(.el-table .cell) { padding-top: 0; padding-bottom: 0; }
+.pt-sort-header { cursor: pointer; user-select: none; }
 
 /* 工具条布局对齐插件页 */
 .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
