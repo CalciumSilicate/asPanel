@@ -153,7 +153,7 @@ async def startup_event():
     try:
         from backend.services import player_manager as _pm
         _pm.ensure_players_from_worlds()
-        _pm.refresh_missing_official_names()
+        await _pm.refresh_missing_official_names()
         _pm.ensure_play_time_if_empty()
     except Exception:
         pass

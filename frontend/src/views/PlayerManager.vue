@@ -34,6 +34,7 @@
               <el-checkbox v-for="s in serverNames" :key="s" :label="s">{{ s }}</el-checkbox>
             </el-checkbox-group>
           </el-popover>
+          <el-checkbox class="wl-only" v-model="whitelistOnly" @change="onWhitelistToggle">仅白名单玩家</el-checkbox>
         </div>
       </div>
 
@@ -108,6 +109,11 @@ const selectedServers = ref<string[]>([])
 const query = ref('')
 const scope = ref<'official_only'|'include_cracked'|'all'>('official_only')
 
+// 白名单过滤
+const whitelistUUIDs = ref<string[]>([])
+const whitelistOnly = ref(false)
+const whitelistSet = computed(() => new Set(whitelistUUIDs.value))
+
 const busyTicks = ref(false)
 const busyNames = ref(false)
 
@@ -157,8 +163,12 @@ const sumTicks = (row: Player) => {
 
 const filteredRows = computed(() => {
   const q = query.value.trim().toLowerCase()
-  if (!q) return rows.value
-  return rows.value.filter(r => {
+  const base = rows.value
+  const afterWhitelist = whitelistOnly.value
+    ? base.filter(r => whitelistSet.value.has(r.uuid))
+    : base
+  if (!q) return afterWhitelist
+  return afterWhitelist.filter(r => {
     const name = (r.player_name || '').toLowerCase()
     const uuid = (r.uuid || '').toLowerCase()
     return (name && name.includes(q)) || uuid.includes(q)
@@ -196,6 +206,7 @@ const submitEdit = async (row: Player) => {
 
 const onScopeChange = async () => { await load() }
 const onServersFilterChange = () => { /* 仅用于触发视图更新，sumTicks 将自动使用 selectedServers */ }
+const onWhitelistToggle = () => { page.value = 1 }
 
 watch(serverNames, (list) => {
   // 当服务器列表变化时，默认全选
@@ -204,6 +215,16 @@ watch(serverNames, (list) => {
 
 onMounted(async () => {
   await loadServers()
+  try {
+    const { data } = await api.get('/api/players/whitelist-uuids')
+    whitelistUUIDs.value = Array.isArray(data) ? data : []
+    // 若白名单存在 uuid，则默认勾选；若为空，则默认不勾选
+    whitelistOnly.value = whitelistUUIDs.value.length > 0
+  } catch (e) {
+    // 忽略错误，默认不勾选
+    whitelistUUIDs.value = []
+    whitelistOnly.value = false
+  }
   await load()
 })
 </script>
@@ -237,9 +258,10 @@ onMounted(async () => {
 .server-checkboxes { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow: auto; }
 
 /* 将“时长来源”按钮视觉上与单选组拼接，统一样式 */
-.scope-group { display: inline-flex; align-items: stretch; }
+.scope-group { display: inline-flex; align-items: center; }
 .scope-group :deep(.el-radio-button__inner) { border-radius: 0 !important; }
 .btn-scope-like { border-radius: 0 !important; margin-left: -1px; }
+.wl-only { margin-left: 8px; }
 
 /* 让页面底部留白用于容纳外部分页 */
 .page { padding-bottom: 8px; }

@@ -6,7 +6,8 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import requests
+import httpx
+from backend.core.api import async_client
 
 from backend.core.config import MCDR_ROOT_PATH
 from backend.database import get_db_context
@@ -79,16 +80,16 @@ def ensure_players_from_worlds() -> dict:
     return stats
 
 
-def _fetch_official_name(uuid_hyphen: str) -> Optional[str]:
+async def _fetch_official_name(uuid_hyphen: str) -> Optional[str]:
     """尝试从 Mojang SessionServer 获取玩家名。失败返回 None。
     注意：API 需要去掉连字符的 UUID。
     """
     try:
         u = uuid_hyphen.replace('-', '')
         url = f"https://sessionserver.mojang.com/session/minecraft/profile/{u}"
-        resp = requests.get(url, timeout=6)
-        if resp.status_code == 200:
-            data = resp.json()
+        r = await async_client.get(url, timeout=6)
+        if r.status_code == 200:
+            data = r.json()
             name = data.get('name')
             if isinstance(name, str) and name:
                 try:
@@ -97,7 +98,7 @@ def _fetch_official_name(uuid_hyphen: str) -> Optional[str]:
                     pass
                 return name
         try:
-            logger.debug(f"[PlayerManager] 官方名解析失败 | uuid={uuid_hyphen} status={resp.status_code}")
+            logger.debug(f"[PlayerManager] 官方名解析失败 | uuid={uuid_hyphen} status={r.status_code}")
         except Exception:
             pass
         return None
@@ -109,7 +110,7 @@ def _fetch_official_name(uuid_hyphen: str) -> Optional[str]:
         return None
 
 
-def refresh_missing_official_names() -> dict:
+async def refresh_missing_official_names() -> dict:
     """
     逻辑2：当 player_name 为 None 且 is_offline == False，尝试获取 player_name；
     若失败，将 is_offline=True；若成功，写入 player_name。
@@ -122,7 +123,7 @@ def refresh_missing_official_names() -> dict:
         players = db.query(models.Player).filter(models.Player.player_name.is_(None), models.Player.is_offline == False).all()  # noqa: E712
         for p in players:
             tried += 1
-            name = _fetch_official_name(p.uuid)
+            name = await _fetch_official_name(p.uuid)
             if name:
                 crud.update_player_name(db, p, name=name, is_offline=False)
                 updated += 1
@@ -145,7 +146,7 @@ def refresh_missing_official_names() -> dict:
     return stats
 
 
-def refresh_offline_names() -> dict:
+async def refresh_offline_names() -> dict:
     """逻辑3：为所有 is_offline==True 的记录再次尝试获取官方玩家名；若获取成功且不同则更新，并将 is_offline=False。"""
     updated = 0
     tried = 0
@@ -153,7 +154,7 @@ def refresh_offline_names() -> dict:
         players = db.query(models.Player).filter(models.Player.is_offline == True).all()  # noqa: E712
         for p in players:
             tried += 1
-            name = _fetch_official_name(p.uuid)
+            name = await _fetch_official_name(p.uuid)
             if name and name != (p.player_name or None):
                 crud.update_player_name(db, p, name=name, is_offline=False)
                 updated += 1

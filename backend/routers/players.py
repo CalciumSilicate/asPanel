@@ -2,6 +2,8 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from pathlib import Path
+import json
 
 from backend import crud, models, schemas
 from backend.auth import require_role
@@ -35,19 +37,47 @@ async def refresh_uuids(_user: models.User = Depends(require_role(Role.ADMIN))):
 @router.post("/refresh-names-official")
 async def refresh_names_official(_user: models.User = Depends(require_role(Role.ADMIN))):
     """逻辑2（触发）：为 player_name 为空且 is_offline=False 的记录尝试解析正版玩家名；失败则标记 is_offline=True。"""
-    return player_manager.refresh_missing_official_names()
+    return await player_manager.refresh_missing_official_names()
 
 
 @router.post("/refresh-names-offline")
 async def refresh_names_offline(_user: models.User = Depends(require_role(Role.ADMIN))):
     """逻辑3（触发）：为 is_offline=True 的记录再次尝试解析玩家名；若成功则更新并设置 is_offline=False。"""
-    return player_manager.refresh_offline_names()
+    return await player_manager.refresh_offline_names()
 
 
 @router.post("/refresh-playtime")
 async def refresh_playtime(_user: models.User = Depends(require_role(Role.ADMIN))):
     """逻辑4（触发）：为所有玩家重算各服务器的时长（读取 world/stats/<uuid>.json）。"""
     return player_manager.recalc_all_play_time()
+
+
+@router.get("/whitelist-uuids", response_model=List[str])
+async def get_whitelist_uuids(db: Session = Depends(get_db),
+                              _user: models.User = Depends(require_role(Role.USER))):
+    """聚合所有服务器 `<server_path>/server/whitelist.json` 中的 uuid 并去重返回。
+    - 文件不存在或解析失败的服务器将跳过。
+    - whitelist.json 典型为数组对象，包含键 `uuid` 与 `name`。
+    """
+    uuids: set[str] = set()
+    servers = crud.get_all_servers(db)
+    for s in servers:
+        try:
+            server_root = Path(s.path) / 'server'
+            wl = server_root / 'whitelist.json'
+            if not wl.exists():
+                continue
+            data = json.loads(wl.read_text(encoding='utf-8'))
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        u = item.get('uuid')
+                        if isinstance(u, str) and u:
+                            uuids.add(u)
+        except Exception:
+            # 单个服务器异常忽略，继续收集其他服务器
+            continue
+    return sorted(uuids)
 
 
 @router.patch("/{player_id}/name", response_model=schemas.Player)
