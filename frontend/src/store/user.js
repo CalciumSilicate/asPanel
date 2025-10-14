@@ -10,6 +10,7 @@ export const user = reactive({
   username: '',
   email: '',
   avatar_url: '', // 例如，后端返回 "/avatars/user_1.png"
+  role: 'GUEST', // 后端返回的角色：GUEST/USER/HELPER/ADMIN/OWNER
 });
 
 // 用于破坏头像缓存的版本号。
@@ -41,6 +42,14 @@ export const fullAvatarUrl = computed(() => {
   // 如果用户没有设置头像，返回 undefined，el-avatar 会显示默认的 icon
   return undefined;
 });
+
+// 角色等级映射与便捷检查
+const ROLE_LEVELS = { GUEST: 0, USER: 1, HELPER: 2, ADMIN: 3, OWNER: 4 };
+export const roleLevel = computed(() => ROLE_LEVELS[user.role] ?? 0);
+export const hasRole = (required) => {
+  const target = ROLE_LEVELS[required] ?? 0;
+  return roleLevel.value >= target;
+};
 
 // 从后端获取用户信息的函数
 export const fetchUser = async () => {

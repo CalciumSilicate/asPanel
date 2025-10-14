@@ -11,7 +11,8 @@ from backend import schemas, models
 from backend.core.config import CPU_PERCENT_INTERVAL
 from backend.database import get_db
 from backend.dependencies import mcdr_manager, task_manager
-from backend.schemas import TaskStatus, TaskType
+from backend.schemas import TaskStatus, TaskType, Role
+from backend.auth import require_role
 
 router = APIRouter(
     prefix="/api",
@@ -29,7 +30,7 @@ async def cpu_sampler():
 
 
 @router.get("/system/stats")
-async def get_system_stats(db: Session = Depends(get_db)):
+async def get_system_stats(db: Session = Depends(get_db), _user=Depends(require_role(Role.USER))):
     servers = db.query(models.Server).all()
     results = await asyncio.gather(*[mcdr_manager.get_status(s.id, s.path) for s in servers])
     running_servers = sum(1 for st, _ in results if st == "running")
@@ -37,7 +38,7 @@ async def get_system_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/system/status")
-async def get_system_status():
+async def get_system_status(_user=Depends(require_role(Role.USER))):
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage('/')
     return {
@@ -52,7 +53,7 @@ async def get_system_status():
 
 
 @router.get("/system/task-progress/{task_id}", response_model=schemas.Task)
-def get_download_progress(task_id: str):
+def get_download_progress(task_id: str, _user=Depends(require_role(Role.USER))):
     task = task_manager.get_task(task_id)
     if not task:
         raise HTTPException(404, "任务未找到")
@@ -77,7 +78,7 @@ def get_download_progress(task_id: str):
 
 
 @router.get("/utils/check-port", response_model=schemas.PortStatusResponse, tags=["Utilities"])
-def check_port_availability(port: int):
+def check_port_availability(port: int, _user=Depends(require_role(Role.USER))):
     if not (1024 <= port <= 65535):
         raise HTTPException(400, "端口号必须在 1024-65535 之间")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

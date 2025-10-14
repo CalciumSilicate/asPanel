@@ -11,10 +11,11 @@ from backend import crud, schemas
 from backend.database import get_db
 from backend.core.config import ARCHIVE_STORAGE_PATH
 from backend.dependencies import task_manager
-from backend.schemas import TaskType, TaskStatus
+from backend.schemas import TaskType, TaskStatus, Role
 from backend.tasks.background import \
     background_create_archive, background_restore_archive, background_process_upload
 from backend.logger import logger
+from backend.auth import require_role
 
 router = APIRouter(
     prefix="/api",
@@ -23,7 +24,7 @@ router = APIRouter(
 
 
 @router.get("/archives", response_model=List[schemas.Archive])
-def read_archives(db: Session = Depends(get_db)):
+def read_archives(db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
     db_archives = crud.get_archives(db)
     response_archives = [schemas.Archive.model_validate(archive) for archive in db_archives]
     return response_archives
@@ -34,6 +35,7 @@ async def create_archive_from_server(
         server_id: int,
         background_tasks: BackgroundTasks,
         db: Session = Depends(get_db),
+        _user=Depends(require_role(Role.ADMIN)),
 ):
     db_server = crud.get_server_by_id(db, server_id)
     if not db_server:
@@ -48,7 +50,8 @@ async def upload_archive(
         mc_version: str,
         file: UploadFile,
         background_tasks: BackgroundTasks,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        _user=Depends(require_role(Role.HELPER))
 ):
     if not any(file.filename.endswith(ext) for ext in ['.zip', '.tar', '.gz', '.7z', '.rar']):
         raise HTTPException(status_code=400, detail="不支持的文件格式。仅支持 zip, tar, tar.gz, 7z, rar。")
@@ -64,7 +67,7 @@ async def upload_archive(
 
 
 @router.get("/archives/active-tasks", response_model=List[schemas.Task])
-async def get_active_archive_tasks():
+async def get_active_archive_tasks(_user=Depends(require_role(Role.HELPER))):
     """获取所有正在进行的存档任务的列表"""
     active_list = []
     # 遍历全局任务字典
@@ -85,7 +88,8 @@ async def get_active_archive_tasks():
 async def download_archive(
         archive_id: int,
         background_tasks: BackgroundTasks,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        _user=Depends(require_role(Role.ADMIN))
 ):
     """
     - 'SERVER' 类型，发送 .tar.gz 文件
@@ -138,7 +142,7 @@ async def download_archive(
 
 
 @router.delete("/archives/delete/{archive_id}", status_code=204)
-def delete_archive(archive_id: int, db: Session = Depends(get_db)):
+def delete_archive(archive_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
     db_archive = crud.delete_archive(db, archive_id)
     file_path = db_archive.path
     if os.path.exists(file_path):
@@ -156,7 +160,7 @@ def delete_archive(archive_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/archives/batch-delete", status_code=204)
-def batch_delete_archives(payload: schemas.BatchActionPayload, db: Session = Depends(get_db)):
+def batch_delete_archives(payload: schemas.BatchActionPayload, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
     if not payload.ids:
         raise HTTPException(status_code=400, detail="No archive IDs provided")
     archives_to_delete = crud.delete_archives_by_ids(db, payload.ids)
@@ -180,7 +184,8 @@ async def restore_archive_to_server(
         archive_id: int,
         payload: schemas.RestorePayload,
         background_tasks: BackgroundTasks,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        _user=Depends(require_role(Role.HELPER))
 ):
     if not crud.get_archive_by_id(db, archive_id):
         raise HTTPException(status_code=404, detail="源存档未找到。")

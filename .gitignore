@@ -28,3 +28,5 @@ storages/
 .env.*
 
 reference/
+openapi_endpoints
+list_openapi_endpoints.py

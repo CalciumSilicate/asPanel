@@ -16,6 +16,8 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend import crud
 from backend.logger import logger
+from backend.auth import require_role
+from backend.schemas import Role
 
 router = APIRouter(prefix="/api/configs", tags=["Configurations"])
 
@@ -297,7 +299,7 @@ class ConfigUpdatePayload(BaseModel):
 
 
 @router.get("/{plugin}/{server_id}", response_model=ConfigResponse)
-async def get_config(plugin: str, server_id: int, db: Session = Depends(get_db)):
+async def get_config(plugin: str, server_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
     spec = _spec_or_404(plugin)
     server = crud.get_server_by_id(db, server_id)
     if not server:
@@ -327,7 +329,7 @@ async def get_config(plugin: str, server_id: int, db: Session = Depends(get_db))
 
 
 @router.patch("/{plugin}/{server_id}")
-async def update_config(plugin: str, server_id: int, payload: ConfigUpdatePayload, db: Session = Depends(get_db)):
+async def update_config(plugin: str, server_id: int, payload: ConfigUpdatePayload, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
     spec = _spec_or_404(plugin)
     server = crud.get_server_by_id(db, server_id)
     if not server:
@@ -368,7 +370,7 @@ class RawPayload(BaseModel):
 
 
 @router.get("/{plugin}/{server_id}/raw", response_class=Response)
-async def get_raw(plugin: str, server_id: int, db: Session = Depends(get_db)):
+async def get_raw(plugin: str, server_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
     spec = _spec_or_404(plugin)
     server = crud.get_server_by_id(db, server_id)
     if not server:
@@ -395,7 +397,7 @@ async def get_raw(plugin: str, server_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{plugin}/{server_id}/raw")
-async def save_raw(plugin: str, server_id: int, payload: RawPayload, db: Session = Depends(get_db)):
+async def save_raw(plugin: str, server_id: int, payload: RawPayload, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
     spec = _spec_or_404(plugin)
     server = crud.get_server_by_id(db, server_id)
     if not server:

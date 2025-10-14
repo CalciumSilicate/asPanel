@@ -2,6 +2,7 @@
 
 import { createRouter, createWebHistory } from 'vue-router';
 import MainLayout from '../layout/MainLayout.vue';
+import { hasRole, fetchUser } from '@/store/user';
 
 const routes = [
     {
@@ -23,85 +24,99 @@ const routes = [
             {
                 path: 'dashboard',
                 name: 'Dashboard',
-                component: () => import('../views/Dashboard.vue')
+                component: () => import('../views/Dashboard.vue'),
+                meta: { requiredRole: 'GUEST' }
             },
             {
                 path: 'servers',
                 name: 'ServerList',
-                component: () => import('../views/ServerList.vue')
+                component: () => import('../views/ServerList.vue'),
+                meta: { requiredRole: 'USER' }
             },
             {
                 path: 'mcdr-plugin-explorer',
                 name: 'MCDRPluginExplorer',
-                component: () => import('../views/MCDRPluginExplorer.vue')
+                component: () => import('../views/MCDRPluginExplorer.vue'),
+                meta: { requiredRole: 'HELPER' }
             },
             {
                 path: 'db-plugin-manager',
                 name: 'DbPluginExplorer',
-                component: () => import('../views/DbPluginExplorer.vue')
+                component: () => import('../views/DbPluginExplorer.vue'),
+                meta: { requiredRole: 'ADMIN' }
             },
             {
                 path: 'server-plugins',
                 name: 'ServerPluginManager',
-                component: () => import('../views/ServerPluginManager.vue')
+                component: () => import('../views/ServerPluginManager.vue'),
+                meta: { requiredRole: 'HELPER' }
             },
             {
                 path: 'tools/mods-manager',
                 name: 'ModsManager',
-                component: () => import('../views/ModsManager.vue')
+                component: () => import('../views/ModsManager.vue'),
+                meta: { requiredRole: 'ADMIN' }
             },
             {
                 path: 'tools/superflat',
                 name: 'SuperFlatWorld',
-                component: () => import('../views/SuperFlatWorld.vue')
+                component: () => import('../views/SuperFlatWorld.vue'),
+                meta: { requiredRole: 'USER' }
             },
             {
                 path: 'tools/prime-backup',
                 name: 'PrimeBackup',
-                component: () => import('../views/PrimeBackup.vue')
+                component: () => import('../views/PrimeBackup.vue'),
+                meta: { requiredRole: 'USER' }
             },
             {
                 path: 'tools/server-link',
                 name: 'ServerLink',
-                component: () => import('../views/ServerLink.vue')
+                component: () => import('../views/ServerLink.vue'),
+                meta: { requiredRole: 'USER' }
             },
             // 插件配置
-            { path: 'server-config/via-version-config', name: 'ViaVersionConfig', component: () => import('../views/plugin-config/ViaVersionConfig.vue') },
-            { path: 'server-config/velocity-proxy-config', name: 'VelocityProxyConfig', component: () => import('../views/plugin-config/VelocityProxyConfig.vue') },
-            { path: 'server-config/prime-backup-config', name: 'PrimeBackupConfig', component: () => import('../views/plugin-config/PrimeBackupConfig.vue') },
-            { path: 'server-config/auto-plugin-reloader-config', name: 'AutoPluginReloaderConfig', component: () => import('../views/plugin-config/AutoPluginReloaderConfig.vue') },
-            { path: 'server-config/bili-live-helper-config', name: 'BiliLiveHelperConfig', component: () => import('../views/plugin-config/BiliLiveHelperConfig.vue') },
-            { path: 'server-config/where-is-config', name: 'WhereIsConfig', component: () => import('../views/plugin-config/WhereIsConfig.vue') },
-            { path: 'server-config/crash-restart-config', name: 'CrashRestartConfig', component: () => import('../views/plugin-config/CrashRestartConfig.vue') },
-            { path: 'server-config/join-motd-config', name: 'JoinMOTDConfig', component: () => import('../views/plugin-config/JoinMOTDConfig.vue') },
-            { path: 'server-config/quick-backup-multi-config', name: 'QuickBackupMultiConfig', component: () => import('../views/plugin-config/QuickBackupMultiConfig.vue') },
+            { path: 'server-config/via-version-config', name: 'ViaVersionConfig', component: () => import('../views/plugin-config/ViaVersionConfig.vue'), meta: { requiredRole: 'ADMIN' } },
+            { path: 'server-config/velocity-proxy-config', name: 'VelocityProxyConfig', component: () => import('../views/plugin-config/VelocityProxyConfig.vue'), meta: { requiredRole: 'ADMIN' } },
+            { path: 'server-config/prime-backup-config', name: 'PrimeBackupConfig', component: () => import('../views/plugin-config/PrimeBackupConfig.vue'), meta: { requiredRole: 'ADMIN' } },
+            { path: 'server-config/auto-plugin-reloader-config', name: 'AutoPluginReloaderConfig', component: () => import('../views/plugin-config/AutoPluginReloaderConfig.vue'), meta: { requiredRole: 'ADMIN' } },
+            { path: 'server-config/bili-live-helper-config', name: 'BiliLiveHelperConfig', component: () => import('../views/plugin-config/BiliLiveHelperConfig.vue'), meta: { requiredRole: 'ADMIN' } },
+            { path: 'server-config/where-is-config', name: 'WhereIsConfig', component: () => import('../views/plugin-config/WhereIsConfig.vue'), meta: { requiredRole: 'ADMIN' } },
+            { path: 'server-config/crash-restart-config', name: 'CrashRestartConfig', component: () => import('../views/plugin-config/CrashRestartConfig.vue'), meta: { requiredRole: 'ADMIN' } },
+            { path: 'server-config/join-motd-config', name: 'JoinMOTDConfig', component: () => import('../views/plugin-config/JoinMOTDConfig.vue'), meta: { requiredRole: 'ADMIN' } },
+            { path: 'server-config/quick-backup-multi-config', name: 'QuickBackupMultiConfig', component: () => import('../views/plugin-config/QuickBackupMultiConfig.vue'), meta: { requiredRole: 'ADMIN' } },
             {
                 path: 'tools/litematica',
                 name: 'Litematica',
-                component: () => import('../views/Litematica.vue')
+                component: () => import('../views/Litematica.vue'),
+                meta: { requiredRole: 'USER' }
             },
             {
                 path: 'chat',
                 name: 'ChatRoom',
-                component: () => import('../views/ChatRoom.vue')
+                component: () => import('../views/ChatRoom.vue'),
+                meta: { requiredRole: 'USER' }
             },
             {
                 path: 'settings',
                 name: 'Settings',
-                component: () => import('../views/Settings.vue')
+                component: () => import('../views/Settings.vue'),
+                meta: { requiredRole: 'ADMIN' }
             },
             {
                 // 【新增】存档管理页面的路由
                 // 它必须作为 MainLayout 的子路由，才能被正确渲染在布局内部
                 path: 'tools/archives',
                 name: 'ArchiveManagement',
-                component: () => import('../views/ArchiveManagement.vue')
+                component: () => import('../views/ArchiveManagement.vue'),
+                meta: { requiredRole: 'HELPER' }
             },
             {
                 path: 'console/:server_id',
                 name: 'Console',
                 component: () => import('../views/Console.vue'),
-                props: true
+                props: true,
+                meta: { requiredRole: 'USER' }
             }
             // 未来可以在此添加 statistics, settings 等子路由
         ]
@@ -119,7 +134,7 @@ const router = createRouter({
 });
 
 // 全局路由守卫 (逻辑不变)
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
     const token = localStorage.getItem('token');
     const publicPages = ['/login', '/register'];
     const authRequired = to.matched.some(record => record.meta.requiresAuth);
@@ -132,6 +147,20 @@ router.beforeEach((to, from, next) => {
     }
 
     if (publicPages.includes(to.path) && token) {
+        return next('/dashboard');
+    }
+
+    // 按需拉取用户信息（用于角色判断）
+    try {
+        if (authRequired && token) {
+            await fetchUser();
+        }
+    } catch (e) {
+        // 忽略用户信息拉取失败，后端会最终裁决
+    }
+
+    const requiredRole = (to.meta as any)?.requiredRole as string | undefined;
+    if (requiredRole && !hasRole(requiredRole)) {
         return next('/dashboard');
     }
 

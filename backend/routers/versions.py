@@ -1,9 +1,11 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from cachetools import TTLCache
 from backend.core.api import get_minecraft_versions_raw, get_velocity_versions_raw, get_fabric_game_version_list, \
     get_fabric_loader_version_list
 from backend import schemas
+from backend.auth import require_role
+from backend.schemas import Role
 
 router = APIRouter(
     prefix="/api",
@@ -13,7 +15,7 @@ velocity_version_cache = TTLCache(maxsize=1, ttl=3600)
 
 
 @router.get("/velocity/versions", response_model=schemas.PaperVersionManifest, tags=["Velocity"])
-async def get_velocity_versions():
+async def get_velocity_versions(_user=Depends(require_role(Role.ADMIN))):
     _ = await get_velocity_versions_raw()
     result = {
         "project": {
@@ -30,18 +32,18 @@ async def get_velocity_versions():
 
 
 @router.get("/minecraft/versions", response_model=schemas.MinecraftVersionManifest)
-async def get_minecraft_versions():
+async def get_minecraft_versions(_user=Depends(require_role(Role.USER))):
     _ = await get_minecraft_versions_raw()
     return schemas.MinecraftVersionManifest(**_)
 
 
 @router.get("/fabric/game-versions", response_model=schemas.FabricGameVersionManifest)
-async def get_fabric_games():
+async def get_fabric_games(_user=Depends(require_role(Role.USER))):
     _ = await get_fabric_game_version_list()
     return schemas.FabricGameVersionManifest(versions=_)
 
 
 @router.get("/fabric/loader-versions", response_model=schemas.FabricLoaderVersionManifest)
-async def get_fabric_versions(version_id: str):
+async def get_fabric_versions(version_id: str, _user=Depends(require_role(Role.USER))):
     _ = await get_fabric_loader_version_list(version_id)
     return schemas.FabricLoaderVersionManifest(versions=_)

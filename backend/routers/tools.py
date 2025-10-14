@@ -105,7 +105,7 @@ async def get_pb_show(server_id: int, id: int = Query(..., description="backup i
 
 
 @router.post("/tools/pb/{server_id}/export")
-async def post_pb_export(server_id: int, payload: schemas.PBExportPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db), _user=Depends(require_role(Role.USER))):
+async def post_pb_export(server_id: int, payload: schemas.PBExportPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
     return await pb.pb_export(db, server_id, payload.id, background_tasks)
 
 
@@ -131,7 +131,7 @@ async def post_pb_fuse(server_id: int, mount_path: str, _user=Depends(require_ro
 
 
 @router.post("/tools/pb/{server_id}/restore")
-async def post_pb_restore(server_id: int, payload: schemas.PBRestorePayload, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
+async def post_pb_restore(server_id: int, payload: schemas.PBRestorePayload, db: Session = Depends(get_db), _user=Depends(require_role(Role.USER))):
     return await pb.pb_restore(db, server_id, payload.id, payload.target_server_id)
 
 
@@ -570,7 +570,7 @@ async def chat_history(group_id: int, limit: int = 200, offset: int = 0, db: Ses
 
 
 @router.post("/tools/chat/send", response_model=schemas.ChatMessageOut)
-async def chat_send(payload: schemas.ChatSendPayload, db: Session = Depends(get_db), current_user: _models.User = Depends(get_current_user)):
+async def chat_send(payload: schemas.ChatSendPayload, db: Session = Depends(get_db), current_user: _models.User = Depends(require_role(Role.USER))):
     level = payload.level or "NORMAL"
     if level == "NORMAL" and not payload.group_id:
         raise HTTPException(status_code=400, detail="NORMAL 级别需要提供 group_id")

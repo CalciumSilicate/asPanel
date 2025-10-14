@@ -31,7 +31,7 @@ router = APIRouter(
 
 # --- Server Endpoints ---
 @router.get('/servers', response_model=List[schemas.ServerDetail])
-async def get_servers(db: Session = Depends(get_db), _user: models.User = Depends(require_role(Role.GUEST))):
+async def get_servers(db: Session = Depends(get_db), _user: models.User = Depends(require_role(Role.USER))):
     return await server_service.get_servers_with_details(db)
 
 
@@ -74,8 +74,8 @@ async def delete_server(server_id: int, db: Session = Depends(get_db),
 # --- Server Action Endpoints ---
 @router.post('/servers/start')
 async def start_server(server_id: int, db: Session = Depends(get_db),
-                       _user: models.User = Depends(require_role(Role.USER))):
-    # PERMISSION: USER
+                       _user: models.User = Depends(require_role(Role.ADMIN))):
+    # PERMISSION: ADMIN
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(404, "Server not found")
@@ -87,8 +87,8 @@ async def start_server(server_id: int, db: Session = Depends(get_db),
 
 @router.post("/servers/stop")
 async def stop_server(server_id: int, db: Session = Depends(get_db),
-                      _user: models.User = Depends(require_role(Role.USER))):
-    # PERMISSION: USER
+                      _user: models.User = Depends(require_role(Role.ADMIN))):
+    # PERMISSION: ADMIN
     server = crud.get_server_by_id(db, server_id)
     await mcdr_manager.stop(server)
     return {"status": "success"}
@@ -114,8 +114,8 @@ async def force_kill_server(server_id: int, db: Session = Depends(get_db),
 
 @router.post("/servers/restart")
 async def restart_server_endpoint(server_id: int, db: Session = Depends(get_db),
-                                  _user: models.User = Depends(require_role(Role.HELPER))):
-    # PERMISSION: HELPER
+                                  _user: models.User = Depends(require_role(Role.ADMIN))):
+    # PERMISSION: ADMIN
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(404, "Server not found")
@@ -127,8 +127,8 @@ async def restart_server_endpoint(server_id: int, db: Session = Depends(get_db),
 
 @router.get("/servers/status")
 async def get_server_status(server_id: int, db: Session = Depends(get_db),
-                            _user: models.User = Depends(require_role(Role.GUEST))):
-    # PERMISSION: GUEST
+                            _user: models.User = Depends(require_role(Role.USER))):
+    # PERMISSION: USER
     server = crud.get_server_by_id(db, server_id)
     st, _ = await mcdr_manager.get_status(server_id, server.path)
     return {"status": st}
@@ -170,8 +170,8 @@ async def batch_action_on_servers(action: str, payload: schemas.BatchActionPaylo
 
 @router.get("/servers/config", response_model=schemas.ServerConfigResponse)
 async def get_server_config(server_id: int, db: Session = Depends(get_db),
-                            _user: models.User = Depends(require_role(Role.HELPER))):
-    # PERMISSION: HELPER
+                            _user: models.User = Depends(require_role(Role.ADMIN))):
+    # PERMISSION: ADMIN
     db_server = crud.get_server_by_id(db, server_id)
     if not db_server:
         raise HTTPException(404, "Server not found")
@@ -386,8 +386,8 @@ async def save_server_config(
 
 @router.get("/servers/resource-usage")
 async def get_servers_resource_usage(db: Session = Depends(get_db),
-                                     _user: models.User = Depends(require_role(Role.GUEST))):
-    # PERMISSION: GUEST
+                                     _user: models.User = Depends(require_role(Role.USER))):
+    # PERMISSION: USER
     usage_data = []
     for server_id, process in mcdr_manager.processes.items():
         if process.returncode is None and mcdr_manager.java_pid.get(server_id):
@@ -412,9 +412,9 @@ async def get_servers_resource_usage(db: Session = Depends(get_db),
 async def read_server_logs(
         server_id: int, line_limit: int = 200,
         db: Session = Depends(get_db),
-        _user: models.User = Depends(require_role(Role.HELPER))
+        _user: models.User = Depends(require_role(Role.ADMIN))
 ):
-    # PERMISSION: HELPER
+    # PERMISSION: ADMIN
     server = crud.get_server_by_id(db, server_id=server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
@@ -430,9 +430,9 @@ async def get_config_file(
         server_id: int,
         file_type: str,
         db: Session = Depends(get_db),
-        _user: models.User = Depends(require_role(Role.HELPER))
+        _user: models.User = Depends(require_role(Role.ADMIN))
 ):
-    # PERMISSION: HELPER
+    # PERMISSION: ADMIN
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")

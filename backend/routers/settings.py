@@ -14,7 +14,7 @@ router = APIRouter(
 
 
 @router.get("", response_model=schemas.SystemSettings)
-async def get_settings(db: Session = Depends(get_db), _user: models.User = Depends(require_role(Role.GUEST))):
+async def get_settings(db: Session = Depends(get_db), _user: models.User = Depends(require_role(Role.ADMIN))):
     """获取系统级设置。
 
     说明：
@@ -33,4 +33,3 @@ async def update_settings(payload: schemas.SystemSettingsUpdate,
     """更新系统级设置（部分字段）。需要 ADMIN 权限。"""
     data = crud.update_system_settings(db, payload.model_dump(exclude_unset=True))
     return schemas.SystemSettings(**data)
-

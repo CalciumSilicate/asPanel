@@ -60,13 +60,13 @@
             </el-icon>
             <span>仪表盘</span>
           </el-menu-item>
-          <el-menu-item index="/chat">
+          <el-menu-item index="/chat" v-if="hasRole('USER')">
             <el-icon>
               <ChatDotRound/>
             </el-icon>
             <span>聊天室</span>
           </el-menu-item>
-          <el-menu-item index="/servers">
+          <el-menu-item index="/servers" v-if="hasRole('USER')">
             <el-icon>
               <Tickets/>
             </el-icon>
@@ -77,26 +77,26 @@
 
 
           <!-- 插件管理 -->
-          <el-sub-menu index="plugin-management">
+          <el-sub-menu index="plugin-management" v-if="hasRole('HELPER')">
             <template #title>
               <el-icon>
                 <Management/>
               </el-icon>
               <span>插件管理</span>
             </template>
-            <el-menu-item index="/server-plugins">
+            <el-menu-item index="/server-plugins" v-if="hasRole('HELPER')">
               <el-icon>
                 <Cpu/>
               </el-icon>
               <span>服务器插件</span>
             </el-menu-item>
-            <el-menu-item index="/mcdr-plugin-explorer">
+            <el-menu-item index="/mcdr-plugin-explorer" v-if="hasRole('HELPER')">
               <el-icon>
                 <Shop/>
               </el-icon>
               <span>联网插件库</span>
             </el-menu-item>
-            <el-menu-item index="/db-plugin-manager">
+            <el-menu-item index="/db-plugin-manager" v-if="hasRole('ADMIN')">
               <el-icon>
                 <Coin/>
               </el-icon>
@@ -105,7 +105,7 @@
           </el-sub-menu>
 
           <!-- Mods 管理 -->
-          <el-menu-item index="/tools/mods-manager">
+          <el-menu-item index="/tools/mods-manager" v-if="hasRole('ADMIN')">
             <el-icon>
               <Grid/>
             </el-icon>
@@ -114,7 +114,7 @@
 
 
           <!-- 插件配置（原“服务器配置”）移动至工具前 -->
-          <el-sub-menu index="server-config">
+          <el-sub-menu index="server-config" v-if="hasRole('ADMIN')">
             <template #title>
               <el-icon>
                 <SetUp/>
@@ -197,7 +197,7 @@
               </el-icon>
               <span>工具</span>
             </template>
-            <el-menu-item index="/tools/prime-backup">
+            <el-menu-item index="/tools/prime-backup" v-if="hasRole('USER')">
               <el-icon>
                 <Umbrella/>
               </el-icon>
@@ -205,43 +205,43 @@
             </el-menu-item>
 
             <!-- 存档管理 -->
-            <el-menu-item index="/tools/archives">
+            <el-menu-item index="/tools/archives" v-if="hasRole('HELPER')">
               <el-icon>
                 <Files/>
               </el-icon>
               <span>存档管理</span>
             </el-menu-item>
-            <el-menu-item index="/tools/superflat">
+            <el-menu-item index="/tools/superflat" v-if="hasRole('USER')">
               <el-icon>
                 <Grid/>
               </el-icon>
               <span>超平坦世界</span>
             </el-menu-item>
-            <el-menu-item index="/tools/server-link">
+            <el-menu-item index="/tools/server-link" v-if="hasRole('USER')">
               <el-icon>
                 <Link/>
               </el-icon>
               <span>Server Link</span>
             </el-menu-item>
-            <el-menu-item index="/tools/qq-bot" disabled>
+            <el-menu-item index="/tools/qq-bot" disabled v-if="hasRole('ADMIN')">
               <el-icon>
                 <Promotion/>
               </el-icon>
               <span>QQ机器人</span>
             </el-menu-item>
-            <el-menu-item index="/tools/world-map" disabled>
+            <el-menu-item index="/tools/world-map" disabled v-if="hasRole('USER')">
               <el-icon>
                 <MapLocation/>
               </el-icon>
               <span>世界地图</span>
             </el-menu-item>
-            <el-menu-item index="/tools/litematica">
+            <el-menu-item index="/tools/litematica" v-if="hasRole('USER')">
               <el-icon>
                 <Printer/>
               </el-icon>
               <span>Litematica</span>
             </el-menu-item>
-            <el-menu-item index="/tools/pcrc" disabled>
+            <el-menu-item index="/tools/pcrc" disabled v-if="hasRole('USER')">
               <el-icon>
                 <VideoCamera/>
               </el-icon>
@@ -250,19 +250,19 @@
           </el-sub-menu>
 
           <!-- 系统功能 -->
-          <el-menu-item index="/statistics" disabled>
+          <el-menu-item index="/statistics" disabled v-if="hasRole('GUEST')">
             <el-icon>
               <TrendCharts/>
             </el-icon>
             <span>数据统计</span>
           </el-menu-item>
-          <el-menu-item index="/player-management" disabled>
+          <el-menu-item index="/player-management" disabled v-if="hasRole('ADMIN')">
             <el-icon>
               <User/>
             </el-icon>
             <span>玩家管理</span>
           </el-menu-item>
-          <el-menu-item index="/settings">
+          <el-menu-item index="/settings" v-if="hasRole('ADMIN')">
             <el-icon>
               <Setting/>
             </el-icon>
@@ -309,7 +309,7 @@ import {
   // Theme toggle icons
   Sunny, Moon
 } from '@element-plus/icons-vue';
-import {user, fullAvatarUrl, fetchUser, clearUser, refreshAvatar} from '@/store/user';
+import {user, fullAvatarUrl, fetchUser, clearUser, refreshAvatar, hasRole} from '@/store/user';
 import AvatarUploader from '@/components/AvatarUploader.vue';
 
 // 折叠状态由全局 ui store 提供

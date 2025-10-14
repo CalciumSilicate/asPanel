@@ -108,7 +108,7 @@ async def list_server_mods(
         server_id: int,
         skip_enrich: bool = Query(False, description='跳过元数据补全与哈希计算以提升速度'),
         db: Session = Depends(get_db),
-        _user=Depends(require_role(Role.USER))
+        _user=Depends(require_role(Role.ADMIN))
 ):
     """列出服务器 mods 目录下的模组，并尝试从本地数据库或 Modrinth 补全元信息。
 
@@ -211,7 +211,7 @@ async def list_server_mods(
 
 
 @router.get('/mods/overview/{server_id}')
-async def mods_overview(server_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.USER))):
+async def mods_overview(server_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
     """提供 mods 目录的概览信息。"""
     server = crud.get_server_by_id(db, server_id)
     if not server:
@@ -247,7 +247,7 @@ async def mods_overview(server_id: int, db: Session = Depends(get_db), _user=Dep
 
 
 @router.get('/mods/usage/total')
-async def mods_usage_total(db: Session = Depends(get_db), _user=Depends(require_role(Role.USER))):
+async def mods_usage_total(db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
     """汇总所有服务器 mods 目录的总占用。"""
     servers = crud.get_all_servers(db)
     total = 0
@@ -323,7 +323,7 @@ async def delete_mod(server_id: int, file_name: str, db: Session = Depends(get_d
 
 @router.get('/mods/download/{server_id}/{file_name}')
 async def download_mod(server_id: int, file_name: str, db: Session = Depends(get_db),
-                       _user=Depends(require_role(Role.USER))):
+                       _user=Depends(require_role(Role.ADMIN))):
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
@@ -473,7 +473,7 @@ async def search_modrinth(
         game_version: Optional[str] = None,
         loader: Optional[str] = None,
         project_type: Optional[str] = None,
-        _user=Depends(require_role(Role.USER))
+        _user=Depends(require_role(Role.ADMIN))
 ):
     """代理 Modrinth 搜索接口。简化版，仅支持 query + 可选版本/加载器过滤。"""
     base = 'https://api.modrinth.com/v2/search'
@@ -505,7 +505,7 @@ async def modrinth_versions(
         project_id: str,
         game_version: Optional[str] = None,
         loader: Optional[str] = None,
-        _user=Depends(require_role(Role.USER))
+        _user=Depends(require_role(Role.ADMIN))
 ):
     """代理 Modrinth 项目的版本列表，并可选过滤。"""
     async with httpx.AsyncClient(timeout=30) as client:
@@ -978,7 +978,7 @@ async def _job_check_updates(server_id: int):
 
 
 @router.get('/mods/check-updates/{server_id}')
-async def check_updates(server_id: int, background_tasks: BackgroundTasks, _user=Depends(require_role(Role.USER))):
+async def check_updates(server_id: int, background_tasks: BackgroundTasks, _user=Depends(require_role(Role.ADMIN))):
     """将检查更新任务放入后台，立即返回提示前端稍后刷新。"""
     background_tasks.add_task(_job_check_updates, server_id)
     return {'status': 'accepted', 'message': '检查任务已开始，请稍后刷新'}

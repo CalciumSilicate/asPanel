@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from backend.core.api import get_mcdr_plugins_catalogue
 from backend import schemas, crud, models
 from backend.auth import require_role
+from backend.schemas import Role
 from backend.core.config import UPLOADED_PLUGINS_PATH
 from backend.core.utils import get_file_md5, get_file_sha256
 from backend.database import get_db, SessionLocal
@@ -26,14 +27,14 @@ router = APIRouter(
 
 
 @router.get("/plugins/mcdr/versions", response_model=schemas.PluginCatalogue)
-async def get_mcdr_catalogue():
+async def get_mcdr_catalogue(_user=Depends(require_role(Role.HELPER))):
     """获取 MCDR 官方插件市场目录"""
     catalogue_data = await get_mcdr_plugins_catalogue()
     return schemas.PluginCatalogue.model_validate(catalogue_data)
 
 
 @router.get("/plugins/server/{server_id}", response_model=schemas.ServerPlugins)
-async def get_server_plugins(server_id: int, db: Session = Depends(get_db)):
+async def get_server_plugins(server_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
     """获取指定服务器已安装的插件列表"""
     catalogue = await get_mcdr_catalogue()
     server_plugins = await server_service.get_server_plugins_info_by_id(server_id, db)
@@ -55,7 +56,8 @@ async def install_plugin_from_online(
         background_tasks: BackgroundTasks,
         plugin_id: str = Query(...),
         tag_name: str = Query("latest"),
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        _user=Depends(require_role(Role.HELPER))
 ):
     """
     从 MCDR 官方市场安装插件，并在后台处理其所有依赖。
@@ -82,7 +84,7 @@ async def install_plugin_from_online(
 
 
 @router.post("/plugins/upload", response_model=schemas.PluginDBRecord)
-async def upload_plugin(file: UploadFile, db: Session = Depends(get_db)):
+async def upload_plugin(file: UploadFile, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
     """上传插件到中央仓库"""
     storage_path, meta = await plugin_manager.save_uploaded_plugin(file)
 
@@ -105,13 +107,13 @@ async def upload_plugin(file: UploadFile, db: Session = Depends(get_db)):
 
 
 @router.get("/plugins/db", response_model=List[schemas.PluginDBRecord])
-def get_db_plugins(db: Session = Depends(get_db)):
+def get_db_plugins(db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
     """获取中央仓库中的所有插件"""
     return crud.get_all_plugins(db)
 
 
 @router.post("/plugins/server/{server_id}/install/from-db/{plugin_db_id}", status_code=status.HTTP_201_CREATED)
-async def install_plugin_from_db(server_id: int, plugin_db_id: int, db: Session = Depends(get_db)):
+async def install_plugin_from_db(server_id: int, plugin_db_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
     """从中央仓库安装插件到服务器"""
     server = crud.get_server_by_id(db, server_id)
     if not server:
@@ -140,7 +142,7 @@ async def install_plugin_from_db(server_id: int, plugin_db_id: int, db: Session 
 
 @router.post("/plugins/server/{server_id}/switch/{file_name}")
 async def switch_server_plugin(server_id: int, file_name: str, enable: Optional[bool] = None,
-                               db: Session = Depends(get_db)):
+                               db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
     """启用/禁用服务器上的一个插件"""
     server = crud.get_server_by_id(db, server_id)
     if not server:
@@ -155,7 +157,7 @@ async def switch_server_plugin(server_id: int, file_name: str, enable: Optional[
 
 
 @router.delete("/plugins/server/{server_id}/{file_name}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_server_plugin(server_id: int, file_name: str, db: Session = Depends(get_db)):
+async def delete_server_plugin(server_id: int, file_name: str, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
@@ -178,7 +180,7 @@ async def delete_server_plugin(server_id: int, file_name: str, db: Session = Dep
 
 
 @router.delete("/plugins/db/{plugin_db_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_db_plugin(plugin_db_id: int, db: Session = Depends(get_db)):
+async def delete_db_plugin(plugin_db_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
     """从中央仓库删除一个插件"""
     plugin_record = crud.get_plugin_by_id(db, plugin_db_id)
     if not plugin_record:
@@ -212,7 +214,8 @@ async def download_plugin_file(
         server_id: int,
         file_name: str,
         background_tasks: BackgroundTasks,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        _user=Depends(require_role(Role.HELPER))
 ):
     """
     下载服务器上指定名称的插件（文件或目录）。
