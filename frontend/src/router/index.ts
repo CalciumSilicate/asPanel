@@ -116,7 +116,7 @@ const routes = [
                 name: 'Console',
                 component: () => import('../views/Console.vue'),
                 props: true,
-                meta: { requiredRole: 'USER' }
+                meta: { requiredRole: 'ADMIN' }
             }
             // 未来可以在此添加 statistics, settings 等子路由
         ]
