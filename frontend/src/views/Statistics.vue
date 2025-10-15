@@ -7,7 +7,7 @@
         <div class="left-stack">
           <el-card shadow="never" class="rank-card">
             <template #header>
-              <div class="card-header">排行榜, 目前细微存在BUG</div>
+              <div class="card-header">排行榜, 目前存在细微BUG</div>
             </template>
 
             <!-- 横向柱状图（含 dataZoom） -->
