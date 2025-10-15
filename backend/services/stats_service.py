@@ -428,7 +428,12 @@ def _align_floor(ts: int, step: int) -> int:
 from typing import Dict
 from datetime import datetime, timedelta
 
-SUPPORTED_GRANULARITIES = {"10min", "30min", "1h", "12h", "24h", "1week", "1month", "6month", "1year"}
+# 支持的粒度（统一由日历对齐器处理）
+SUPPORTED_GRANULARITIES = {
+    "10min", "20min", "30min",
+    "1h", "6h", "12h", "24h",
+    "1week", "1month", "3month", "6month", "1year"
+}
 
 
 def _normalize_metrics(metrics: List[str], namespace: str) -> List[Tuple[str, str]]:
@@ -487,12 +492,24 @@ def list_metrics(db: Session, q: Optional[str] = None, limit: int = 50,
 
 def _align_down_calendar(ts: int, granularity: str, tz) -> int:
     dt = datetime.fromtimestamp(ts, tz)
+    if granularity == "10min":
+        minute = (dt.minute // 10) * 10
+        aligned = dt.replace(minute=minute, second=0, microsecond=0)
+        return int(aligned.timestamp())
+    if granularity == "20min":
+        minute = (dt.minute // 20) * 20
+        aligned = dt.replace(minute=minute, second=0, microsecond=0)
+        return int(aligned.timestamp())
     if granularity == "30min":
         minute = 0 if dt.minute < 30 else 30
         aligned = dt.replace(minute=minute, second=0, microsecond=0)
         return int(aligned.timestamp())
     if granularity == "1h":
         aligned = dt.replace(minute=0, second=0, microsecond=0)
+        return int(aligned.timestamp())
+    if granularity == "6h":
+        hour = (dt.hour // 6) * 6
+        aligned = dt.replace(hour=hour, minute=0, second=0, microsecond=0)
         return int(aligned.timestamp())
     if granularity == "12h":
         hour = 0 if dt.hour < 12 else 12
@@ -509,6 +526,17 @@ def _align_down_calendar(ts: int, granularity: str, tz) -> int:
     if granularity == "1month":
         start = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         return int(start.timestamp())
+    if granularity == "3month":
+        # 以季度为边界：1/4/7/10 月
+        q_start_month = 1
+        if dt.month >= 10:
+            q_start_month = 10
+        elif dt.month >= 7:
+            q_start_month = 7
+        elif dt.month >= 4:
+            q_start_month = 4
+        start = dt.replace(month=q_start_month, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return int(start.timestamp())
     if granularity == "6month":
         month = 1 if dt.month <= 6 else 7
         start = dt.replace(month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -521,6 +549,16 @@ def _align_down_calendar(ts: int, granularity: str, tz) -> int:
 
 def _next_boundary(ts: int, granularity: str, tz) -> int:
     dt = datetime.fromtimestamp(ts, tz)
+    if granularity == "10min":
+        minute = (dt.minute // 10) * 10
+        base = dt.replace(minute=minute, second=0, microsecond=0)
+        nxt = base + timedelta(minutes=10)
+        return int(nxt.timestamp())
+    if granularity == "20min":
+        minute = (dt.minute // 20) * 20
+        base = dt.replace(minute=minute, second=0, microsecond=0)
+        nxt = base + timedelta(minutes=20)
+        return int(nxt.timestamp())
     if granularity == "30min":
         minute = 0 if dt.minute < 30 else 30
         base = dt.replace(minute=minute, second=0, microsecond=0)
@@ -528,6 +566,11 @@ def _next_boundary(ts: int, granularity: str, tz) -> int:
         return int(nxt.timestamp())
     if granularity == "1h":
         nxt = dt.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        return int(nxt.timestamp())
+    if granularity == "6h":
+        hour = (dt.hour // 6) * 6
+        base = dt.replace(hour=hour, minute=0, second=0, microsecond=0)
+        nxt = base + timedelta(hours=6)
         return int(nxt.timestamp())
     if granularity == "12h":
         hour = 0 if dt.hour < 12 else 12
@@ -548,6 +591,17 @@ def _next_boundary(ts: int, granularity: str, tz) -> int:
         year = dt.year + (1 if dt.month == 12 else 0)
         month = 1 if dt.month == 12 else dt.month + 1
         nxt = dt.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return int(nxt.timestamp())
+    if granularity == "3month":
+        # 1->4->7->10->(next year 1)
+        if dt.month <= 3:
+            nxt = dt.replace(month=4, day=1, hour=0, minute=0, second=0, microsecond=0)
+        elif dt.month <= 6:
+            nxt = dt.replace(month=7, day=1, hour=0, minute=0, second=0, microsecond=0)
+        elif dt.month <= 9:
+            nxt = dt.replace(month=10, day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            nxt = dt.replace(year=dt.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
         return int(nxt.timestamp())
     if granularity == "6month":
         if dt.month <= 6:
@@ -582,20 +636,17 @@ def _align_up_calendar(ts: int, granularity: str, tz) -> int:
 
 def _build_boundaries_for_player(db: Session, *, player_id: int, metric_ids: List[int], granularity: str,
                                  start_ts: Optional[int], end_ts: Optional[int], server_ids: Optional[List[int]] = None) -> Tuple[List[int], Dict[int, int], int, int]:
-    """返回 (boundaries, delta_by_ts, first_boundary, end_boundary)
+    """构建边界并拉取该玩家在所选指标/服务器上的 delta 聚合。
 
-    注意：除 '10min' 外，其它粒度会将结束时间向后对齐到下一个边界（若 end 未提供则用当前时间）。
+    返回 (boundaries, delta_by_ts, start_anchor, end_boundary)
+    语义：边界序列表示连续的右端点，窗口均为 (prev, cur]，用于统一 (start, end]。
     """
     tz = get_tzinfo()
 
-    # 计算对齐后的结束边界（用于限制查询 & 构建边界）
+    # 统一对齐结束边界；若 end 缺省，取当前时间并向后对齐
     import time as _t
-    if granularity == "10min":
-        # 10min 保持现状：按记录时刻输出
-        effective_end_ts = end_ts
-    else:
-        base_end = int(end_ts if end_ts is not None else _t.time())
-        effective_end_ts = _align_up_calendar(base_end, granularity, tz)
+    base_end = int(end_ts if end_ts is not None else _t.time())
+    effective_end_ts = _align_up_calendar(base_end, granularity, tz)
 
     # 计算数据集中最早记录时间（不依赖 delta 是否存在，避免因无 delta 导致边界过晚）
     min_q = select(func.min(models.PlayerMetrics.ts)).where(
@@ -615,38 +666,25 @@ def _build_boundaries_for_player(db: Session, *, player_id: int, metric_ids: Lis
     )
     if server_ids:
         q = q.where(models.PlayerMetrics.server_id.in_(server_ids))
+    # 统一 (start, end]：大于 start，小于等于 end
     if start_ts is not None:
-        q = q.where(models.PlayerMetrics.ts >= start_ts)
+        q = q.where(models.PlayerMetrics.ts > start_ts)
     if effective_end_ts is not None:
         q = q.where(models.PlayerMetrics.ts <= effective_end_ts)
     rows = db.execute(q.group_by(models.PlayerMetrics.ts).order_by(models.PlayerMetrics.ts.asc())).all()
-    if not rows:
-        # 无数据时，也按对齐规则返回边界锚点（用于 total 计算）
-        if granularity == "10min":
-            return [], {}, 0, 0
-        seed = int(start_ts if start_ts is not None else (min_ts_all or (effective_end_ts or 0)))
-        start_anchor = _align_down_calendar(seed, granularity, tz)
-        end_boundary = int(effective_end_ts or start_anchor)
-        boundaries: List[int] = []
-        cur = start_anchor
-        while cur < end_boundary:
-            cur = _next_boundary(cur, granularity, tz)
-            boundaries.append(cur)
-        if not boundaries or boundaries[-1] != end_boundary:
-            boundaries.append(end_boundary)
-        return boundaries, {}, start_anchor, end_boundary
-
+    # 构建 delta_by_ts 映射
     delta_by_ts: Dict[int, int] = {int(ts): int(total or 0) for ts, total in rows}
-    ts_list = [int(ts) for ts, _ in rows]
-    # 使用数据集中全局最早时间作为起点与对齐基准（而非 delta 里出现的 first_ts）
-    first_ts = int(min_ts_all or ts_list[0])
 
-    if granularity == "10min":
-        boundaries = ts_list
-        return boundaries, delta_by_ts, first_ts, last_ts
-
-    start_anchor = _align_down_calendar((start_ts or first_ts), granularity, tz)
-    end_boundary = int(effective_end_ts if effective_end_ts is not None else (ts_list[-1] if ts_list else start_anchor))
+    # 选择序列起点：若提供 start，则以 start 为基准；否则以数据集中或全局最早记录为基准
+    if min_ts_all is None and not rows:
+        # 完全无数据
+        return [], {}, 0, 0
+    first_ts = int(min_ts_all) if min_ts_all is not None else int(min(delta_by_ts.keys()))
+    # 若未提供 start，则将起点微调到 first_ts 之前，确保 first_ts 归入首个桶 (prev, first_boundary]
+    base_start = int(start_ts if start_ts is not None else (first_ts - 1))
+    start_anchor = _align_down_calendar(base_start, granularity, tz)
+    end_boundary = int(effective_end_ts)
+    # 生成边界：从 start_anchor 之后的第一个边界开始，到 end_boundary（含）
     boundaries: List[int] = []
     cur = start_anchor
     while cur < end_boundary:
@@ -654,7 +692,6 @@ def _build_boundaries_for_player(db: Session, *, player_id: int, metric_ids: Lis
         boundaries.append(cur)
     if not boundaries or boundaries[-1] != end_boundary:
         boundaries.append(end_boundary)
-
     return boundaries, delta_by_ts, start_anchor, end_boundary
 
 
@@ -669,7 +706,6 @@ def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity
     if granularity not in SUPPORTED_GRANULARITIES:
         raise ValueError(f"不支持的粒度: {granularity}")
 
-    tz = get_tzinfo()
     start_ts = _parse_iso(start) if start else None
     end_ts = _parse_iso(end) if end else None
 
@@ -681,13 +717,16 @@ def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity
             return {uid: [] for uid in player_uuids}
 
         result: Dict[str, List[Tuple[int, int]]] = {}
+        # 查询阶段参数：允许负 delta，不进行 clamp；不补零桶，由前端完成
+        clamp_negative = False
+        fill_missing = False
         for uid in player_uuids:
             player_id = db.scalar(select(models.Player.id).where(models.Player.uuid == uid))
             if player_id is None:
                 result[uid] = []
                 continue
 
-            boundaries, delta_by_ts, first_boundary, last_ts = _build_boundaries_for_player(
+            boundaries, delta_by_ts, start_anchor, end_boundary = _build_boundaries_for_player(
                 db, player_id=player_id, metric_ids=metric_ids, granularity=granularity,
                 start_ts=start_ts, end_ts=end_ts, server_ids=server_ids,
             )
@@ -695,27 +734,28 @@ def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity
                 result[uid] = []
                 continue
 
-            # 10min：直接取每个记录时刻自身的 delta
-            if granularity == "10min":
-                result[uid] = [(b, int(delta_by_ts.get(b, 0))) for b in boundaries]
-                continue
-
             out: List[Tuple[int, int]] = []
-            prev = None
+            prev_boundary = start_anchor
             sorted_ts = sorted(delta_by_ts.keys())
             idx = 0
             for b in boundaries:
                 bucket_delta = 0
-                if prev is None:
-                    while idx < len(sorted_ts) and sorted_ts[idx] <= b:
-                        bucket_delta += delta_by_ts[sorted_ts[idx]]
-                        idx += 1
+                # 汇总 (prev_boundary, b] 内的所有 delta
+                while idx < len(sorted_ts) and sorted_ts[idx] <= b:
+                    t = sorted_ts[idx]
+                    if t > prev_boundary:
+                        bucket_delta += delta_by_ts[t]
+                    idx += 1
+                # 允许负 delta；如需 clamp 可在此启用
+                if clamp_negative:
+                    bucket_delta = max(bucket_delta, 0)
+                # 不补零空桶：仅在非零时返回该桶
+                if fill_missing:
+                    out.append((b, int(bucket_delta)))
                 else:
-                    while idx < len(sorted_ts) and sorted_ts[idx] <= b:
-                        bucket_delta += delta_by_ts[sorted_ts[idx]]
-                        idx += 1
-                out.append((b, int(bucket_delta)))
-                prev = b
+                    if bucket_delta != 0:
+                        out.append((b, int(bucket_delta)))
+                prev_boundary = b
             result[uid] = out
         return result
     finally:
@@ -840,14 +880,16 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
             return {uid: [] for uid in player_uuids}
 
         result: Dict[str, List[Tuple[int, int]]] = {}
+        # 查询阶段参数：不补零桶；仅在值变化或首点时输出
+        fill_missing = False
         for uid in player_uuids:
             player_id = db.scalar(select(models.Player.id).where(models.Player.uuid == uid))
             if player_id is None:
                 result[uid] = []
                 continue
 
-            # 仍然复用边界构建逻辑（仅用于确定时间锚点，不再使用 delta 计算 total）
-            boundaries, _delta_by_ts, _first_boundary, last_ts = _build_boundaries_for_player(
+            # 使用统一边界构建（仅用于锚点），total 使用 "<= boundary" 最新值
+            boundaries, _delta_by_ts, start_anchor, end_boundary = _build_boundaries_for_player(
                 db, player_id=player_id, metric_ids=metric_ids, granularity=granularity,
                 start_ts=start_ts, end_ts=end_ts, server_ids=server_ids,
             )
@@ -917,7 +959,7 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                     models.PlayerMetrics.player_id == player_id,
                     models.PlayerMetrics.metric_id.in_(metric_ids),
                     models.PlayerMetrics.ts > first_b,
-                    models.PlayerMetrics.ts <= last_ts,
+                    models.PlayerMetrics.ts <= end_boundary,
                 )
                 .order_by(models.PlayerMetrics.ts.asc())
             )
@@ -928,7 +970,18 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
             # 3) 沿边界推进，应用事件更新 current_sum，并记录 total 值
             out: List[Tuple[int, int]] = []
             idx = 0
-            out.append((first_b, int(current_sum)))
+            # 首点：输出基线；若不补零桶，则保留首点作为锚点
+            last_output_val = None
+            def _maybe_append(point_ts: int, val: int):
+                nonlocal last_output_val
+                if fill_missing:
+                    out.append((point_ts, int(val)))
+                else:
+                    if last_output_val is None or int(val) != int(last_output_val):
+                        out.append((point_ts, int(val)))
+                        last_output_val = int(val)
+
+            _maybe_append(first_b, int(current_sum))
             for b in boundaries[1:]:
                 while idx < len(events) and int(events[idx][0]) <= b:
                     _ts, sid, mid, tot = events[idx]
@@ -939,7 +992,7 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                         current_sum += (new_val - prev_val)
                         totals_by_key[key] = new_val
                     idx += 1
-                out.append((b, int(current_sum)))
+                _maybe_append(b, int(current_sum))
 
             result[uid] = out
         return result
