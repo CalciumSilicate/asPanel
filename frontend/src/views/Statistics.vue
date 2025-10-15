@@ -70,9 +70,9 @@
                   <el-option v-for="opt in playerOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
                 </el-select>
               </el-form-item>
-              <el-form-item label="粒度 (慎选10min，数据量大易卡)">
-                <el-select v-model="granularity" style="width: 130px">
-                  <el-option v-for="g in granularities" :key="g" :label="g" :value="g"/>
+              <el-form-item label="粒度">
+                <el-select v-model="granularity" style="width: 180px">
+                  <el-option v-for="opt in granularityOptions" :key="opt.value" :label="opt.label" :value="opt.value" :title="opt.label"/>
                 </el-select>
               </el-form-item>
               <el-form-item label="单位选择">
@@ -155,6 +155,11 @@ const metricOptions = ref<string[]>([])
 const metricsLoading = ref(false)
 const selectedMetrics = ref<string[]>(['custom.play_time','custom.play_one_minute'])
 const granularities = ['10min', '30min', '1h', '12h', '24h', '1week', '1month', '6month', '1year']
+const granularityOptions = computed(() => granularities.map(g => ({
+  value: g,
+  label: (g==='10min' || g==='30min' || g==='1h') ? `${g}（数据量大时易卡，慎选）` : g,
+})))
+const granularityBug = computed(() => ['1week','1month','6month','1year'].includes(granularity.value))
 const granularity = ref<string>('12h')
 const range = ref<[Date, Date] | null>(null)
 
@@ -659,6 +664,10 @@ watch(selectedServerNames, async () => {
 })
 
 watch(granularity, async () => {
+  if (granularityBug.value) {
+    const { ElMessage } = await import('element-plus')
+    ElMessage.warning('提示：1week 及以上粒度存在已知问题，结果可能不准确')
+  }
   if (canQuery.value) await queryStatsForTopPlayers()
 })
 
