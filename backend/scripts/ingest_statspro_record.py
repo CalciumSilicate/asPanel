@@ -188,7 +188,12 @@ def upsert_metrics_for_snapshot(db, *, server_id: int, ts: int, uuid: str, metri
     for cat_key, item_key, curr_total in metrics:
         mid = mid_map[(cat_key, item_key)]
         prev_total = prev_map.get(mid)
-        delta = int(curr_total) - int(prev_total or 0) if prev_total is not None else 0
+        is_new = prev_total is None
+        delta = 0 if is_new else (int(curr_total) - int(prev_total or 0))
+
+        # 若非首次且值未变化（delta==0），则跳过写入（与后端 ingest 逻辑保持一致）
+        if (not is_new) and (int(delta) == 0):
+            continue
 
         existing = db.execute(
             select(models.PlayerMetrics)
