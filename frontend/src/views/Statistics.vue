@@ -12,6 +12,7 @@
               <el-radio-button label="official_only">仅正版玩家</el-radio-button>
               <el-radio-button label="include_cracked">包括盗版玩家</el-radio-button>
             </el-radio-group>
+            <el-checkbox class="wl-only" v-model="whitelistOnly" @change="onWhitelistToggle">仅白名单玩家</el-checkbox>
           </div>
         </div>
       </template>
@@ -159,6 +160,11 @@ const players = ref<any[]>([])
 const servers = ref<any[]>([])
 // 玩家范围筛选：所有 / 仅正版 / 包括盗版
 const scope = ref<'official_only'|'include_cracked'|'all'>('official_only')
+// 白名单筛选
+const whitelistUUIDs = ref<string[]>([])
+const whitelistOnly = ref<boolean>(false)
+const whitelistSet = computed(() => new Set(whitelistUUIDs.value))
+
 const serverNames = computed(() => servers.value.map((s:any) => (s.path?.split('/').pop()) || s.name))
 const selectedServerNames = ref<string[]>([])
 const selectedServerIds = ref<number[]>([])
@@ -314,11 +320,18 @@ function showName(u: string): string {
   return p?.player_name || shortUuid(u)
 }
 
+function visiblePlayers(): any[] {
+  if (!whitelistOnly.value) return players.value
+  const set = whitelistSet.value
+  return players.value.filter((p:any) => set.has(String(p.uuid)))
+}
+
 async function searchPlayers(query: string) {
   playersLoading.value = true
   try {
     const q = (query || '').toLowerCase()
-    const list = players.value.filter((p:any) => (p.player_name||'').toLowerCase().includes(q) || (p.uuid||'').toLowerCase().includes(q))
+    const baseList = visiblePlayers()
+    const list = baseList.filter((p:any) => (p.player_name||'').toLowerCase().includes(q) || (p.uuid||'').toLowerCase().includes(q))
     const rankMap = new Map<string, number>()
     rankItems.value.forEach((it:any, idx:number) => { if (it?.player_uuid) rankMap.set(String(it.player_uuid), idx) })
     list.sort((a:any,b:any) => {
@@ -470,8 +483,8 @@ async function queryStatsForTopPlayers() {
     topUuids = rankItems.value.map((x:any)=>x.player_uuid).filter(Boolean).slice(0,10)
   }
   if (topUuids.length === 0) {
-    // 回退：玩家列表前 10 个
-    topUuids = players.value.slice(0,10).map((p:any)=>p.uuid)
+    // 回退：玩家列表前 10 个（应用白名单过滤）
+    topUuids = visiblePlayers().slice(0,10).map((p:any)=>p.uuid)
   }
   if (topUuids.length === 0) return
   const base = { player_uuid: topUuids, metric: selectedMetrics.value, granularity: granularity.value, namespace: 'minecraft', server_id: selectedServerIds.value }
@@ -741,8 +754,8 @@ async function refreshRanks(_showTip=false) {
   if (!canQuery.value) return
   // 若未选择时刻，默认使用后端“当前时刻”逻辑（不传 at）
   const list = await fetchLeaderboardTotal({ metric: selectedMetrics.value, server_id: selectedServerIds.value, limit: 10000, ...(rankAtTs.value ? { at: toIso(new Date(rankAtTs.value*1000)) } : {}) })
-  // 依据 scope 过滤：仅保留 players 列表内（按 scope 拉取）的玩家
-  const allowed = new Set((players.value || []).map((p:any)=>String(p.uuid)))
+  // 依据 scope + 白名单过滤
+  const allowed = new Set(visiblePlayers().map((p:any)=>String(p.uuid)))
   const filtered = (list || []).filter((it:any) => allowed.has(String(it.player_uuid)))
   await drawRankChart(filtered)
   // 同步刷新全服总计（防抖）用于“全服总计”为百分比基准
@@ -824,8 +837,26 @@ watch(rankAtTs, async () => {
   if (canQuery.value) await refreshRanks(false)
 })
 
+async function fetchWhitelist() {
+  try {
+    const res = await apiClient.get('/api/players/whitelist-uuids')
+    whitelistUUIDs.value = Array.isArray(res.data) ? res.data : []
+  } catch { whitelistUUIDs.value = [] }
+}
+
+const onWhitelistToggle = async () => {
+  // 裁剪已选玩家
+  const allowed = new Set(visiblePlayers().map((p:any)=>String(p.uuid)))
+  selectedPlayers.value = selectedPlayers.value.filter(u => allowed.has(String(u)))
+  // 刷新榜单与图表
+  await refreshRanks(false)
+  if (canQuery.value) await queryStatsForTopPlayers()
+  // 同步刷新全服总计（命中缓存）
+  scheduleGlobalTotalRefresh(currentRankContextTs())
+}
+
 onMounted(async () => {
-  await Promise.all([fetchPlayers(), fetchServers()])
+  await Promise.all([fetchPlayers(), fetchServers(), fetchWhitelist()])
   if (canQuery.value) {
     await refreshRanks(false)
     // 初始同步全服总计
@@ -859,4 +890,5 @@ onMounted(async () => {
 .percent-title { color: var(--el-text-color-regular); margin-right: 6px; }
 .server-checkboxes { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; }
 .preset-panel { display: flex; flex-wrap: wrap; gap: 6px; }
+.wl-only { margin-left: 8px; }
 </style>
