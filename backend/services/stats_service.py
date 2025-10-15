@@ -240,7 +240,15 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
             )
             prev_rows = db.execute(
                 select(models.PlayerMetrics.metric_id, models.PlayerMetrics.total)
-                .join(sub, (models.PlayerMetrics.metric_id == sub.c.metric_id) & (models.PlayerMetrics.ts == sub.c.mts))
+                .join(
+                    sub,
+                    (models.PlayerMetrics.metric_id == sub.c.metric_id)
+                    & (models.PlayerMetrics.ts == sub.c.mts)
+                )
+                .where(
+                    models.PlayerMetrics.server_id == server_id,
+                    models.PlayerMetrics.player_id == pid,
+                )
             ).all()
             prev_map = {int(mid): int(t or 0) for (mid, t) in prev_rows}
 
