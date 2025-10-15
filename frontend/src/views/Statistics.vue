@@ -70,7 +70,7 @@
                   <el-option v-for="opt in playerOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
                 </el-select>
               </el-form-item>
-              <el-form-item label="粒度">
+              <el-form-item label="粒度 (慎选10min，数据量大易卡)">
                 <el-select v-model="granularity" style="width: 130px">
                   <el-option v-for="g in granularities" :key="g" :label="g" :value="g"/>
                 </el-select>
@@ -154,7 +154,7 @@ const playerOptions = ref<{label:string,value:string}[]>([])
 const metricOptions = ref<string[]>([])
 const metricsLoading = ref(false)
 const selectedMetrics = ref<string[]>(['custom.play_time','custom.play_one_minute'])
-const granularities = ['30min', '1h', '12h', '24h', '1week', '1month', '6month', '1year']
+const granularities = ['10min', '30min', '1h', '12h', '24h', '1week', '1month', '6month', '1year']
 const granularity = ref<string>('12h')
 const range = ref<[Date, Date] | null>(null)
 
