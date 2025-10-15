@@ -124,7 +124,13 @@ const routes = [
                 component: () => import('../views/Console.vue'),
                 props: true,
                 meta: { requiredRole: 'ADMIN' }
-            }
+            },
+            {
+                path: 'statistics',
+                name: 'Statistics',
+                component: () => import('../views/Statistics.vue'),
+                meta: { requiredRole: 'USER' }
+            },
             // 未来可以在此添加 statistics, settings 等子路由
         ]
     },

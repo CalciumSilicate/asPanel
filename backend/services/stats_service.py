@@ -194,9 +194,9 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
 
         def _compute_delta(prev_total: Optional[int], curr_total: int) -> Tuple[int, int]:
             if prev_total is None:
-                return int(curr_total), 0
+                return 0, 0
             if curr_total < prev_total:
-                return int(curr_total), 1
+                return 0, 1
             return int(curr_total - prev_total), 0
 
         for fp in files:
@@ -452,6 +452,39 @@ def _resolve_metric_ids(db: Session, pairs: List[Tuple[str, str]]) -> List[int]:
     return ids
 
 
+def list_metrics(db: Session, q: Optional[str] = None, limit: int = 50,
+                 namespace: str = DEFAULT_NAMESPACE) -> List[str]:
+    """列出已存在的指标（归一为 'cat.item' 形式），支持按关键字模糊过滤。"""
+    # 简单 LIKE 过滤，尽量利用索引；否则回退到 Python 过滤
+    like = None
+    if q:
+        like = f"%{q}%"
+    stmt = select(models.MetricsDim.category, models.MetricsDim.item)
+    if like:
+        stmt = stmt.where(
+            (models.MetricsDim.category.ilike(like)) | (models.MetricsDim.item.ilike(like))
+        )
+    stmt = stmt.limit(max(1, int(limit)))
+    rows = db.execute(stmt).all()
+    out: List[str] = []
+    for cat_key, item_key in rows:
+        try:
+            ns1, cat = str(cat_key).split(":", 1)
+            ns2, item = str(item_key).split(":", 1)
+            if ns1 == namespace and ns2 == namespace:
+                out.append(f"{cat}.{item}")
+        except Exception:
+            continue
+    # 去重保持顺序
+    seen = set()
+    uniq = []
+    for m in out:
+        if m not in seen:
+            seen.add(m)
+            uniq.append(m)
+    return uniq
+
+
 def _align_down_calendar(ts: int, granularity: str, tz) -> int:
     dt = datetime.fromtimestamp(ts, tz)
     if granularity == "30min":
@@ -529,7 +562,7 @@ def _next_boundary(ts: int, granularity: str, tz) -> int:
 
 
 def _build_boundaries_for_player(db: Session, *, player_id: int, metric_ids: List[int], granularity: str,
-                                 start_ts: Optional[int], end_ts: Optional[int]) -> Tuple[List[int], Dict[int, int], int, int]:
+                                 start_ts: Optional[int], end_ts: Optional[int], server_ids: Optional[List[int]] = None) -> Tuple[List[int], Dict[int, int], int, int]:
     """返回 (boundaries, delta_by_ts, first_boundary, last_ts)"""
     tz = get_tzinfo()
 
@@ -538,6 +571,8 @@ def _build_boundaries_for_player(db: Session, *, player_id: int, metric_ids: Lis
         models.PlayerMetrics.player_id == player_id,
         models.PlayerMetrics.metric_id.in_(metric_ids),
     )
+    if server_ids:
+        q = q.where(models.PlayerMetrics.server_id.in_(server_ids))
     if start_ts is not None:
         q = q.where(models.PlayerMetrics.ts >= start_ts)
     if end_ts is not None:
@@ -570,7 +605,8 @@ def _build_boundaries_for_player(db: Session, *, player_id: int, metric_ids: Lis
 
 def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity: str = "10min",
                      start: Optional[str] = None, end: Optional[str] = None,
-                     namespace: str = DEFAULT_NAMESPACE) -> Dict[str, List[Tuple[int, int]]]:
+                     namespace: str = DEFAULT_NAMESPACE,
+                     server_ids: Optional[List[int]] = None) -> Dict[str, List[Tuple[int, int]]]:
     if not player_uuids:
         raise ValueError("必须提供至少一个 player_uuid")
     if not metrics:

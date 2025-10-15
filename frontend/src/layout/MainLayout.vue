@@ -250,7 +250,7 @@
           </el-sub-menu>
 
           <!-- 系统功能 -->
-          <el-menu-item index="/statistics" disabled v-if="hasRole('GUEST')">
+          <el-menu-item index="/statistics" v-if="hasRole('USER')">
             <el-icon>
               <TrendCharts/>
             </el-icon>
@@ -289,6 +289,8 @@
         v-model:visible="avatarDialogVisible"
         @success="handleAvatarSuccess"
     />
+
+
   </el-container>
   </el-container>
 </template>
@@ -311,6 +313,7 @@ import {
 } from '@element-plus/icons-vue';
 import {user, fullAvatarUrl, fetchUser, clearUser, refreshAvatar, hasRole} from '@/store/user';
 import AvatarUploader from '@/components/AvatarUploader.vue';
+
 
 // 折叠状态由全局 ui store 提供
 // const isCollapse = ref(false);
@@ -368,6 +371,7 @@ const handleAvatarSuccess = async () => {
 
 onMounted(() => {
   fetchUser();
+  // fetchPlayers();
   // 初始化主题：优先使用本地设置，其次跟随系统
   const saved = localStorage.getItem(THEME_KEY);
   if (saved === 'dark' || saved === 'light') {
