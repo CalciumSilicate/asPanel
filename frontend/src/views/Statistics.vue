@@ -682,6 +682,7 @@ async function drawRankChart(items: any[], skipRight=false) {
   const vals = (!percentEnabled.value && !convertEnabled.value)
     ? scaled.map(v => Math.round(v))
     : scaled
+  const initialEndIdx = Math.min(names.length - 1, 14)
   const option = {
     grid: { left: 20, right: 30, top: 8, bottom: 36, containLabel: true },
     xAxis: {
@@ -702,8 +703,8 @@ async function drawRankChart(items: any[], skipRight=false) {
       },
     },
     dataZoom: [
-      { type: 'inside', yAxisIndex: 0 },
-      { type: 'slider', yAxisIndex: 0, orient: 'horizontal', bottom: 6, height: 16 },
+      { type: 'inside', yAxisIndex: 0, startValue: 0, endValue: initialEndIdx },
+      { type: 'slider', yAxisIndex: 0, orient: 'vertical', right: 6, top: 24, bottom: 24, width: 12, startValue: 0, endValue: initialEndIdx },
     ],
     series: [{ type: 'bar', data: vals, label: { show: true, position: 'right', formatter: (p:any) => {
       const v = Number(p.value||0)
