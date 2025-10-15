@@ -357,7 +357,7 @@ async def ingest_scheduler_loop():
             ignored = 0
             for srv in servers:
                 stats_dir = _server_stats_dir(srv.path)
-                if srv.id in ignore_ids:
+                if srv.id in ignore_ids or not stats_dir.exists():
                     ignored += 1
                     logger.debug(f"ignored {stats_dir}")
                     continue
