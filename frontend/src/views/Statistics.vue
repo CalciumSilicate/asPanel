@@ -7,7 +7,7 @@
         <div class="left-stack">
           <el-card shadow="never" class="rank-card">
             <template #header>
-              <div class="card-header">排行榜, 目前存在细微BUG</div>
+              <div class="card-header">排行榜</div>
             </template>
 
             <!-- 横向柱状图（含 dataZoom） -->
@@ -154,12 +154,12 @@ const playerOptions = ref<{label:string,value:string}[]>([])
 const metricOptions = ref<string[]>([])
 const metricsLoading = ref(false)
 const selectedMetrics = ref<string[]>(['custom.play_time','custom.play_one_minute'])
-const granularities = ['10min', '30min', '1h', '12h', '24h', '1week', '1month', '6month', '1year']
+// 与后端保持一致的粒度集合
+const granularities = ['10min','20min','30min','1h','6h','12h','24h','1week','1month','3month','6month','1year']
 const granularityOptions = computed(() => granularities.map(g => ({
   value: g,
-  label: (g==='10min' || g==='30min' || g==='1h') ? `${g}（数据量大时易卡，慎选）` : g,
+  label: (g==='10min' || g==='20min' || g==='30min' || g==='1h') ? `${g}（数据量大时易卡，慎选）` : g,
 })))
-const granularityBug = computed(() => ['1week','1month','6month','1year'].includes(granularity.value))
 const granularity = ref<string>('12h')
 const range = ref<[Date, Date] | null>(null)
 
@@ -313,11 +313,75 @@ async function searchPlayers(query: string) {
   } finally { playersLoading.value = false }
 }
 
-const STEP_SECONDS: Record<string, number> = { '10min':600, '30min':1800, '1h':3600, '12h':43200, '24h':86400, '1week':604800, '1month':2629800, '6month':15778800, '1year':31557600 }
+// 日历对齐版本：与后端保持完全一致的边界生成（本地时区）
+function alignDown(ts: number, gran: string): number {
+  const d = new Date(ts * 1000)
+  const set = (y:number, m:number, day:number, h:number, min:number) => new Date(y, m, day, h, min, 0, 0)
+  if (gran === '10min') { const m = Math.floor(d.getMinutes()/10)*10; return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), m).getTime()/1000) }
+  if (gran === '20min') { const m = Math.floor(d.getMinutes()/20)*20; return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), m).getTime()/1000) }
+  if (gran === '30min') { const m = d.getMinutes()<30?0:30; return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), m).getTime()/1000) }
+  if (gran === '1h') { return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), 0).getTime()/1000) }
+  if (gran === '6h') { const h = Math.floor(d.getHours()/6)*6; return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), h, 0).getTime()/1000) }
+  if (gran === '12h') { const h = d.getHours()<12?0:12; return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), h, 0).getTime()/1000) }
+  if (gran === '24h') { return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0).getTime()/1000) }
+  if (gran === '1week') {
+    // 周起始：周日 00:00（与后端一致）
+    const weekday = d.getDay() // 0..6 (Sun..Sat)
+    const start = new Date(d)
+    start.setDate(d.getDate() - weekday)
+    start.setHours(0,0,0,0)
+    return Math.floor(start.getTime()/1000)
+  }
+  if (gran === '1month') { return Math.floor(new Date(d.getFullYear(), d.getMonth(), 1, 0,0,0,0).getTime()/1000) }
+  if (gran === '3month') {
+    const m = d.getMonth() // 0..11
+    const qStart = (m<3)?0:(m<6)?3:(m<9)?6:9
+    return Math.floor(new Date(d.getFullYear(), qStart, 1, 0,0,0,0).getTime()/1000)
+  }
+  if (gran === '6month') { const m = d.getMonth(); const h = (m<=5)?0:6; return Math.floor(new Date(d.getFullYear(), h, 1, 0,0,0,0).getTime()/1000) }
+  if (gran === '1year') { return Math.floor(new Date(d.getFullYear(), 0, 1, 0,0,0,0).getTime()/1000) }
+  // 回退：10min
+  const m = Math.floor(d.getMinutes()/10)*10
+  return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), m).getTime()/1000)
+}
+function nextBoundary(ts: number, gran: string): number {
+  const d = new Date(ts * 1000)
+  if (gran === '10min') { d.setMinutes(Math.floor(d.getMinutes()/10)*10); d.setSeconds(0,0); d.setMinutes(d.getMinutes()+10); return Math.floor(d.getTime()/1000) }
+  if (gran === '20min') { d.setMinutes(Math.floor(d.getMinutes()/20)*20); d.setSeconds(0,0); d.setMinutes(d.getMinutes()+20); return Math.floor(d.getTime()/1000) }
+  if (gran === '30min') { d.setMinutes(d.getMinutes()<30?0:30); d.setSeconds(0,0); d.setMinutes(d.getMinutes()+30); return Math.floor(d.getTime()/1000) }
+  if (gran === '1h') { d.setMinutes(0,0,0); d.setHours(d.getHours()+1); return Math.floor(d.getTime()/1000) }
+  if (gran === '6h') { d.setMinutes(0,0,0); d.setHours(Math.floor(d.getHours()/6)*6 + 6); return Math.floor(d.getTime()/1000) }
+  if (gran === '12h') { d.setMinutes(0,0,0); d.setHours(d.getHours()<12?12:24); return Math.floor(d.getTime()/1000) }
+  if (gran === '24h') { d.setHours(0,0,0,0); d.setDate(d.getDate()+1); return Math.floor(d.getTime()/1000) }
+  if (gran === '1week') { const weekday = d.getDay(); const start = new Date(d); start.setDate(d.getDate() - weekday); start.setHours(0,0,0,0); start.setDate(start.getDate()+7); return Math.floor(start.getTime()/1000) }
+  if (gran === '1month') { return Math.floor(new Date(d.getFullYear(), d.getMonth()+1, 1, 0,0,0,0).getTime()/1000) }
+  if (gran === '3month') {
+    const m = d.getMonth()
+    const qStart = (m<3)?0:(m<6)?3:(m<9)?6:9
+    const next = (qStart===9) ? new Date(d.getFullYear()+1, 0, 1, 0,0,0,0) : new Date(d.getFullYear(), qStart+3, 1, 0,0,0,0)
+    return Math.floor(next.getTime()/1000)
+  }
+  if (gran === '6month') { const m = d.getMonth(); const next = (m<=5) ? new Date(d.getFullYear(), 6, 1, 0,0,0,0) : new Date(d.getFullYear()+1, 0, 1, 0,0,0,0); return Math.floor(next.getTime()/1000) }
+  if (gran === '1year') { return Math.floor(new Date(d.getFullYear()+1, 0, 1, 0,0,0,0).getTime()/1000) }
+  // 回退：10min
+  d.setMinutes(Math.floor(d.getMinutes()/10)*10); d.setSeconds(0,0); d.setMinutes(d.getMinutes()+10); return Math.floor(d.getTime()/1000)
+}
+
+function buildCalendarXTs(minTs: number, maxTs: number, gran: string): number[] {
+  // 使第一点就是对齐后的边界：若 minTs 已经在边界上，直接纳入；否则取下一个边界
+  const anchor = alignDown(minTs - 1, gran) // (start, end] 语义：从前一锚点推进
+  const xTs: number[] = []
+  let cur = anchor
+  while (true) {
+    cur = nextBoundary(cur, gran)
+    xTs.push(cur)
+    if (cur >= maxTs) break
+  }
+  return xTs
+}
 
 function fillGaps(dict: Record<string, [number, number][]>, gran: string, mode: 'delta'|'total') {
-  const step = STEP_SECONDS[gran] || 600
-  // 找到全局最小/最大 ts
+  // 找到全局最小/最大 ts（均为右边界时刻）
   let minTs = Number.MAX_SAFE_INTEGER, maxTs = 0
   for (const arr of Object.values(dict)) {
     if (!arr.length) continue
@@ -325,8 +389,7 @@ function fillGaps(dict: Record<string, [number, number][]>, gran: string, mode: 
     maxTs = Math.max(maxTs, arr[arr.length-1][0])
   }
   if (!isFinite(minTs) || maxTs <= 0) return { dict, xTs: [] }
-  const xTs: number[] = []
-  for (let t = minTs; t <= maxTs; t += step) xTs.push(t)
+  const xTs: number[] = buildCalendarXTs(minTs, maxTs, gran)
 
   const out: Record<string, [number, number][]> = {}
   for (const [uuid, arr] of Object.entries(dict)) {
@@ -381,16 +444,16 @@ function toIso(d?: Date) {
 }
 
 async function queryStatsForTopPlayers() {
-  // 依据当前排行榜前五名作为右图玩家，自动查询与渲染
+  // 依据当前排行榜前十名作为右图玩家，自动查询与渲染
   if (!canQuery.value) return
   await ensureCharts()
-  let topUuids = selectedPlayers.value.slice(0,5)
+  let topUuids = selectedPlayers.value.slice(0,10)
   if (topUuids.length === 0) {
-    topUuids = rankItems.value.map((x:any)=>x.player_uuid).filter(Boolean).slice(0,5)
+    topUuids = rankItems.value.map((x:any)=>x.player_uuid).filter(Boolean).slice(0,10)
   }
   if (topUuids.length === 0) {
-    // 回退：玩家列表前 5 个
-    topUuids = players.value.slice(0,5).map((p:any)=>p.uuid)
+    // 回退：玩家列表前 10 个
+    topUuids = players.value.slice(0,10).map((p:any)=>p.uuid)
   }
   if (topUuids.length === 0) return
   const base = { player_uuid: topUuids, metric: selectedMetrics.value, granularity: granularity.value, namespace: 'minecraft', server_id: selectedServerIds.value }
@@ -593,6 +656,17 @@ let rankRefreshTimer: any = null
 const rankItems = ref<any[]>([])
 
 
+function formatAxisValueTick(v: number): string {
+  const val = Number(v || 0)
+  if (percentEnabled.value) return Number(val).toPrecision(5) + '%'
+  if (convertEnabled.value) return Number(val).toFixed(2)
+  const abs = Math.abs(val)
+  if (abs >= 1e9) return (val/1e9).toFixed(1) + 'B'
+  if (abs >= 1e6) return (val/1e6).toFixed(1) + 'M'
+  if (abs >= 1e3) return (val/1e3).toFixed(1) + 'k'
+  return String(Math.round(val))
+}
+
 async function drawRankChart(items: any[], skipRight=false) {
   const echarts = await loadECharts()
   if (!rankChartRef.value) return
@@ -610,7 +684,11 @@ async function drawRankChart(items: any[], skipRight=false) {
     : scaled
   const option = {
     grid: { left: 20, right: 30, top: 8, bottom: 36, containLabel: true },
-    xAxis: { type: 'value' },
+    xAxis: {
+      type: 'value',
+      axisLabel: { hideOverlap: true, formatter: (val:any) => formatAxisValueTick(Number(val)) },
+      splitNumber: 4,
+    },
     yAxis: {
       type: 'category',
       data: names,
@@ -635,7 +713,7 @@ async function drawRankChart(items: any[], skipRight=false) {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
   }
   rankChart.setOption(option, true)
-  // 榜单变化后自动刷新右侧曲线（前五位）
+  // 榜单变化后自动刷新右侧曲线（前十位）
   await searchPlayers('')
   if (!skipRight) await queryStatsForTopPlayers()
 }
@@ -643,7 +721,7 @@ async function drawRankChart(items: any[], skipRight=false) {
 async function refreshRanks(_showTip=false) {
   if (!canQuery.value) return
   // 若未选择时刻，默认使用后端“当前时刻”逻辑（不传 at）
-  const list = await fetchLeaderboardTotal({ metric: selectedMetrics.value, server_id: selectedServerIds.value, limit: 10, ...(rankAtTs.value ? { at: toIso(new Date(rankAtTs.value*1000)) } : {}) })
+  const list = await fetchLeaderboardTotal({ metric: selectedMetrics.value, server_id: selectedServerIds.value, limit: 10000, ...(rankAtTs.value ? { at: toIso(new Date(rankAtTs.value*1000)) } : {}) })
   await drawRankChart(list)
   // 同步刷新全服总计（防抖）用于“全服总计”为百分比基准
   const ts = rankAtTs.value || currentTotalEndTs || Math.floor(Date.now()/1000)
@@ -664,10 +742,6 @@ watch(selectedServerNames, async () => {
 })
 
 watch(granularity, async () => {
-  if (granularityBug.value) {
-    const { ElMessage } = await import('element-plus')
-    ElMessage.warning('提示：1week 及以上粒度存在已知问题，结果可能不准确')
-  }
   if (canQuery.value) await queryStatsForTopPlayers()
 })
 
