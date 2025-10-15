@@ -455,7 +455,8 @@ def create_server_link_group(db: Session, payload: schemas.ServerLinkGroupCreate
     return rec
 
 
-def update_server_link_group(db: Session, group_id: int, payload: schemas.ServerLinkGroupUpdate) -> Optional[models.ServerLinkGroup]:
+def update_server_link_group(db: Session, group_id: int, payload: schemas.ServerLinkGroupUpdate) -> Optional[
+    models.ServerLinkGroup]:
     rec = get_server_link_group_by_id(db, group_id)
     if not rec:
         return None
@@ -553,6 +554,10 @@ def update_system_settings(db: Session, patch: dict) -> dict:
 
 
 # --- Player CRUD ---
+def get_player_by_id(db: Session, id: int) -> Optional[models.Player]:
+    return db.query(models.Player).filter(models.Player.id == id).first()
+
+
 def get_player_by_uuid(db: Session, uuid: str) -> Optional[models.Player]:
     return db.query(models.Player).filter(models.Player.uuid == uuid).first()
 
@@ -577,14 +582,16 @@ def list_players(db: Session, *, scope: str = "all") -> list[models.Player]:
 
 def create_player(db: Session, *, uuid: str, player_name: Optional[str] = None,
                   play_time: Optional[dict] = None, is_offline: bool = False) -> models.Player:
-    rec = models.Player(uuid=uuid, player_name=player_name, play_time=json.dumps(play_time or {}), is_offline=is_offline)
+    rec = models.Player(uuid=uuid, player_name=player_name, play_time=json.dumps(play_time or {}),
+                        is_offline=is_offline)
     db.add(rec)
     db.commit()
     db.refresh(rec)
     return rec
 
 
-def update_player_name(db: Session, rec: models.Player, *, name: Optional[str], is_offline: Optional[bool] = None) -> models.Player:
+def update_player_name(db: Session, rec: models.Player, *, name: Optional[str],
+                       is_offline: Optional[bool] = None) -> models.Player:
     rec.player_name = name
     if is_offline is not None:
         rec.is_offline = bool(is_offline)

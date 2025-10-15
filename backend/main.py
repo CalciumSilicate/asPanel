@@ -21,11 +21,13 @@ from backend.core.config import (
 
 from backend.routers import users, system, archives, servers, versions, plugins, tools
 from backend.routers import players as players_router
+from backend.routers import stats as stats_router
 from backend.routers import settings as settings_router
 from backend.routers import mods as mods_router
 from backend.routers import configuration as configuration_router
 from backend.services.ws import router as ws_router
 from backend.routers.system import cpu_sampler
+from backend.services import stats_service
 from backend.core.api import *
 from backend.ws import sio
 import time
@@ -140,6 +142,7 @@ app.include_router(configuration_router.router)
 app.include_router(ws_router)
 app.include_router(settings_router.router)
 app.include_router(players_router.router)
+app.include_router(stats_router.router)
 
 
 @app.on_event("startup")
@@ -175,6 +178,12 @@ async def startup_event():
 
     loop.set_exception_handler(_asyncio_exception_handler)
     logger.success("服务器启动完成")
+    # 启动统计入库定时任务（每逢 10 分钟整点）
+    try:
+        asyncio.create_task(stats_service.ingest_scheduler_loop())
+        logger.info("统计入库后台任务已启动（10min 对齐）")
+    except Exception as e:
+        logger.warning(f"启动统计入库任务失败：{e}")
 
 main_asgi_app = socketio.ASGIApp(sio, other_asgi_app=app, socketio_path='/ws/socket.io')
 

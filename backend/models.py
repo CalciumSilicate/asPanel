@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime, Enum as SQLAlchemyEnum, Text, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Enum as SQLAlchemyEnum, Text, Boolean, PrimaryKeyConstraint, \
+    UniqueConstraint, ForeignKey, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 import json
@@ -160,3 +161,26 @@ class Player(Base):
     play_time = Column(String, default="{}")
     # 是否为离线/盗版（当从官方接口无法解析时标记为 True）
     is_offline = Column(Boolean, default=False, nullable=False)
+
+
+class MetricsDim(Base):
+    __tablename__ = "metrics_dim"
+    metric_id = Column(Integer, primary_key=True, autoincrement=True)
+    category = Column(String) # with namespace, such as minecraft:custom
+    item = Column(String) # with namespace, such as minecraft:deaths
+    __table_args__ = (UniqueConstraint("category", "item", name="uq_metric_ns_cat_item"),)
+
+
+class PlayerMetrics(Base):
+    __tablename__ = "player_metrics"
+    ts = Column(Integer)  # epoch seconds, aligned to 10-min
+    server_id = Column(Integer, ForeignKey("servers.id"))
+    player_id = Column(Integer, ForeignKey("players.id"))
+    metric_id = Column(Integer, ForeignKey("metrics_dim.metric_id"))
+    total = Column(Integer)
+    delta = Column(Integer)
+    __table_args__ = [
+        PrimaryKeyConstraint("server_id", "player_id", "metric_id", "ts", name="pk_player_metrics"),
+        Index("idx_player_metrics_ts", "ts"),
+        Index("idx_player_metrics_metric_ts", "metric_id", "ts"),
+    ]

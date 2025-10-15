@@ -4,7 +4,6 @@ from pathlib import Path
 import os
 import secrets
 
-
 # --- API Configure ---
 MINECRAFT_VERSION_MANIFEST_URL = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
 VELOCITY_VERSION_MANIFEST_URL = "https://fill.papermc.io/v3/projects/velocity/versions"
@@ -66,10 +65,12 @@ TIMEZONE = os.getenv("ASPANEL_TIMEZONE", "Asia/Shanghai")
 
 # 提供统一的 tzinfo 获取与格式化工具
 from datetime import timezone as _dt_timezone, timedelta as _dt_timedelta
+
 try:
     from zoneinfo import ZoneInfo as _ZoneInfo  # Python 3.9+
 except Exception:  # pragma: no cover
     _ZoneInfo = None
+
 
 def get_tzinfo():
     """返回配置时区对应的 tzinfo；若不可用，回退为 UTC+8 固定偏移。"""
@@ -99,6 +100,7 @@ def get_tzinfo():
     # 最终回退 Asia/Shanghai 等价偏移
     return _dt_timezone(_dt_timedelta(hours=8))
 
+
 def to_local_dt(dt):
     """将 datetime 转换为配置时区的 aware datetime；None 直接返回 None。
     若 dt 为 naive，按 UTC 解释后转换；若已带 tz，直接 astimezone。
@@ -114,9 +116,11 @@ def to_local_dt(dt):
     except Exception:
         return dt
 
+
 def to_local_iso(dt):
     x = to_local_dt(dt)
     return x.isoformat() if x else None
+
 
 # --- Security and verification ---
 # 优先从环境变量读取 JWT 密钥；未提供时从 storages/secret.key 读取/生成并持久化（不纳入 git）。
@@ -183,3 +187,8 @@ PUBLIC_PLUGINS_DIRECTORIES = [
 PYTHON_EXECUTABLE = "python"
 
 CPU_PERCENT_INTERVAL = 1
+
+STATS_WHITELIST_ON = False
+STATS_WHITELIST = ["minecraft:custom.minecraft:deaths", "minecraft:custom.minecraft:play_time",
+                   "minecraft:custom.minecraft:play_one_minute", "minecraft:used.minecraft:totem_of_undying", "minecraft:used.minecraft:*_pickaxe"]
+STATS_IGNORE = ["minecraft:killed_by.minecraft:*", "*.minecraft:stone"]
