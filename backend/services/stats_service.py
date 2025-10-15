@@ -559,10 +559,41 @@ def _next_boundary(ts: int, granularity: str, tz) -> int:
     raise ValueError(f"不支持的粒度: {granularity}")
 
 
+def _align_up_calendar(ts: int, granularity: str, tz) -> int:
+    """将时间向后对齐到下一个粒度边界（若已在边界上则返回自身）。
+
+    规则：
+    - 30min → 小时内的 :00 或 :30；非边界则取下一个边界
+    - 1h    → 整点
+    - 12h   → 0 点或 12 点
+    - 24h   → 当日 00:00:00
+    - 1week → 周起始（按 _align_down_calendar 的周起始定义）
+    - 1month→ 月初 00:00:00
+    - 6month→ 半年起始（1 月或 7 月 1 日）
+    - 1year → 当年 1 月 1 日 00:00:00
+    """
+    down = _align_down_calendar(ts, granularity, tz)
+    if down == ts:
+        return ts
+    return _next_boundary(down, granularity, tz)
+
+
 def _build_boundaries_for_player(db: Session, *, player_id: int, metric_ids: List[int], granularity: str,
                                  start_ts: Optional[int], end_ts: Optional[int], server_ids: Optional[List[int]] = None) -> Tuple[List[int], Dict[int, int], int, int]:
-    """返回 (boundaries, delta_by_ts, first_boundary, last_ts)"""
+    """返回 (boundaries, delta_by_ts, first_boundary, end_boundary)
+
+    注意：除 '10min' 外，其它粒度会将结束时间向后对齐到下一个边界（若 end 未提供则用当前时间）。
+    """
     tz = get_tzinfo()
+
+    # 计算对齐后的结束边界（用于限制查询 & 构建边界）
+    import time as _t
+    if granularity == "10min":
+        # 10min 保持现状：按记录时刻输出
+        effective_end_ts = end_ts
+    else:
+        base_end = int(end_ts if end_ts is not None else _t.time())
+        effective_end_ts = _align_up_calendar(base_end, granularity, tz)
 
     # 聚合各 ts 的 delta（跨 server 与 metric 求和）
     q = select(models.PlayerMetrics.ts, func.sum(models.PlayerMetrics.delta)).where(
@@ -573,11 +604,23 @@ def _build_boundaries_for_player(db: Session, *, player_id: int, metric_ids: Lis
         q = q.where(models.PlayerMetrics.server_id.in_(server_ids))
     if start_ts is not None:
         q = q.where(models.PlayerMetrics.ts >= start_ts)
-    if end_ts is not None:
-        q = q.where(models.PlayerMetrics.ts <= end_ts)
+    if effective_end_ts is not None:
+        q = q.where(models.PlayerMetrics.ts <= effective_end_ts)
     rows = db.execute(q.group_by(models.PlayerMetrics.ts).order_by(models.PlayerMetrics.ts.asc())).all()
     if not rows:
-        return [], {}, 0, 0
+        # 无数据时，也按对齐规则返回边界锚点（用于 total 计算）
+        if granularity == "10min":
+            return [], {}, 0, 0
+        start_anchor = _align_down_calendar(int(start_ts or (effective_end_ts or 0)), granularity, tz)
+        end_boundary = int(effective_end_ts or start_anchor)
+        boundaries: List[int] = []
+        cur = start_anchor
+        while cur < end_boundary:
+            cur = _next_boundary(cur, granularity, tz)
+            boundaries.append(cur)
+        if not boundaries or boundaries[-1] != end_boundary:
+            boundaries.append(end_boundary)
+        return boundaries, {}, start_anchor, end_boundary
 
     delta_by_ts: Dict[int, int] = {int(ts): int(total or 0) for ts, total in rows}
     ts_list = [int(ts) for ts, _ in rows]
@@ -589,16 +632,16 @@ def _build_boundaries_for_player(db: Session, *, player_id: int, metric_ids: Lis
         return boundaries, delta_by_ts, first_ts, last_ts
 
     start_anchor = _align_down_calendar((start_ts or first_ts), granularity, tz)
+    end_boundary = int(effective_end_ts if effective_end_ts is not None else last_ts)
     boundaries: List[int] = []
     cur = start_anchor
-    while cur < last_ts:
+    while cur < end_boundary:
         cur = _next_boundary(cur, granularity, tz)
-        if cur <= last_ts:
-            boundaries.append(cur)
-    if not boundaries or boundaries[-1] != last_ts:
-        boundaries.append(last_ts)
+        boundaries.append(cur)
+    if not boundaries or boundaries[-1] != end_boundary:
+        boundaries.append(end_boundary)
 
-    return boundaries, delta_by_ts, start_anchor, last_ts
+    return boundaries, delta_by_ts, start_anchor, end_boundary
 
 
 def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity: str = "10min",
