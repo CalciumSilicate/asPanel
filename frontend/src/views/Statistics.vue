@@ -53,6 +53,11 @@
                 <el-option v-for="g in granularities" :key="g" :label="g" :value="g"/>
               </el-select>
             </el-form-item>
+            <el-form-item label="玩家">
+              <el-select v-model="selectedPlayers" multiple filterable remote :remote-method="searchPlayers" :loading="playersLoading" collapse-tags placeholder="输入以搜索玩家" style="min-width: 320px">
+                <el-option v-for="opt in playerOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+              </el-select>
+            </el-form-item>
           </el-form>
         </el-card>
 
@@ -101,6 +106,12 @@ const servers = ref<any[]>([])
 const serverNames = computed(() => servers.value.map((s:any) => (s.path?.split('/').pop()) || s.name))
 const selectedServerNames = ref<string[]>([])
 const selectedServerIds = ref<number[]>([])
+// 选中的玩家 UUID 列表（用于右侧图表与筛选）
+const selectedPlayers = ref<string[]>([])
+
+// 玩家远程搜索
+const playersLoading = ref(false)
+const playerOptions = ref<{label:string,value:string}[]>([])
 
 const metricOptions = ref<string[]>([])
 const metricsLoading = ref(false)
@@ -146,6 +157,15 @@ function shortUuid(u: string): string { return (u||'').slice(0,8) }
 function showName(u: string): string {
   const p = players.value.find((x:any) => x.uuid === u)
   return p?.player_name || shortUuid(u)
+}
+
+async function searchPlayers(query: string) {
+  playersLoading.value = true
+  try {
+    const q = (query || '').toLowerCase()
+    const list = players.value.filter((p:any) => (p.player_name||'').toLowerCase().includes(q) || (p.uuid||'').toLowerCase().includes(q))
+    playerOptions.value = list.slice(0,50).map((p:any) => ({ label: p.player_name ? `${p.player_name} (${p.uuid.slice(0,8)})` : p.uuid, value: p.uuid }))
+  } finally { playersLoading.value = false }
 }
 
 const STEP_SECONDS: Record<string, number> = { '10min':600, '30min':1800, '1h':3600, '12h':43200, '24h':86400, '1week':604800, '1month':2629800, '6month':15778800, '1year':31557600 }
@@ -213,7 +233,14 @@ async function queryStatsForTopPlayers() {
   // 依据当前排行榜前五名作为右图玩家，自动查询与渲染
   if (!canQuery.value) return
   await ensureCharts()
-  const topUuids = rankItems.value.map((x:any)=>x.player_uuid).filter(Boolean).slice(0,5)
+  let topUuids = selectedPlayers.value.slice(0,5)
+  if (topUuids.length === 0) {
+    topUuids = rankItems.value.map((x:any)=>x.player_uuid).filter(Boolean).slice(0,5)
+  }
+  if (topUuids.length === 0) {
+    // 回退：玩家列表前 5 个
+    topUuids = players.value.slice(0,5).map((p:any)=>p.uuid)
+  }
   if (topUuids.length === 0) return
   const base = { player_uuid: topUuids, metric: selectedMetrics.value, granularity: granularity.value, namespace: 'minecraft', server_id: selectedServerIds.value }
   const [deltaDict, totalDict] = await Promise.all([ fetchDeltaSeries(base), fetchTotalSeries(base) ])
@@ -324,20 +351,20 @@ async function drawRankChart(items: any[]) {
 async function refreshRanks(showTip=false) {
   if (!canQuery.value) return
   if (rankMode.value === 'total') {
-    if (!rankAtTs.value) {
-      if (showTip) {
-        const { ElMessage } = await import('element-plus')
-        ElMessage.info('请在右侧 Total 图表点击一个时间点作为时刻')
-      }
-      return
-    }
-    const list = await fetchLeaderboardTotal({ metric: selectedMetrics.value, at: toIso(new Date(rankAtTs.value*1000)), server_id: selectedServerIds.value, limit: 10 })
+    // 若未选择时刻，默认使用后端“当前时刻”逻辑（不传 at）
+    const list = await fetchLeaderboardTotal({ metric: selectedMetrics.value, server_id: selectedServerIds.value, limit: 10, ...(rankAtTs.value ? { at: toIso(new Date(rankAtTs.value*1000)) } : {}) })
     await drawRankChart(list)
   } else {
     // 使用当前 dataZoom 选区
     const s = currentZoomRange.startTs
     const e = currentZoomRange.endTs
-    if (!s || !e) return
+    if (!s || !e) {
+      if (showTip) {
+        const { ElMessage } = await import('element-plus')
+        ElMessage.info('请先在右侧图表底部滑块选择时段，再查看增量榜')
+      }
+      return
+    }
     const list = await fetchLeaderboardDelta({ metric: selectedMetrics.value, start: toIso(new Date(s*1000)), end: toIso(new Date(e*1000)), server_id: selectedServerIds.value, limit: 10 })
     await drawRankChart(list)
   }
@@ -360,6 +387,11 @@ watch(granularity, async () => {
   if (canQuery.value) await queryStatsForTopPlayers()
 })
 
+watch(selectedPlayers, async () => {
+  // 手动选择玩家时，右图按所选玩家渲染
+  if (canQuery.value) await queryStatsForTopPlayers()
+})
+
 watch(rankMode, async (m) => {
   if (m === 'delta' && !zoomRangeReady.value) {
     const { ElMessage } = await import('element-plus')
@@ -377,8 +409,7 @@ watch(rankAtTs, async () => {
 onMounted(async () => {
   await Promise.all([fetchPlayers(), fetchServers()])
   if (canQuery.value) {
-    // 初始若没有时刻，先不显示总量榜，待用户点击 Total 曲线
-    // 但为方便体验，若后端有数据，可自动选用最后一个点作为默认时刻（等右侧曲线第一次渲染后点击事件会更新榜单）
+    await refreshRanks(false)
   }
 })
 </script>
@@ -405,4 +436,3 @@ onMounted(async () => {
 .server-checkboxes { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; }
 
 </style>
-

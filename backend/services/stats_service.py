@@ -194,8 +194,6 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
 
         def _compute_delta(prev_total: Optional[int], curr_total: int) -> Tuple[int, int]:
             if prev_total is None:
-                return 0, 0
-            if curr_total < prev_total:
                 return 0, 1
             return int(curr_total - prev_total), 0
 
@@ -259,8 +257,8 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
                 mid = metric_id_map[metric]
                 curr_total = _read_metric_from_json(js, metric)
                 prev_total = prev_map.get(mid)
-                delta, reset = _compute_delta(prev_total, curr_total)
-                if delta == 0 and reset == 0:
+                delta, new = _compute_delta(prev_total, curr_total)
+                if delta == 0 and not new:
                     continue
                 # 查找是否已存在同(ts, server, player, metric)记录
                 existing = db.execute(
