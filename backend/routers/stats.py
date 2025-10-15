@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Query
 from typing import List, Tuple, Optional
+from fastapi import Query as _Q
 
 from backend.services import stats_service
 
@@ -14,6 +15,7 @@ def api_delta_series(
     start: Optional[str] = Query(None, description="起始时间 ISO8601，可为空"),
     end: Optional[str] = Query(None, description="结束时间 ISO8601，可为空"),
     namespace: str = Query("minecraft", description="命名空间，默认 minecraft"),
+    server_ids: Optional[List[int]] = _Q(None, description="限定参与聚合的服务器ID列表；留空表示全部服务器"),
 ):
     """按时间桶返回 delta（ticks）序列。"""
     return stats_service.get_delta_series(
@@ -23,6 +25,7 @@ def api_delta_series(
         start=start,
         end=end,
         namespace=namespace,
+        server_ids=server_ids,
     )
 
 
@@ -34,6 +37,7 @@ def api_total_series(
     start: Optional[str] = Query(None, description="起始时间 ISO8601，可为空"),
     end: Optional[str] = Query(None, description="结束时间 ISO8601，可为空"),
     namespace: str = Query("minecraft", description="命名空间，默认 minecraft"),
+    server_ids: Optional[List[int]] = _Q(None, description="限定参与聚合的服务器ID列表；留空表示全部服务器"),
 ):
     """按时间桶返回重建的 total（ticks）序列。"""
     return stats_service.get_total_series(
@@ -43,5 +47,6 @@ def api_total_series(
         start=start,
         end=end,
         namespace=namespace,
+        server_ids=server_ids,
     )
 

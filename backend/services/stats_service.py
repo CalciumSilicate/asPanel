@@ -134,7 +134,7 @@ def discover_metrics_from_all_servers() -> List[str]:
     return metrics
 
 
-def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], *, namespace: str = DEFAULT_NAMESPACE) -> None:
+def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], *, namespace: str = DEFAULT_NAMESPACE) -> int:
     """对单个服务器执行一次入库（使用主库 models 定义），包含：
     - 跳过未修改的 JSON（基于 JsonDim.last_read_time 与文件 mtime）
     - 缓存 JSON 解析结果，避免重复读取
@@ -154,6 +154,7 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
         return
 
     db = SessionLocal()
+    rows_written_total = 0
     try:
         # 预取 json_dim map
         json_dim_map = crud.get_json_dim_map_for_server(db, server_id)
@@ -245,6 +246,7 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
 
             # 计算并写入变更（合并 upsert 行为）
             to_add: list[models.PlayerMetrics] = []
+            updated_count = 0
             for metric in metrics:
                 mid = metric_id_map[metric]
                 curr_total = _read_metric_from_json(js, metric)
@@ -271,14 +273,18 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
                     existing.total = int(curr_total)
                     existing.delta = int(delta)
                     db.add(existing)
+                    updated_count += 1
 
             if to_add:
                 db.add_all(to_add)
             # 更新 json_dim 的 last_read_time（读取时间点）
             crud.upsert_json_dim_last_read(db, server_id, fn, now)
 
+            rows_written_total += updated_count + len(to_add)
+
         db.commit()
         logger.debug(f"ingested {stats_dir}")
+        return rows_written_total
     finally:
         db.close()
 
@@ -339,8 +345,11 @@ async def ingest_scheduler_loop():
             with SessionLocal() as db:
                 servers = crud.get_all_servers(db)
             processed = 0
+            inserted_rows_total = 0
+            ignored = 0
             for srv in servers:
                 if srv.id in ignore_ids:
+                    ignored += 1
                     continue
                 stats_dir = _server_stats_dir(srv.path)
                 # 若服务器在运行，先 save-all
@@ -352,9 +361,10 @@ async def ingest_scheduler_loop():
                 except Exception:
                     pass
                 # 入库放到线程池中，避免阻塞事件循环
-                await asyncio.to_thread(ingest_once_for_server, srv.id, stats_dir, metrics)
+                inserted = await asyncio.to_thread(ingest_once_for_server, srv.id, stats_dir, metrics)
+                inserted_rows_total += int(inserted or 0)
                 processed += 1
-            logger.info(f"统计入库完成 | 服务器数={processed} | 指标数={len(metrics)}")
+            logger.info(f"统计入库完成 | 服务器数={processed} | 指标数={len(metrics)} | ignored={ignored} | rows_written={inserted_rows_total}")
         except Exception as e:
             logger.opt(exception=e).error("统计入库循环发生异常")
         finally:
@@ -407,7 +417,8 @@ def _align_floor(ts: int, step: int) -> int:
 
 def get_delta_series(*, player_uuid: str, metric: str, granularity: str = "10min",
                      start: Optional[str] = None, end: Optional[str] = None,
-                     namespace: str = DEFAULT_NAMESPACE) -> List[Tuple[int, int]]:
+                     namespace: str = DEFAULT_NAMESPACE,
+                     server_ids: Optional[List[int]] = None) -> List[Tuple[int, int]]:
     metric = _normalize_metric(metric)
     step = _GRANULARITY_SECONDS.get(granularity)
     if step is None:
@@ -448,7 +459,7 @@ def get_delta_series(*, player_uuid: str, metric: str, granularity: str = "10min
         end_ts = _align_floor(end_ts, step)
 
         # 汇总不同 server_id 在同一 ts 的 delta
-        rows = db.execute(
+        stmt = (
             select(models.PlayerMetrics.ts, func.sum(models.PlayerMetrics.delta))
             .where(
                 models.PlayerMetrics.player_id == player_id,
@@ -458,7 +469,10 @@ def get_delta_series(*, player_uuid: str, metric: str, granularity: str = "10min
             )
             .group_by(models.PlayerMetrics.ts)
             .order_by(models.PlayerMetrics.ts.asc())
-        ).all()
+        )
+        if server_ids:
+            stmt = stmt.where(models.PlayerMetrics.server_id.in_(server_ids))
+        rows = db.execute(stmt).all()
 
         out: List[Tuple[int, int]] = []
         bucket = start_ts
@@ -479,7 +493,8 @@ def get_delta_series(*, player_uuid: str, metric: str, granularity: str = "10min
 
 def get_total_series(*, player_uuid: str, metric: str, granularity: str = "10min",
                      start: Optional[str] = None, end: Optional[str] = None,
-                     namespace: str = DEFAULT_NAMESPACE) -> List[Tuple[int, int]]:
+                     namespace: str = DEFAULT_NAMESPACE,
+                     server_ids: Optional[List[int]] = None) -> List[Tuple[int, int]]:
     metric = _normalize_metric(metric)
     step = _GRANULARITY_SECONDS.get(granularity)
     if step is None:
@@ -501,14 +516,19 @@ def get_total_series(*, player_uuid: str, metric: str, granularity: str = "10min
         if player_id is None:
             return []
 
-        t_min = db.scalar(
-            select(func.min(models.PlayerMetrics.ts))
-            .where(models.PlayerMetrics.player_id == player_id, models.PlayerMetrics.metric_id == metric_id)
+        tmin_stmt = select(func.min(models.PlayerMetrics.ts)).where(
+            models.PlayerMetrics.player_id == player_id,
+            models.PlayerMetrics.metric_id == metric_id,
         )
-        t_max = db.scalar(
-            select(func.max(models.PlayerMetrics.ts))
-            .where(models.PlayerMetrics.player_id == player_id, models.PlayerMetrics.metric_id == metric_id)
+        tmax_stmt = select(func.max(models.PlayerMetrics.ts)).where(
+            models.PlayerMetrics.player_id == player_id,
+            models.PlayerMetrics.metric_id == metric_id,
         )
+        if server_ids:
+            tmin_stmt = tmin_stmt.where(models.PlayerMetrics.server_id.in_(server_ids))
+            tmax_stmt = tmax_stmt.where(models.PlayerMetrics.server_id.in_(server_ids))
+        t_min = db.scalar(tmin_stmt)
+        t_max = db.scalar(tmax_stmt)
         pool_min = t_min
         pool_max = t_max
         if pool_min is None or pool_max is None:
@@ -520,7 +540,7 @@ def get_total_series(*, player_uuid: str, metric: str, granularity: str = "10min
         end_ts = _align_floor(req_end, step)
 
         # 基准：各 server 在 start_ts 时刻（或之前）最新一条 total 的和
-        base_rows = db.execute(
+        base_stmt = (
             select(
                 models.PlayerMetrics.server_id,
                 models.PlayerMetrics.ts,
@@ -532,7 +552,10 @@ def get_total_series(*, player_uuid: str, metric: str, granularity: str = "10min
                 models.PlayerMetrics.ts <= start_ts,
             )
             .order_by(models.PlayerMetrics.server_id.asc(), models.PlayerMetrics.ts.asc())
-        ).all()
+        )
+        if server_ids:
+            base_stmt = base_stmt.where(models.PlayerMetrics.server_id.in_(server_ids))
+        base_rows = db.execute(base_stmt).all()
         last_total_by_server: dict[int, Tuple[int, int]] = {}
         for sid, t, tot in base_rows:
             # 仅保留每个 server 最新（<= start_ts）的记录
@@ -542,7 +565,7 @@ def get_total_series(*, player_uuid: str, metric: str, granularity: str = "10min
         base_total = sum(v[1] for v in last_total_by_server.values())
 
         # 取 start_ts 之后的增量（汇总不同 server）
-        delta_rows = db.execute(
+        delta_stmt = (
             select(models.PlayerMetrics.ts, func.sum(models.PlayerMetrics.delta))
             .where(
                 models.PlayerMetrics.player_id == player_id,
@@ -552,7 +575,10 @@ def get_total_series(*, player_uuid: str, metric: str, granularity: str = "10min
             )
             .group_by(models.PlayerMetrics.ts)
             .order_by(models.PlayerMetrics.ts.asc())
-        ).all()
+        )
+        if server_ids:
+            delta_stmt = delta_stmt.where(models.PlayerMetrics.server_id.in_(server_ids))
+        delta_rows = db.execute(delta_stmt).all()
 
         out: List[Tuple[int, int]] = []
         cumulative = int(base_total)
