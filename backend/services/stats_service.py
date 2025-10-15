@@ -283,7 +283,7 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
             rows_written_total += updated_count + len(to_add)
 
         db.commit()
-        logger.debug(f"ingested {stats_dir}")
+        logger.debug(f"服务器 {server_id} 入库完成 stats_dir={stats_dir} | rows_written={rows_written_total}")
         return rows_written_total
     finally:
         db.close()
@@ -327,7 +327,7 @@ async def _sleep_until_next_10min_boundary():
 async def ingest_scheduler_loop():
     """后台循环：每逢 10 分钟整点触发一次入库，并在运行中服务器执行 save-all。"""
     # 启动先对齐一次
-    # await _sleep_until_next_10min_boundary()
+    await _sleep_until_next_10min_boundary()
     while True:
         try:
             # 发现指标集合（全局）
@@ -348,10 +348,11 @@ async def ingest_scheduler_loop():
             inserted_rows_total = 0
             ignored = 0
             for srv in servers:
+                stats_dir = _server_stats_dir(srv.path)
                 if srv.id in ignore_ids:
                     ignored += 1
+                    logger.debug(f"ignored {stats_dir}")
                     continue
-                stats_dir = _server_stats_dir(srv.path)
                 # 若服务器在运行，先 save-all
                 try:
                     proc = mcdr_manager.processes.get(srv.id)
