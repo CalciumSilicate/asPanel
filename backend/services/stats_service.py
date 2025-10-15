@@ -260,6 +260,8 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
                 delta, new = _compute_delta(prev_total, curr_total)
                 if delta == 0 and not new:
                     continue
+                if curr_total == 0 and new:
+                    continue
                 # 查找是否已存在同(ts, server, player, metric)记录
                 existing = db.execute(
                     select(models.PlayerMetrics)
