@@ -1,24 +1,37 @@
 <template>
   <div class="statistics-view">
 
-    <el-row :gutter="16">
+    <el-row :gutter="16" class="main-row">
       <!-- 左：排行榜 -->
       <el-col :xs="24" :lg="7">
-        <el-card shadow="never" class="rank-card">
-          <template #header>
-            <div class="card-header">排行榜</div>
-          </template>
+        <div class="left-stack">
+          <el-card shadow="never" class="rank-card">
+            <template #header>
+              <div class="card-header">排行榜</div>
+            </template>
 
-          <!-- 横向柱状图（dataZoom 移至底部） -->
-          <div ref="rankChartRef" class="rank-chart"></div>
-        </el-card>
+            <!-- 横向柱状图（含 dataZoom） -->
+            <div ref="rankChartRef" class="rank-chart"></div>
+          </el-card>
+          <!-- 百分比显示控制区域：移动到排行榜容器下方 -->
+          <div class="percent-panel">
+            <div class="mini-form">
+              <span class="percent-title">百分比显示</span>
+              <el-switch v-model="percentEnabled" />
+              <el-select v-model="percentBase" :disabled="!percentEnabled" placeholder="选择基准" style="width: 200px">
+                <el-option label="全服总计" value="global" />
+                <el-option v-for="opt in percentBaseCandidates" :key="opt.value" :label="opt.label" :value="opt.value" />
+              </el-select>
+            </div>
+          </div>
+        </div>
       </el-col>
 
       <!-- 右：筛选 + 统计视图 -->
       <el-col :xs="24" :lg="17">
         <el-card shadow="never" class="filter-card">
           <el-form :inline="true" label-width="80px" class="filter-form">
-            <!-- 第一行：数据来源、指标选择、指标预设、换算单位开关、百分比显示 -->
+            <!-- 第一行：数据来源、指标选择、指标预设、换算单位开关 -->
             <div class="mini-form">
               <el-form-item label="数据来源">
                 <el-popover placement="bottom-start" trigger="click" width="280">
@@ -46,16 +59,7 @@
                 </el-popover>
               </el-form-item>
               <el-form-item label="换算单位">
-                <el-switch v-model="convertEnabled" active-text="开启" inactive-text="关闭" />
-              </el-form-item>
-              <el-form-item label="百分比显示">
-                <div class="mini-form">
-                  <el-switch v-model="percentEnabled" />
-                  <el-select v-if="percentEnabled" v-model="percentBase" style="width: 160px">
-                    <el-option label="全服总计为100%" value="global" />
-                    <el-option label="选中玩家总计为100%" value="selected" />
-                  </el-select>
-                </div>
+                <el-switch v-model="convertEnabled"/>
               </el-form-item>
             </div>
 
@@ -358,16 +362,14 @@ async function queryStatsForTopPlayers() {
   totalDeltaSum.value = Number(Object.values(deltaDict).reduce((acc, arr) => acc + arr.reduce((s, [,v]) => s + Number(v||0), 0), 0).toFixed(2))
   totalLastTotal.value = Number(Object.values(totalDict).reduce((acc, arr) => acc + (arr.length ? Number(arr[arr.length-1][1]||0) : 0), 0).toFixed(2))
 
-  // 若开启百分比，将两张图的数据按基准统一缩放
-  const baseVal = percentBaseValue.value || 1
-  const scaleDict = (d:Record<string,[number,number][]>) => {
-    if (!percentEnabled.value) return d
-    const out: Record<string, [number, number][]> = {}
-    for (const [k, arr] of Object.entries(d)) out[k] = arr.map(([t,v]) => [t, Number(((Number(v||0)/baseVal)*100).toFixed(5))]) as [number,number][]
-    return out
-  }
-  const deltaOpt: any = buildSeriesOption(scaleDict(deltaDict), 'bar', granularity.value, 'delta')
-  const totalOpt: any = buildSeriesOption(scaleDict(totalDict), 'line', granularity.value, 'total')
+  // 百分比应用到 Total 累计趋势（按当前基准常量缩放）
+  const baseForPercent = percentBaseValueRank.value || 1
+  const pct = (v:number) => Number(((v / (baseForPercent || 1)) * 100).toPrecision(5))
+  const scaledTotalDict = percentEnabled.value
+    ? Object.fromEntries(Object.entries(totalDict).map(([k, arr]) => [k, arr.map(([t, v]) => [t, pct(Number(v||0))]) as [number, number][]]))
+    : totalDict
+  const deltaOpt: any = buildSeriesOption(deltaDict, 'bar', granularity.value, 'delta')
+  const totalOpt: any = buildSeriesOption(scaledTotalDict, 'line', granularity.value, 'total')
 
   deltaChart && deltaChart.setOption(deltaOpt, true)
   totalChart && totalChart.setOption(totalOpt, true)
@@ -457,14 +459,30 @@ async function refreshGlobalTotalAtTs(ts: number) {
 }
 // 百分比显示
 const percentEnabled = ref<boolean>(false)
-const percentBase = ref<'global'|'selected'>('global')
-const percentBaseValue = computed<number>(() => {
+const percentBase = ref<string>('global') // 'global' 或 'player:<uuid>'
+const percentBaseCandidates = computed(() => {
+  const arr = [] as {label:string,value:string}[]
+  // 仅加入数值不为 0 的玩家
+  for (const it of (rankItems.value || [])) {
+    const v = Number(it?.value || 0)
+    if (v > 0 && it?.player_uuid) arr.push({ label: it.player_name || shortUuid(String(it.player_uuid)), value: `player:${String(it.player_uuid)}` })
+  }
+  return arr
+})
+const percentBaseValueRank = computed<number>(() => {
   if (!percentEnabled.value) return 1
-  return percentBase.value === 'global' ? Number(globalTotalSum.value || 1) : Number(totalLastTotal.value || 1)
+  if (percentBase.value === 'global') return Number(globalTotalSum.value || 1)
+  if (percentBase.value.startsWith('player:')) {
+    const uid = percentBase.value.slice(7)
+    const it = (rankItems.value || []).find((x:any)=> String(x.player_uuid) === uid)
+    const raw = Number(it?.value || 0)
+    return convertEnabled.value ? applyConvert(raw) : raw
+  }
+  return 1
 })
 
 function toPercent(val: number): number {
-  const base = percentBaseValue.value || 1
+  const base = percentBaseValueRank.value || 1
   return (Number(val || 0) / base) * 100
 }
 
@@ -513,16 +531,13 @@ async function drawRankChart(items: any[]) {
   const convVals = convertEnabled.value ? rawVals.map(v => applyConvert(v)) : rawVals
   // 计算百分比基准（若开启百分比：默认用全服总计。若存在 rankAtTs 则以该时刻刷新全服总计）
   let base = 1
-  if (percentEnabled.value) {
-    if (percentBase.value === 'global') base = Number(globalTotalSum.value || 1)
-    else base = Number(totalLastTotal.value || 1)
-  }
+  if (percentEnabled.value) base = percentBaseValueRank.value || 1
   const scaled = percentEnabled.value ? convVals.map(v => (v / (base || 1)) * 100) : convVals
   const vals = (!percentEnabled.value && !convertEnabled.value)
     ? scaled.map(v => Math.round(v))
     : scaled
   const option = {
-    grid: { left: 20, right: 30, top: 8, bottom: 26, containLabel: true },
+    grid: { left: 20, right: 30, top: 8, bottom: 36, containLabel: true },
     xAxis: { type: 'value' },
     yAxis: {
       type: 'category',
@@ -538,7 +553,7 @@ async function drawRankChart(items: any[]) {
     },
     dataZoom: [
       { type: 'inside', yAxisIndex: 0 },
-      { type: 'slider', yAxisIndex: 0, orient: 'horizontal', bottom: 2, height: 14 },
+      { type: 'slider', yAxisIndex: 0, orient: 'horizontal', bottom: 6, height: 16 },
     ],
     series: [{ type: 'bar', data: vals, label: { show: true, position: 'right', formatter: (p:any) => {
       const v = Number(p.value||0)
@@ -558,6 +573,9 @@ async function refreshRanks(_showTip=false) {
   // 若未选择时刻，默认使用后端“当前时刻”逻辑（不传 at）
   const list = await fetchLeaderboardTotal({ metric: selectedMetrics.value, server_id: selectedServerIds.value, limit: 10, ...(rankAtTs.value ? { at: toIso(new Date(rankAtTs.value*1000)) } : {}) })
   await drawRankChart(list)
+  // 同步刷新全服总计，用于“全服总计”为百分比基准
+  const ts = rankAtTs.value || currentTotalEndTs || Math.floor(Date.now()/1000)
+  await refreshGlobalTotalAtTs(ts)
 }
 
 watch(selectedMetrics, async () => {
@@ -589,9 +607,22 @@ watch(convertFrom, async (v) => {
 watch(convertTo, async () => { if (canQuery.value) { await queryStatsForTopPlayers(); await refreshRanks(false) } })
 watch(convertEnabled, async () => { if (canQuery.value) { await queryStatsForTopPlayers(); await refreshRanks(false) } })
 
-// 百分比：开关/基准变化时刷新
+// 百分比：开关/基准变化时，仅重绘排行榜（趋势图不受影响）
 watch(percentEnabled, async () => { if (canQuery.value) { await queryStatsForTopPlayers(); await refreshRanks(false) } })
 watch(percentBase, async () => { if (canQuery.value) { await queryStatsForTopPlayers(); await refreshRanks(false) } })
+watch(globalTotalSum, async () => {
+  if (percentEnabled.value && percentBase.value === 'global' && canQuery.value) {
+    await refreshRanks(false)
+  }
+})
+watch(rankItems, async () => {
+  if (!percentEnabled.value) return
+  if (percentBase.value === 'global') return
+  const uid = percentBase.value.startsWith('player:') ? percentBase.value.slice(7) : ''
+  if (!uid) { percentBase.value = 'global'; return }
+  const exists = (rankItems.value || []).some((x:any)=> String(x.player_uuid) === uid && Number(x.value||0) > 0)
+  if (!exists) percentBase.value = 'global'
+})
 
 watch(rankAtTs, async () => {
   if (canQuery.value) await refreshRanks(false)
@@ -601,6 +632,9 @@ onMounted(async () => {
   await Promise.all([fetchPlayers(), fetchServers()])
   if (canQuery.value) {
     await refreshRanks(false)
+    // 初始同步全服总计
+    const ts = rankAtTs.value || currentTotalEndTs || Math.floor(Date.now()/1000)
+    await refreshGlobalTotalAtTs(ts)
   }
 })
 </script>
@@ -621,8 +655,12 @@ onMounted(async () => {
 .kpi-value { font-size: 22px; font-weight: 600; }
 .chart-card { border-radius: 8px; }
 .chart { width: 100%; height: 300px; }
-.rank-card { height: auto; padding-bottom: 8px; }
-.rank-chart { width: 100%; height: 420px; }
+.main-row { align-items: stretch; }
+.left-stack { display: flex; flex-direction: column; height: 100%; }
+.rank-card { flex: 1; padding-bottom: 8px; }
+.rank-chart { width: 100%; height: 520px; }
+.percent-panel { margin-top: 8px; padding: 6px 8px; }
+.percent-title { color: var(--el-text-color-regular); margin-right: 6px; }
 .server-checkboxes { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; }
 .preset-panel { display: flex; flex-wrap: wrap; gap: 6px; }
 
