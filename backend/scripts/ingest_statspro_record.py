@@ -67,6 +67,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--server-id", type=int, required=True, help="目标服务器 ID（asPanel 数据库内 server_id）")
     p.add_argument("--record-root", type=str, required=True, help="StatsPro record 目录根路径")
     p.add_argument("--namespace", type=str, default="minecraft", help="命名空间，默认 minecraft")
+    p.add_argument("--now-stats-dir", type=str, default=None, help="现存 stats 目录（仅当快照文件名出现在该目录时才读取）")
     p.add_argument("--dry-run", action="store_true", help="试运行：仅打印概要，不写入数据库")
     return p.parse_args()
 
@@ -223,7 +224,8 @@ def upsert_metrics_for_snapshot(db, *, server_id: int, ts: int, uuid: str, metri
     return affected
 
 
-def ingest_record_root(server_id: int, record_root: Path, namespace: str = "minecraft", dry_run: bool = False) -> int:
+def ingest_record_root(server_id: int, record_root: Path, namespace: str = "minecraft", dry_run: bool = False,
+                       now_stats_dir: Optional[Path] = None) -> int:
     snaps = iter_snapshot_dirs(record_root)
     if not snaps:
         print(f"[WARN] 未在 {record_root} 发现快照目录")
@@ -246,14 +248,38 @@ def ingest_record_root(server_id: int, record_root: Path, namespace: str = "mine
 
     pbar = tqdm(total=total_files, unit="file", desc="Ingesting", ncols=80) if tqdm else None
 
+    # 若提供 now-stats-dir，则仅处理该目录中存在的 UUID
+    now_uuid_set: Optional[set[str]] = None
+    if now_stats_dir:
+        try:
+            now_uuid_set = set([p.stem for p in Path(now_stats_dir).glob('*.json')])
+            print(f"[INFO] 启用 now-stats 过滤，匹配 UUID 数={len(now_uuid_set)}")
+        except Exception:
+            now_uuid_set = None
+
     total_rows = 0
+    # 记录上一个快照中每个 UUID 的摘要（用于跳过完全相同的文件）
+    import hashlib
+    last_hash_by_uuid: Dict[str, str] = {}
     with SessionLocal() as db:
         for ts, snap_dir, files in snap_infos:
             batch_rows = 0
             for fp in files:
                 uuid = fp.stem
+                # 过滤：仅处理现在 still 存在于 now-stats-dir 的 UUID
+                if now_uuid_set is not None and uuid not in now_uuid_set:
+                    if pbar: pbar.update(1)
+                    continue
                 try:
-                    js = json.loads(fp.read_text(encoding="utf-8"))
+                    data_bytes = fp.read_bytes()
+                    # 与上一个快照比较：完全一致则跳过
+                    h = hashlib.md5(data_bytes).hexdigest()
+                    if last_hash_by_uuid.get(uuid) == h:
+                        if pbar: pbar.update(1)
+                        continue
+                    # 记录当前摘要
+                    last_hash_by_uuid[uuid] = h
+                    js = json.loads(data_bytes.decode('utf-8'))
                 except Exception:
                     print(f"[WARN] 解析失败，跳过: {fp}")
                     if pbar: pbar.update(1)
@@ -284,7 +310,8 @@ def main():
     root = Path(args.record_root).expanduser().resolve()
     if not root.is_dir():
         raise SystemExit(f"record-root 不存在或不可读: {root}")
-    rows = ingest_record_root(args.server_id, root, namespace=args.namespace, dry_run=args.dry_run)
+    now_dir = Path(args.now_stats_dir).expanduser().resolve() if args.now_stats_dir else None
+    rows = ingest_record_root(args.server_id, root, namespace=args.namespace, dry_run=args.dry_run, now_stats_dir=now_dir)
     print(f"[DONE] 导入完成，累计写入行数={rows} (dry_run={args.dry_run})")
 
 
