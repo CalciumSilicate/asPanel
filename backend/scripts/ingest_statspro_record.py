@@ -41,6 +41,13 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy import select, func
 
+# 为直接脚本运行补齐模块搜索路径（将仓库根目录加入 sys.path）
+import sys
+from pathlib import Path as _PathForSys
+_ROOT = _PathForSys(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 # 复用后端 ORM 与会话
 from backend.database import SessionLocal
 from backend import models
@@ -252,4 +259,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
