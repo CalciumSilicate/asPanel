@@ -63,7 +63,7 @@ def leaderboard_total(metric: List[str] = Query(..., description="指标列表�
                       at: Optional[str] = Query(None, description="统计时刻，ISO；默认当前"),
                       server_id: Optional[List[int]] = Query(None, description="数据源服务器ID"),
                       namespace: str = Query("minecraft", description="命名空间"),
-                      limit: int = Query(50, ge=1, le=500)):
+                      limit: int = Query(50, ge=1)):
     return stats_service.leaderboard_total(metrics=metric, at=at, server_ids=server_id,
                                            namespace=namespace, limit=limit)
 
@@ -74,6 +74,6 @@ def leaderboard_delta(metric: List[str] = Query(..., description="指标列表�
                       end: Optional[str] = Query(None, description="结束时间，ISO"),
                       server_id: Optional[List[int]] = Query(None, description="数据源服务器ID"),
                       namespace: str = Query("minecraft", description="命名空间"),
-                      limit: int = Query(50, ge=1, le=500)):
+                      limit: int = Query(50, ge=1)):
     return stats_service.leaderboard_delta(metrics=metric, start=start, end=end,
                                            server_ids=server_id, namespace=namespace, limit=limit)

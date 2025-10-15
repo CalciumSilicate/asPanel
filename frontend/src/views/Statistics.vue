@@ -18,7 +18,7 @@
       <el-col :xs="24" :lg="17">
         <el-card shadow="never" class="filter-card">
           <el-form :inline="true" label-width="80px" class="filter-form">
-            <!-- 第一行：数据来源、指标选择、换算单位开关 -->
+            <!-- 第一行：数据来源、指标选择、指标预设、换算单位开关、百分比显示 -->
             <div class="mini-form">
               <el-form-item label="数据来源">
                 <el-popover placement="bottom-start" trigger="click" width="280">
@@ -31,12 +31,31 @@
                 </el-popover>
               </el-form-item>
               <el-form-item label="指标">
-                <el-select v-model="selectedMetrics" multiple filterable remote :remote-method="searchMetrics" :loading="metricsLoading" collapse-tags placeholder="输入以搜索指标" style="min-width: 320px">
+                <el-select v-model="selectedMetrics" multiple filterable remote :remote-method="searchMetrics" :loading="metricsLoading" collapse-tags collapse-tags-tooltip placeholder="输入以搜索指标" style="min-width: 320px">
                   <el-option v-for="m in metricOptions" :key="m" :label="m" :value="m"/>
                 </el-select>
               </el-form-item>
+              <el-form-item label="指标预设">
+                <el-popover placement="bottom-start" trigger="click" width="380">
+                  <template #reference>
+                    <el-button class="btn-scope-like">指标预设</el-button>
+                  </template>
+                  <div class="preset-panel">
+                    <el-button v-for="p in metricPresets" :key="p.key" size="small" @click="applyPreset(p.key)">{{ p.name }}</el-button>
+                  </div>
+                </el-popover>
+              </el-form-item>
               <el-form-item label="换算单位">
                 <el-switch v-model="convertEnabled" active-text="开启" inactive-text="关闭" />
+              </el-form-item>
+              <el-form-item label="百分比显示">
+                <div class="mini-form">
+                  <el-switch v-model="percentEnabled" />
+                  <el-select v-if="percentEnabled" v-model="percentBase" style="width: 160px">
+                    <el-option label="全服总计为100%" value="global" />
+                    <el-option label="选中玩家总计为100%" value="selected" />
+                  </el-select>
+                </div>
               </el-form-item>
             </div>
 
@@ -78,16 +97,16 @@
 
         <el-row :gutter="16" class="kpi-row">
           <el-col :xs="24" :sm="12" :lg="6">
-            <el-card shadow="hover" class="kpi-card"><div class="kpi-title">玩家数量</div><div class="kpi-value">{{ Math.min(5, rankItems.length || 0) }}</div></el-card>
+            <el-card shadow="hover" class="kpi-card"><div class="kpi-title">选中玩家数量</div><div class="kpi-value">{{ selectedPlayerCount }}</div></el-card>
           </el-col>
           <el-col :xs="24" :sm="12" :lg="6">
-            <el-card shadow="hover" class="kpi-card"><div class="kpi-title">指标数</div><div class="kpi-value">{{ selectedMetrics.length }}</div></el-card>
+            <el-card shadow="hover" class="kpi-card"><div class="kpi-title">区间合计(Δ)</div><div class="kpi-value">{{ fmtKpi(totalDeltaSum) }}</div></el-card>
           </el-col>
           <el-col :xs="24" :sm="12" :lg="6">
-            <el-card shadow="hover" class="kpi-card"><div class="kpi-title">区间合计(Δ)</div><div class="kpi-value">{{ totalDeltaSum }}</div></el-card>
+            <el-card shadow="hover" class="kpi-card"><div class="kpi-title">全服总计</div><div class="kpi-value">{{ fmtKpi(globalTotalSum) }}</div></el-card>
           </el-col>
           <el-col :xs="24" :sm="12" :lg="6">
-            <el-card shadow="hover" class="kpi-card"><div class="kpi-title">末值合计(Total)</div><div class="kpi-value">{{ totalLastTotal }}</div></el-card>
+            <el-card shadow="hover" class="kpi-card"><div class="kpi-title">选中玩家总计</div><div class="kpi-value">{{ fmtKpi(totalLastTotal) }}</div></el-card>
           </el-col>
         </el-row>
 
@@ -135,6 +154,33 @@ const granularities = ['10min', '30min', '1h', '12h', '24h', '1week', '1month', 
 const granularity = ref<string>('10min')
 const range = ref<[Date, Date] | null>(null)
 
+// 指标预设
+const metricPresets = [
+  { key: 'online_time', name: '在线时长', metrics: ['custom.play_one_minute','custom.play_time'], conv: { on: true, from: 'gt', to: 'hour' } },
+  { key: 'deaths', name: '死亡次数', metrics: ['custom.deaths'], conv: { on: false } },
+  { key: 'mined_total', name: '挖掘总数', metrics: (()=>{ const mats=['wooden','stone','iron','golden','diamond','netherite','copper']; const tools=['axe','sword','pickaxe','shovel','hoe']; const combos = mats.flatMap(m=>tools.map(t=>`used.${m}_${t}`)); return ['used.shears', ...combos] })(), conv: { on: false } },
+  { key: 'elytra_km', name: '鞘翅飞行距离', metrics: ['custom.aviate_one_cm'], conv: { on: true, from: 'cm', to: 'km' } },
+  { key: 'pearl_km', name: '珍珠传送距离', metrics: ['custom.ender_pearl_one_cm'], conv: { on: true, from: 'cm', to: 'km' } },
+  { key: 'vehicle_km', name: '载具行进距离', metrics: (()=>{ const vehicles=['boat','horse','minecart','pig','crouch']; return vehicles.map(v=>`custom.${v}_one_cm`) })(), conv: { on: true, from: 'cm', to: 'km' } },
+  { key: 'walk_km', name: '步行行进距离', metrics: ['custom.sprint_one_cm','custom.walk_one_cm','custom.walk_under_water_one_cm','custom.walk_on_water_one_cm'], conv: { on: true, from: 'cm', to: 'km' } },
+  { key: 'firework', name: '烟花火箭使用次数', metrics: ['custom.firework_boost'], conv: { on: false } },
+  { key: 'break_bedrock', name: '破基岩次数', metrics: ['custom.break_bedrock'], conv: { on: false } },
+  { key: 'totem_used', name: '不死图腾使用次数', metrics: ['used.totem_of_undying'], conv: { on: false } },
+]
+
+async function applyPreset(key: string) {
+  const p = metricPresets.find(x=>x.key===key)
+  if (!p) return
+  selectedMetrics.value = p.metrics.slice()
+  // 设置换算
+  convertEnabled.value = !!p.conv?.on
+  if (p.conv?.from) convertFrom.value = p.conv.from as any
+  if (p.conv?.to) convertTo.value = p.conv.to as any
+  // 刷新视图
+  await refreshRanks(false)
+  await queryStatsForTopPlayers()
+}
+
 const rankAtTs = ref<number | null>(null) // 由右侧 Total 图点击选择
 const rankChartRef = ref<HTMLElement | null>(null)
 let rankChart: any = null
@@ -148,12 +194,20 @@ const canQuery = computed(() => selectedMetrics.value.length > 0)
 
 const totalDeltaSum = ref<number>(0)
 const totalLastTotal = ref<number>(0)
+const globalTotalSum = ref<number>(0)
+let currentTotalEndTs: number | null = null
+
+const selectedPlayerCount = computed(() => {
+  if (selectedPlayers.value && selectedPlayers.value.length > 0) return selectedPlayers.value.length
+  if (rankItems.value && rankItems.value.length > 0) return Math.min(5, rankItems.value.length)
+  return Math.min(5, players.value.length || 0)
+})
 
 let currentDeltaXTimestamps: number[] = []
 let currentTotalXTimestamps: number[] = []
 
 // 换算单位配置
-const convertEnabled = ref<boolean>(false)
+const convertEnabled = ref<'boolean'>(false)
 const convertFrom = ref<'gt'|'cm'>('gt')
 const convertTo = ref<'sec'|'min'|'hour'|'day'|'km'>('hour')
 
@@ -304,8 +358,16 @@ async function queryStatsForTopPlayers() {
   totalDeltaSum.value = Number(Object.values(deltaDict).reduce((acc, arr) => acc + arr.reduce((s, [,v]) => s + Number(v||0), 0), 0).toFixed(2))
   totalLastTotal.value = Number(Object.values(totalDict).reduce((acc, arr) => acc + (arr.length ? Number(arr[arr.length-1][1]||0) : 0), 0).toFixed(2))
 
-  const deltaOpt: any = buildSeriesOption(deltaDict, 'bar', granularity.value, 'delta')
-  const totalOpt: any = buildSeriesOption(totalDict, 'line', granularity.value, 'total')
+  // 若开启百分比，将两张图的数据按基准统一缩放
+  const baseVal = percentBaseValue.value || 1
+  const scaleDict = (d:Record<string,[number,number][]>) => {
+    if (!percentEnabled.value) return d
+    const out: Record<string, [number, number][]> = {}
+    for (const [k, arr] of Object.entries(d)) out[k] = arr.map(([t,v]) => [t, Number(((Number(v||0)/baseVal)*100).toFixed(5))]) as [number,number][]
+    return out
+  }
+  const deltaOpt: any = buildSeriesOption(scaleDict(deltaDict), 'bar', granularity.value, 'delta')
+  const totalOpt: any = buildSeriesOption(scaleDict(totalDict), 'line', granularity.value, 'total')
 
   deltaChart && deltaChart.setOption(deltaOpt, true)
   totalChart && totalChart.setOption(totalOpt, true)
@@ -344,6 +406,9 @@ async function queryStatsForTopPlayers() {
         endSum += b
       }
       totalLastTotal.value = Number(endSum.toFixed(2))
+      // 记录末端时间并刷新全服总计（应用单位换算）
+      currentTotalEndTs = xArr[Math.min(xArr.length-1, Math.max(0,endIdx))] || null
+      currentTotalEndTs && refreshGlobalTotalAtTs(currentTotalEndTs)
     }
   }
   deltaChart && (deltaChart.off('dataZoom'), deltaChart.on('dataZoom', onZoom(deltaChart,'delta')))
@@ -381,6 +446,39 @@ async function fetchServers() {
   } catch { servers.value = [] }
 }
 
+async function refreshGlobalTotalAtTs(ts: number) {
+  try {
+    const list = await fetchLeaderboardTotal({ metric: selectedMetrics.value, server_id: selectedServerIds.value, limit: 10000, at: toIso(new Date(ts*1000)) })
+    const raw = (list || []).reduce((acc:number, it:any) => acc + Number(it.value||0), 0)
+    globalTotalSum.value = convertEnabled.value ? applyConvert(raw) : Number(raw)
+  } catch {
+    globalTotalSum.value = 0
+  }
+}
+// 百分比显示
+const percentEnabled = ref<boolean>(false)
+const percentBase = ref<'global'|'selected'>('global')
+const percentBaseValue = computed<number>(() => {
+  if (!percentEnabled.value) return 1
+  return percentBase.value === 'global' ? Number(globalTotalSum.value || 1) : Number(totalLastTotal.value || 1)
+})
+
+function toPercent(val: number): number {
+  const base = percentBaseValue.value || 1
+  return (Number(val || 0) / base) * 100
+}
+
+function fmtKpi(val: number): string {
+  if (percentEnabled.value) return Number(toPercent(val)).toPrecision(5) + '%'
+  if (convertEnabled.value) return Number(val || 0).toFixed(2)
+  return String(Math.round(Number(val || 0)))
+}
+
+function valueForChart(val: number): number {
+  if (!percentEnabled.value) return Number(val || 0)
+  return Number(toPercent(val))
+}
+
 function computeSelectedServerIds() {
   const nameToId = new Map<string, number>()
   servers.value.forEach((s:any) => nameToId.set((s.path?.split('/').pop()) || s.name, Number(s.id)))
@@ -411,7 +509,18 @@ async function drawRankChart(items: any[]) {
   if (!rankChart) rankChart = echarts.init(rankChartRef.value)
   rankItems.value = items || []
   const names = items.map(it => it.player_name || shortUuid(it.player_uuid))
-  const vals = items.map(it => applyConvert(Number(it.value||0)))
+  const rawVals = items.map(it => Number(it.value||0))
+  const convVals = convertEnabled.value ? rawVals.map(v => applyConvert(v)) : rawVals
+  // 计算百分比基准（若开启百分比：默认用全服总计。若存在 rankAtTs 则以该时刻刷新全服总计）
+  let base = 1
+  if (percentEnabled.value) {
+    if (percentBase.value === 'global') base = Number(globalTotalSum.value || 1)
+    else base = Number(totalLastTotal.value || 1)
+  }
+  const scaled = percentEnabled.value ? convVals.map(v => (v / (base || 1)) * 100) : convVals
+  const vals = (!percentEnabled.value && !convertEnabled.value)
+    ? scaled.map(v => Math.round(v))
+    : scaled
   const option = {
     grid: { left: 20, right: 30, top: 8, bottom: 26, containLabel: true },
     xAxis: { type: 'value' },
@@ -429,8 +538,13 @@ async function drawRankChart(items: any[]) {
     },
     dataZoom: [
       { type: 'inside', yAxisIndex: 0 },
+      { type: 'slider', yAxisIndex: 0, orient: 'horizontal', bottom: 2, height: 14 },
     ],
-    series: [{ type: 'bar', data: vals, label: { show: true, position: 'right', formatter: (p:any) => Number(p.value||0).toFixed(2) } }],
+    series: [{ type: 'bar', data: vals, label: { show: true, position: 'right', formatter: (p:any) => {
+      const v = Number(p.value||0)
+      if (percentEnabled.value) return Number(v).toPrecision(5) + '%'
+      return convertEnabled.value ? Number(v).toFixed(2) : String(Math.round(v))
+    } } }],
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
   }
   rankChart.setOption(option, true)
@@ -475,6 +589,10 @@ watch(convertFrom, async (v) => {
 watch(convertTo, async () => { if (canQuery.value) { await queryStatsForTopPlayers(); await refreshRanks(false) } })
 watch(convertEnabled, async () => { if (canQuery.value) { await queryStatsForTopPlayers(); await refreshRanks(false) } })
 
+// 百分比：开关/基准变化时刷新
+watch(percentEnabled, async () => { if (canQuery.value) { await queryStatsForTopPlayers(); await refreshRanks(false) } })
+watch(percentBase, async () => { if (canQuery.value) { await queryStatsForTopPlayers(); await refreshRanks(false) } })
+
 watch(rankAtTs, async () => {
   if (canQuery.value) await refreshRanks(false)
 })
@@ -506,5 +624,6 @@ onMounted(async () => {
 .rank-card { height: auto; padding-bottom: 8px; }
 .rank-chart { width: 100%; height: 420px; }
 .server-checkboxes { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; }
+.preset-panel { display: flex; flex-wrap: wrap; gap: 6px; }
 
 </style>
