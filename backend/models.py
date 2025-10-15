@@ -184,3 +184,16 @@ class PlayerMetrics(Base):
         Index("idx_player_metrics_ts", "ts"),
         Index("idx_player_metrics_metric_ts", "metric_id", "ts"),
     )
+
+
+class JsonDim(Base):
+    __tablename__ = "json_dim"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    server_id = Column(Integer, ForeignKey("servers.id"), nullable=False)
+    json_file_name = Column(String, nullable=False)
+    # 上次读取时间（epoch 秒）；允许为 NULL（未读取过，仅占位）
+    last_read_time = Column(Integer, nullable=True)
+    __table_args__ = (
+        UniqueConstraint("server_id", "json_file_name", name="uq_json_dim_server_file"),
+        Index("idx_json_dim_server", "server_id"),
+    )

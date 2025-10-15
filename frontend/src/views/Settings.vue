@@ -49,6 +49,18 @@
                   </el-select>
                 </div>
               </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <div class="form-item-label">
+                    <span>统计忽略的服务器ID</span>
+                    <small>以英文逗号分隔，例如：1,2,3。入库时跳过这些服务器。</small>
+                  </div>
+                </template>
+                <div class="form-item-control">
+                  <el-input v-model="form.stats_ignore_server_text" placeholder="例如：1,2,3" style="width: 280px;" />
+                </div>
+              </el-form-item>
             </el-form>
           </el-card>
         </div>
@@ -67,6 +79,7 @@ const form = reactive({
   python_executable: settings.python_executable,
   java_command: settings.java_command,
   timezone: settings.timezone,
+  stats_ignore_server_text: '',
 })
 const tzOptions = COMMON_TIMEZONES
 const saving = ref(false)
@@ -82,6 +95,12 @@ const autoSave = () => {
         python_executable: form.python_executable,
         java_command: form.java_command,
         timezone: form.timezone,
+        stats_ignore_server: (form.stats_ignore_server_text || '')
+          .split(',')
+          .map(s => s.trim())
+          .filter(s => s.length > 0)
+          .map(s => parseInt(s, 10))
+          .filter(n => !Number.isNaN(n)),
       })
       const d = new Date()
       savedAt.value = d.toLocaleTimeString('zh-CN')
@@ -96,6 +115,10 @@ const autoSave = () => {
 onMounted(async () => {
   await loadSettings()
   Object.assign(form, settings)
+  try {
+    const arr = Array.isArray(settings.stats_ignore_server) ? settings.stats_ignore_server : []
+    form.stats_ignore_server_text = arr.join(',')
+  } catch (e) { /* no-op */ }
 })
 
 watch(() => ({...form}), autoSave, { deep: true })

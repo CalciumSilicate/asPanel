@@ -508,6 +508,7 @@ DEFAULT_SYSTEM_SETTINGS = {
     "python_executable": ".venv/bin/python",
     "java_command": "java",
     "timezone": "Asia/Shanghai",
+    "stats_ignore_server": [],  # 新增：忽略入库的服务器ID列表
 }
 
 
@@ -551,6 +552,31 @@ def update_system_settings(db: Session, patch: dict) -> dict:
     # 返回合并后的全量配置（带默认值）
     merged = {**DEFAULT_SYSTEM_SETTINGS, **current}
     return merged
+
+
+# --- JsonDim CRUD ---
+def get_json_dim_map_for_server(db: Session, server_id: int) -> dict[str, int | None]:
+    """返回 {json_file_name: last_read_time or None} 的映射。"""
+    rows = db.query(models.JsonDim).filter(models.JsonDim.server_id == server_id).all()
+    out = {}
+    for r in rows:
+        out[r.json_file_name] = r.last_read_time if r.last_read_time is not None else None
+    return out
+
+
+def upsert_json_dim_last_read(db: Session, server_id: int, json_file_name: str, last_read_time: int) -> models.JsonDim:
+    rec = (
+        db.query(models.JsonDim)
+        .filter(models.JsonDim.server_id == server_id, models.JsonDim.json_file_name == json_file_name)
+        .first()
+    )
+    if rec is None:
+        rec = models.JsonDim(server_id=server_id, json_file_name=json_file_name, last_read_time=last_read_time)
+        db.add(rec)
+    else:
+        rec.last_read_time = last_read_time
+        db.add(rec)
+    return rec
 
 
 # --- Player CRUD ---

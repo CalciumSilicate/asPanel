@@ -17,6 +17,7 @@ from backend.core.config import STATS_WHITELIST_ON, STATS_WHITELIST, STATS_IGNOR
 from backend.database import SessionLocal
 from backend import crud, models
 from backend.logger import logger
+from backend.dependencies import mcdr_manager
 
 # 统计专用 SQLite（独立于 asPanel.db）
 from sqlalchemy import select, func
@@ -134,7 +135,11 @@ def discover_metrics_from_all_servers() -> List[str]:
 
 
 def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], *, namespace: str = DEFAULT_NAMESPACE) -> None:
-    """对单个服务器执行一次入库（使用主库 models 定义）。"""
+    """对单个服务器执行一次入库（使用主库 models 定义），包含：
+    - 跳过未修改的 JSON（基于 JsonDim.last_read_time 与文件 mtime）
+    - 缓存 JSON 解析结果，避免重复读取
+    - 批量查询上次 total，减少 N×M 次查询
+    """
     if not stats_dir.is_dir():
         return
 
@@ -148,100 +153,131 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
     if not files:
         return
 
-    def _ensure_player_id(session: Session, player_uuid: str) -> Optional[int]:
-        pid = session.scalar(select(models.Player.id).where(models.Player.uuid == player_uuid))
-        if pid is not None:
-            return int(pid)
-        # 若玩家不存在，这里按需创建（保持最小字段）
-        obj = models.Player(uuid=player_uuid, player_name=None, play_time="{}", is_offline=True)
-        session.add(obj)
-        session.flush()
-        return int(obj.id)
-
-    def _ensure_metric_id(session: Session, metric: str) -> int:
-        cat, item = metric.split(".", 1)
-        cat_key = f"{namespace}:{cat}"
-        item_key = f"{namespace}:{item}"
-        m_id = session.scalar(
-            select(models.MetricsDim.metric_id)
-            .where(models.MetricsDim.category == cat_key, models.MetricsDim.item == item_key)
-        )
-        if m_id is not None:
-            return int(m_id)
-        obj = models.MetricsDim(category=cat_key, item=item_key)
-        session.add(obj)
-        session.flush()
-        return int(obj.metric_id)
-
-    def _read_metric_from_json(js: dict, metric: str) -> int:
-        category, item = metric.split(".", 1)
-        cat_key = f"{namespace}:{category}"
-        item_key = f"{namespace}:{item}"
-        stats = js.get("stats", {}) or {}
-        return int((stats.get(cat_key, {}) or {}).get(item_key, 0) or 0)
-
-    def _get_prev_total(session: Session, *, player_id: int, metric_id: int, ts_: int) -> Optional[int]:
-        row = session.execute(
-            select(models.PlayerMetrics.total)
-            .where(
-                models.PlayerMetrics.server_id == server_id,
-                models.PlayerMetrics.player_id == player_id,
-                models.PlayerMetrics.metric_id == metric_id,
-                models.PlayerMetrics.ts <= ts_,
-            )
-            .order_by(models.PlayerMetrics.ts.desc())
-            .limit(1)
-        ).scalar_one_or_none()
-        return int(row) if row is not None else None
-
-    def _compute_delta(prev_total: Optional[int], curr_total: int) -> Tuple[int, int]:
-        if prev_total is None:
-            return int(curr_total), 0
-        if curr_total < prev_total:
-            return int(curr_total), 1
-        return int(curr_total - prev_total), 0
-
     db = SessionLocal()
     try:
-        with db.begin():
-            for fp in files:
-                player_uuid = fp.stem
-                pid = _ensure_player_id(db, player_uuid)
-                try:
-                    js = json.loads(fp.read_text(encoding="utf-8"))
-                except Exception:
+        # 预取 json_dim map
+        json_dim_map = crud.get_json_dim_map_for_server(db, server_id)
+
+        # 预构建 metric_id 映射（减少循环内查询）
+        metric_id_map: dict[str, int] = {}
+        for metric in metrics:
+            cat, item = metric.split(".", 1)
+            cat_key = f"{namespace}:{cat}"
+            item_key = f"{namespace}:{item}"
+            m_id = db.scalar(
+                select(models.MetricsDim.metric_id)
+                .where(models.MetricsDim.category == cat_key, models.MetricsDim.item == item_key)
+            )
+            if m_id is None:
+                obj = models.MetricsDim(category=cat_key, item=item_key)
+                db.add(obj)
+                db.flush()
+                m_id = obj.metric_id
+            metric_id_map[metric] = int(m_id)
+
+        def _ensure_player_id(player_uuid: str) -> int:
+            pid = db.scalar(select(models.Player.id).where(models.Player.uuid == player_uuid))
+            if pid is not None:
+                return int(pid)
+            obj = models.Player(uuid=player_uuid, player_name=None, play_time="{}", is_offline=True)
+            db.add(obj)
+            db.flush()
+            return int(obj.id)
+
+        def _read_metric_from_json(js: dict, metric: str) -> int:
+            category, item = metric.split(".", 1)
+            cat_key = f"{namespace}:{category}"
+            item_key = f"{namespace}:{item}"
+            stats = js.get("stats", {}) or {}
+            return int((stats.get(cat_key, {}) or {}).get(item_key, 0) or 0)
+
+        def _compute_delta(prev_total: Optional[int], curr_total: int) -> Tuple[int, int]:
+            if prev_total is None:
+                return int(curr_total), 0
+            if curr_total < prev_total:
+                return int(curr_total), 1
+            return int(curr_total - prev_total), 0
+
+        for fp in files:
+            fn = fp.name
+            mtime = int(fp.stat().st_mtime)
+            last_read = json_dim_map.get(fn)
+            # 若文件未变化（mtime <= last_read_time），跳过
+            if last_read is not None and mtime <= int(last_read or 0):
+                continue
+
+            # 读取并解析 JSON（一次）
+            try:
+                js = json.loads(fp.read_text(encoding="utf-8"))
+            except Exception:
+                # 无法解析：仍然记录 last_read_time，避免频繁重试
+                crud.upsert_json_dim_last_read(db, server_id, fn, now)
+                continue
+
+            player_uuid = fp.stem
+            pid = _ensure_player_id(player_uuid)
+
+            metric_ids = [metric_id_map[m] for m in metrics]
+            if not metric_ids:
+                crud.upsert_json_dim_last_read(db, server_id, fn, now)
+                continue
+
+            # 批量获取上一时刻 total（ts<=ts-1），每个 metric_id 只取最新一条
+            sub = (
+                select(
+                    models.PlayerMetrics.metric_id,
+                    func.max(models.PlayerMetrics.ts).label("mts")
+                )
+                .where(
+                    models.PlayerMetrics.server_id == server_id,
+                    models.PlayerMetrics.player_id == pid,
+                    models.PlayerMetrics.metric_id.in_(metric_ids),
+                    models.PlayerMetrics.ts <= ts - 1,
+                )
+                .group_by(models.PlayerMetrics.metric_id)
+                .subquery()
+            )
+            prev_rows = db.execute(
+                select(models.PlayerMetrics.metric_id, models.PlayerMetrics.total)
+                .join(sub, (models.PlayerMetrics.metric_id == sub.c.metric_id) & (models.PlayerMetrics.ts == sub.c.mts))
+            ).all()
+            prev_map = {int(mid): int(t or 0) for (mid, t) in prev_rows}
+
+            # 计算并写入变更（合并 upsert 行为）
+            to_add: list[models.PlayerMetrics] = []
+            for metric in metrics:
+                mid = metric_id_map[metric]
+                curr_total = _read_metric_from_json(js, metric)
+                prev_total = prev_map.get(mid)
+                delta, reset = _compute_delta(prev_total, curr_total)
+                if delta == 0 and reset == 0:
                     continue
-                for metric in metrics:
-                    metric_id = _ensure_metric_id(db, metric)
-                    curr_total = _read_metric_from_json(js, metric)
-                    prev_total = _get_prev_total(db, player_id=pid, metric_id=metric_id, ts_=ts - 1)
-                    delta, reset = _compute_delta(prev_total, curr_total)
-                    if delta == 0 and reset == 0:
-                        continue
-                    # upsert（按 PK 查找后更新/插入）
-                    existing = db.execute(
-                        select(models.PlayerMetrics)
-                        .where(
-                            models.PlayerMetrics.server_id == server_id,
-                            models.PlayerMetrics.player_id == pid,
-                            models.PlayerMetrics.metric_id == metric_id,
-                            models.PlayerMetrics.ts == ts,
-                        )
-                    ).scalar_one_or_none()
-                    if existing is None:
-                        obj = models.PlayerMetrics(
-                            ts=ts,
-                            server_id=server_id,
-                            player_id=pid,
-                            metric_id=metric_id,
-                            total=int(curr_total),
-                            delta=int(delta),
-                        )
-                        db.add(obj)
-                    else:
-                        existing.total = int(curr_total)
-                        existing.delta = int(delta)
-                        db.add(existing)
+                # 查找是否已存在同(ts, server, player, metric)记录
+                existing = db.execute(
+                    select(models.PlayerMetrics)
+                    .where(
+                        models.PlayerMetrics.server_id == server_id,
+                        models.PlayerMetrics.player_id == pid,
+                        models.PlayerMetrics.metric_id == mid,
+                        models.PlayerMetrics.ts == ts,
+                    )
+                ).scalar_one_or_none()
+                if existing is None:
+                    to_add.append(models.PlayerMetrics(
+                        ts=ts, server_id=server_id, player_id=pid, metric_id=mid,
+                        total=int(curr_total), delta=int(delta)
+                    ))
+                else:
+                    existing.total = int(curr_total)
+                    existing.delta = int(delta)
+                    db.add(existing)
+
+            if to_add:
+                db.add_all(to_add)
+            # 更新 json_dim 的 last_read_time（读取时间点）
+            crud.upsert_json_dim_last_read(db, server_id, fn, now)
+
+        db.commit()
         logger.debug(f"ingested {stats_dir}")
     finally:
         db.close()
@@ -256,11 +292,15 @@ def ingest_all_servers_now() -> Tuple[int, List[str]]:
     db = SessionLocal()
     try:
         servers = crud.get_all_servers(db)
+        cfg = crud.get_system_settings_data(db)
+        ignore_ids = list(map(int, (cfg or {}).get('stats_ignore_server', []) or []))
     finally:
         db.close()
 
     count = 0
     for srv in servers:
+        if srv.id in ignore_ids:
+            continue
         stats_dir = _server_stats_dir(srv.path)
         ingest_once_for_server(srv.id, stats_dir, metrics)
         count += 1
@@ -279,13 +319,42 @@ async def _sleep_until_next_10min_boundary():
 
 
 async def ingest_scheduler_loop():
-    """后台循环：每逢 10 分钟整点触发一次入库。"""
+    """后台循环：每逢 10 分钟整点触发一次入库，并在运行中服务器执行 save-all。"""
     # 启动先对齐一次
-    await _sleep_until_next_10min_boundary()
+    # await _sleep_until_next_10min_boundary()
     while True:
         try:
-            n, metrics = await asyncio.to_thread(ingest_all_servers_now)
-            logger.info(f"统计入库完成 | 服务器数={n} | 指标数={len(metrics)}")
+            # 发现指标集合（全局）
+            metrics = discover_metrics_from_all_servers()
+            # 忽略服务器列表
+            ignore_ids: list[int] = []
+            try:
+                with SessionLocal() as db:
+                    cfg = crud.get_system_settings_data(db)
+                    ignore_ids = list(map(int, (cfg or {}).get('stats_ignore_server', []) or []))
+            except Exception:
+                ignore_ids = []
+
+            # 遍历服务器
+            with SessionLocal() as db:
+                servers = crud.get_all_servers(db)
+            processed = 0
+            for srv in servers:
+                if srv.id in ignore_ids:
+                    continue
+                stats_dir = _server_stats_dir(srv.path)
+                # 若服务器在运行，先 save-all
+                try:
+                    proc = mcdr_manager.processes.get(srv.id)
+                    if proc and proc.returncode is None:
+                        await mcdr_manager.send_command(srv, 'save-all')
+                        await asyncio.sleep(1.0)
+                except Exception:
+                    pass
+                # 入库放到线程池中，避免阻塞事件循环
+                await asyncio.to_thread(ingest_once_for_server, srv.id, stats_dir, metrics)
+                processed += 1
+            logger.info(f"统计入库完成 | 服务器数={processed} | 指标数={len(metrics)}")
         except Exception as e:
             logger.opt(exception=e).error("统计入库循环发生异常")
         finally:

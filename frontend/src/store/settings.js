@@ -6,6 +6,7 @@ export const settings = reactive({
   python_executable: '.venv/bin/python',
   java_command: 'java',
   timezone: 'Asia/Shanghai',
+  stats_ignore_server: [],
 })
 
 export const loadSettings = async () => {
@@ -31,4 +32,3 @@ export const COMMON_TIMEZONES = [
   { label: 'UTC 伦敦', value: 'UTC' },
   { label: 'UTC-5 纽约', value: 'America/New_York' },
 ]
-

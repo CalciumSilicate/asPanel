@@ -660,12 +660,14 @@ class SystemSettings(BaseModel):
     python_executable: str = Field(".venv/bin/python", description="服务器运行 MCDR 的 Python 可执行文件路径；相对路径以服务器目录为基准")
     java_command: str = Field("java", description="用于构建 MCDR start_command 的 Java 可执行文件")
     timezone: str = Field("Asia/Shanghai", description="前端显示使用的时区标识 e.g. Asia/Shanghai")
+    stats_ignore_server: List[int] = Field(default_factory=list, description="忽略统计入库的服务器ID列表")
 
 
 class SystemSettingsUpdate(BaseModel):
     python_executable: str | None = None
     java_command: str | None = None
     timezone: str | None = None
+    stats_ignore_server: List[int] | None = None
 
 
 # --- Player Schemas ---
