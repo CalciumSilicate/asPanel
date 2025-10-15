@@ -357,6 +357,7 @@ async def ingest_scheduler_loop():
                 try:
                     proc = mcdr_manager.processes.get(srv.id)
                     if proc and proc.returncode is None:
+                        logger.debug(f"服务器运行中，试发送命令save-all server_id={srv.id}")
                         await mcdr_manager.send_command(srv, 'save-all')
                         await asyncio.sleep(1.0)
                 except Exception:
