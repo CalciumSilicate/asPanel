@@ -801,9 +801,11 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
             first_b = boundaries[0]
 
             # 1) 计算基线：在 first_b 时刻（含）之前，每个 (server, metric) 的最新 total 之和
+            # 修复：需要按 player_id 参与聚合与连接，否则会将不同玩家在同一时刻的记录混合
             latest_baseline = (
                 select(
                     models.PlayerMetrics.server_id.label('server_id'),
+                    models.PlayerMetrics.player_id.label('player_id'),
                     models.PlayerMetrics.metric_id.label('metric_id'),
                     func.max(models.PlayerMetrics.ts).label('ts'),
                 )
@@ -812,7 +814,11 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                     models.PlayerMetrics.metric_id.in_(metric_ids),
                     models.PlayerMetrics.ts <= first_b,
                 )
-                .group_by(models.PlayerMetrics.server_id, models.PlayerMetrics.metric_id)
+                .group_by(
+                    models.PlayerMetrics.server_id,
+                    models.PlayerMetrics.player_id,
+                    models.PlayerMetrics.metric_id,
+                )
             )
             if server_ids:
                 latest_baseline = latest_baseline.where(models.PlayerMetrics.server_id.in_(server_ids))
@@ -828,6 +834,7 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                 .join(
                     models.PlayerMetrics,
                     (models.PlayerMetrics.server_id == latest_baseline.c.server_id)
+                    & (models.PlayerMetrics.player_id == latest_baseline.c.player_id)
                     & (models.PlayerMetrics.metric_id == latest_baseline.c.metric_id)
                     & (models.PlayerMetrics.ts == latest_baseline.c.ts)
                 )

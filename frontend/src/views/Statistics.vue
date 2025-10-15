@@ -26,7 +26,7 @@
                     <el-button class="btn-scope-like" type="primary">数据来源 ({{ selectedServerNames.length }})</el-button>
                   </template>
                   <el-checkbox-group v-model="selectedServerNames" @change="onServersSelectionChange" class="server-checkboxes">
-                    <el-checkbox v-for="s in serverNames" :key="s" :label="s">{{ s }}</el-checkbox>
+                    <el-checkbox v-for="s in serverNames" :key="s" :value="s">{{ s }}</el-checkbox>
                   </el-checkbox-group>
                 </el-popover>
               </el-form-item>
@@ -311,9 +311,6 @@ async function queryStatsForTopPlayers() {
   totalChart && totalChart.setOption(totalOpt, true)
   currentDeltaXTimestamps = deltaOpt._xTs
   currentTotalXTimestamps = totalOpt._xTs
-  // 初始根据当前 dataZoom 计算 KPI
-  deltaChart && onZoom(deltaChart,'delta')()
-  totalChart && onZoom(totalChart,'total')()
 
   totalChart && totalChart.off('click')
   totalChart && totalChart.on('click', (params:any) => {
@@ -339,18 +336,21 @@ async function queryStatsForTopPlayers() {
       }
       totalDeltaSum.value = Number(sum.toFixed(2))
     } else {
-      let total = 0
+      // Total：取每条曲线在区间末端（endIdx）数值之和
+      let endSum = 0
       for (const s of series) {
         const arr = (s.data || [])
-        const a = Number(arr[Math.max(0,startIdx)] || 0)
         const b = Number(arr[Math.min(arr.length-1,endIdx)] || 0)
-        total += (b - a)
+        endSum += b
       }
-      totalLastTotal.value = Number(total.toFixed(2))
+      totalLastTotal.value = Number(endSum.toFixed(2))
     }
   }
   deltaChart && (deltaChart.off('dataZoom'), deltaChart.on('dataZoom', onZoom(deltaChart,'delta')))
   totalChart && (totalChart.off('dataZoom'), totalChart.on('dataZoom', onZoom(totalChart,'total')))
+  // 初始根据当前 dataZoom 计算 KPI
+  deltaChart && onZoom(deltaChart,'delta')()
+  totalChart && onZoom(totalChart,'total')()
 }
 
 
@@ -413,7 +413,7 @@ async function drawRankChart(items: any[]) {
   const names = items.map(it => it.player_name || shortUuid(it.player_uuid))
   const vals = items.map(it => applyConvert(Number(it.value||0)))
   const option = {
-    grid: { left: 110, right: 16, top: 8, bottom: 26, containLabel: true },
+    grid: { left: 20, right: 16, top: 8, bottom: 26, containLabel: true },
     xAxis: { type: 'value' },
     yAxis: {
       type: 'category',
@@ -421,10 +421,10 @@ async function drawRankChart(items: any[]) {
       inverse: true,
       axisLabel: {
         interval: 0,
-        formatter: (val: string) => {
-          const s = String(val || '')
-          return s.length > 10 ? (s.slice(0, 10) + '…') : s
-        },
+        width: 80,
+        overflow: 'truncate',
+        ellipsis: '…',
+        margin: 4,
       },
     },
     dataZoom: [
