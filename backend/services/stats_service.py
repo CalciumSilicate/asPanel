@@ -595,6 +595,17 @@ def _build_boundaries_for_player(db: Session, *, player_id: int, metric_ids: Lis
         base_end = int(end_ts if end_ts is not None else _t.time())
         effective_end_ts = _align_up_calendar(base_end, granularity, tz)
 
+    # 计算数据集中最早记录时间（不依赖 delta 是否存在，避免因无 delta 导致边界过晚）
+    min_q = select(func.min(models.PlayerMetrics.ts)).where(
+        models.PlayerMetrics.player_id == player_id,
+        models.PlayerMetrics.metric_id.in_(metric_ids),
+    )
+    if server_ids:
+        min_q = min_q.where(models.PlayerMetrics.server_id.in_(server_ids))
+    if effective_end_ts is not None:
+        min_q = min_q.where(models.PlayerMetrics.ts <= effective_end_ts)
+    min_ts_all = db.scalar(min_q)
+
     # 聚合各 ts 的 delta（跨 server 与 metric 求和）
     q = select(models.PlayerMetrics.ts, func.sum(models.PlayerMetrics.delta)).where(
         models.PlayerMetrics.player_id == player_id,
@@ -611,7 +622,8 @@ def _build_boundaries_for_player(db: Session, *, player_id: int, metric_ids: Lis
         # 无数据时，也按对齐规则返回边界锚点（用于 total 计算）
         if granularity == "10min":
             return [], {}, 0, 0
-        start_anchor = _align_down_calendar(int(start_ts or (effective_end_ts or 0)), granularity, tz)
+        seed = int(start_ts if start_ts is not None else (min_ts_all or (effective_end_ts or 0)))
+        start_anchor = _align_down_calendar(seed, granularity, tz)
         end_boundary = int(effective_end_ts or start_anchor)
         boundaries: List[int] = []
         cur = start_anchor
@@ -624,15 +636,15 @@ def _build_boundaries_for_player(db: Session, *, player_id: int, metric_ids: Lis
 
     delta_by_ts: Dict[int, int] = {int(ts): int(total or 0) for ts, total in rows}
     ts_list = [int(ts) for ts, _ in rows]
-    first_ts = ts_list[0]
-    last_ts = ts_list[-1]
+    # 使用数据集中全局最早时间作为起点与对齐基准（而非 delta 里出现的 first_ts）
+    first_ts = int(min_ts_all or ts_list[0])
 
     if granularity == "10min":
         boundaries = ts_list
         return boundaries, delta_by_ts, first_ts, last_ts
 
     start_anchor = _align_down_calendar((start_ts or first_ts), granularity, tz)
-    end_boundary = int(effective_end_ts if effective_end_ts is not None else last_ts)
+    end_boundary = int(effective_end_ts if effective_end_ts is not None else (ts_list[-1] if ts_list else start_anchor))
     boundaries: List[int] = []
     cur = start_anchor
     while cur < end_boundary:
