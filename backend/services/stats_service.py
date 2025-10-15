@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Iterable, List, Optional, Set, Tuple
 
-from backend.core.config import STATS_WHITELIST_ON, STATS_WHITELIST, STATS_IGNORE
+from backend.core.config import STATS_WHITELIST_ON, STATS_WHITELIST, STATS_IGNORE, get_tzinfo
 from backend.database import SessionLocal
 from backend import crud, models
 from backend.logger import logger
@@ -425,181 +425,268 @@ def _align_floor(ts: int, step: int) -> int:
     return ts - (ts % step)
 
 
-def get_delta_series(*, player_uuid: str, metric: str, granularity: str = "10min",
-                     start: Optional[str] = None, end: Optional[str] = None,
-                     namespace: str = DEFAULT_NAMESPACE,
-                     server_ids: Optional[List[int]] = None) -> List[Tuple[int, int]]:
-    metric = _normalize_metric(metric)
-    step = _GRANULARITY_SECONDS.get(granularity)
-    if step is None:
-        raise ValueError(f"不支持的粒度: {granularity}")
+from typing import Dict
+from datetime import datetime, timedelta
 
-    db = SessionLocal()
-    try:
-        # metric_id
-        cat, item = metric.split(".", 1)
-        cat_key = f"{namespace}:{cat}"
-        item_key = f"{namespace}:{item}"
-        metric_id = db.scalar(
+SUPPORTED_GRANULARITIES = {"10min", "30min", "1h", "12h", "24h", "1week", "1month", "6month", "1year"}
+
+
+def _normalize_metrics(metrics: List[str], namespace: str) -> List[Tuple[str, str]]:
+    out: List[Tuple[str, str]] = []
+    for m in metrics:
+        nm = _normalize_metric(m)
+        cat, item = nm.split(".", 1)
+        out.append((f"{namespace}:{cat}", f"{namespace}:{item}"))
+    return out
+
+
+def _resolve_metric_ids(db: Session, pairs: List[Tuple[str, str]]) -> List[int]:
+    ids: List[int] = []
+    for cat_key, item_key in pairs:
+        m_id = db.scalar(
             select(models.MetricsDim.metric_id)
             .where(models.MetricsDim.category == cat_key, models.MetricsDim.item == item_key)
         )
-        if metric_id is None:
-            return []
+        if m_id is not None:
+            ids.append(int(m_id))
+    return ids
 
-        # 找到该玩家 id
-        player_id = db.scalar(select(models.Player.id).where(models.Player.uuid == player_uuid))
-        if player_id is None:
-            return []
 
-        t_min = db.scalar(
-            select(func.min(models.PlayerMetrics.ts))
-            .where(models.PlayerMetrics.player_id == player_id, models.PlayerMetrics.metric_id == metric_id)
-        )
-        t_max = db.scalar(
-            select(func.max(models.PlayerMetrics.ts))
-            .where(models.PlayerMetrics.player_id == player_id, models.PlayerMetrics.metric_id == metric_id)
-        )
-        if t_min is None or t_max is None:
-            return []
+def _align_down_calendar(ts: int, granularity: str, tz) -> int:
+    dt = datetime.fromtimestamp(ts, tz)
+    if granularity == "30min":
+        minute = 0 if dt.minute < 30 else 30
+        aligned = dt.replace(minute=minute, second=0, microsecond=0)
+        return int(aligned.timestamp())
+    if granularity == "1h":
+        aligned = dt.replace(minute=0, second=0, microsecond=0)
+        return int(aligned.timestamp())
+    if granularity == "12h":
+        hour = 0 if dt.hour < 12 else 12
+        aligned = dt.replace(hour=hour, minute=0, second=0, microsecond=0)
+        return int(aligned.timestamp())
+    if granularity == "24h":
+        aligned = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        return int(aligned.timestamp())
+    if granularity == "1week":
+        weekday = dt.weekday()  # 0..6 (Mon..Sun)
+        days_to_sunday = (weekday + 1) % 7
+        start = (dt - timedelta(days=days_to_sunday)).replace(hour=0, minute=0, second=0, microsecond=0)
+        return int(start.timestamp())
+    if granularity == "1month":
+        start = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return int(start.timestamp())
+    if granularity == "6month":
+        month = 1 if dt.month <= 6 else 7
+        start = dt.replace(month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return int(start.timestamp())
+    if granularity == "1year":
+        start = dt.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return int(start.timestamp())
+    raise ValueError(f"不支持的粒度: {granularity}")
 
-        start_ts = _parse_iso(start) or int(t_min)
-        end_ts = _parse_iso(end) or int(t_max)
-        start_ts = _align_floor(start_ts, step)
-        end_ts = _align_floor(end_ts, step)
 
-        # 汇总不同 server_id 在同一 ts 的 delta
-        stmt = (
-            select(models.PlayerMetrics.ts, func.sum(models.PlayerMetrics.delta))
-            .where(
-                models.PlayerMetrics.player_id == player_id,
-                models.PlayerMetrics.metric_id == metric_id,
-                models.PlayerMetrics.ts >= start_ts,
-                models.PlayerMetrics.ts <= end_ts,
+def _next_boundary(ts: int, granularity: str, tz) -> int:
+    dt = datetime.fromtimestamp(ts, tz)
+    if granularity == "30min":
+        minute = 0 if dt.minute < 30 else 30
+        base = dt.replace(minute=minute, second=0, microsecond=0)
+        nxt = base + timedelta(minutes=30)
+        return int(nxt.timestamp())
+    if granularity == "1h":
+        nxt = dt.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        return int(nxt.timestamp())
+    if granularity == "12h":
+        hour = 0 if dt.hour < 12 else 12
+        base = dt.replace(hour=hour, minute=0, second=0, microsecond=0)
+        nxt = base + timedelta(hours=12)
+        return int(nxt.timestamp())
+    if granularity == "24h":
+        base = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        nxt = base + timedelta(days=1)
+        return int(nxt.timestamp())
+    if granularity == "1week":
+        weekday = dt.weekday()
+        days_to_sunday = (weekday + 1) % 7
+        start = (dt - timedelta(days=days_to_sunday)).replace(hour=0, minute=0, second=0, microsecond=0)
+        nxt = start + timedelta(days=7)
+        return int(nxt.timestamp())
+    if granularity == "1month":
+        year = dt.year + (1 if dt.month == 12 else 0)
+        month = 1 if dt.month == 12 else dt.month + 1
+        nxt = dt.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return int(nxt.timestamp())
+    if granularity == "6month":
+        if dt.month <= 6:
+            nxt = dt.replace(month=7, day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            nxt = dt.replace(year=dt.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return int(nxt.timestamp())
+    if granularity == "1year":
+        nxt = dt.replace(year=dt.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return int(nxt.timestamp())
+    raise ValueError(f"不支持的粒度: {granularity}")
+
+
+def _build_boundaries_for_player(db: Session, *, player_id: int, metric_ids: List[int], granularity: str,
+                                 start_ts: Optional[int], end_ts: Optional[int]) -> Tuple[List[int], Dict[int, int], int, int]:
+    """返回 (boundaries, delta_by_ts, first_boundary, last_ts)"""
+    tz = get_tzinfo()
+
+    # 聚合各 ts 的 delta（跨 server 与 metric 求和）
+    q = select(models.PlayerMetrics.ts, func.sum(models.PlayerMetrics.delta)).where(
+        models.PlayerMetrics.player_id == player_id,
+        models.PlayerMetrics.metric_id.in_(metric_ids),
+    )
+    if start_ts is not None:
+        q = q.where(models.PlayerMetrics.ts >= start_ts)
+    if end_ts is not None:
+        q = q.where(models.PlayerMetrics.ts <= end_ts)
+    rows = db.execute(q.group_by(models.PlayerMetrics.ts).order_by(models.PlayerMetrics.ts.asc())).all()
+    if not rows:
+        return [], {}, 0, 0
+
+    delta_by_ts: Dict[int, int] = {int(ts): int(total or 0) for ts, total in rows}
+    ts_list = [int(ts) for ts, _ in rows]
+    first_ts = ts_list[0]
+    last_ts = ts_list[-1]
+
+    if granularity == "10min":
+        boundaries = ts_list
+        return boundaries, delta_by_ts, first_ts, last_ts
+
+    start_anchor = _align_down_calendar((start_ts or first_ts), granularity, tz)
+    boundaries: List[int] = []
+    cur = start_anchor
+    while cur < last_ts:
+        cur = _next_boundary(cur, granularity, tz)
+        if cur <= last_ts:
+            boundaries.append(cur)
+    if not boundaries or boundaries[-1] != last_ts:
+        boundaries.append(last_ts)
+
+    return boundaries, delta_by_ts, start_anchor, last_ts
+
+
+def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity: str = "10min",
+                     start: Optional[str] = None, end: Optional[str] = None,
+                     namespace: str = DEFAULT_NAMESPACE) -> Dict[str, List[Tuple[int, int]]]:
+    if not player_uuids:
+        raise ValueError("必须提供至少一个 player_uuid")
+    if not metrics:
+        raise ValueError("必须提供至少一个 metric")
+    if granularity not in SUPPORTED_GRANULARITIES:
+        raise ValueError(f"不支持的粒度: {granularity}")
+
+    tz = get_tzinfo()
+    start_ts = _parse_iso(start) if start else None
+    end_ts = _parse_iso(end) if end else None
+
+    pairs = _normalize_metrics(metrics, namespace)
+    db = SessionLocal()
+    try:
+        metric_ids = _resolve_metric_ids(db, pairs)
+        if not metric_ids:
+            return {uid: [] for uid in player_uuids}
+
+        result: Dict[str, List[Tuple[int, int]]] = {}
+        for uid in player_uuids:
+            player_id = db.scalar(select(models.Player.id).where(models.Player.uuid == uid))
+            if player_id is None:
+                result[uid] = []
+                continue
+
+            boundaries, delta_by_ts, first_boundary, last_ts = _build_boundaries_for_player(
+                db, player_id=player_id, metric_ids=metric_ids, granularity=granularity,
+                start_ts=start_ts, end_ts=end_ts,
             )
-            .group_by(models.PlayerMetrics.ts)
-            .order_by(models.PlayerMetrics.ts.asc())
-        )
-        if server_ids:
-            stmt = stmt.where(models.PlayerMetrics.server_id.in_(server_ids))
-        rows = db.execute(stmt).all()
+            if not boundaries:
+                result[uid] = []
+                continue
 
-        out: List[Tuple[int, int]] = []
-        bucket = start_ts
-        idx = 0
-        acc = 0
-        while bucket <= end_ts:
-            upper = bucket + step
-            while idx < len(rows) and rows[idx][0] < upper:
-                acc += int(rows[idx][1] or 0)
-                idx += 1
-            out.append((bucket, acc))
-            acc = 0
-            bucket = upper
-        return out
+            # 10min：直接取每个记录时刻自身的 delta
+            if granularity == "10min":
+                result[uid] = [(b, int(delta_by_ts.get(b, 0))) for b in boundaries]
+                continue
+
+            out: List[Tuple[int, int]] = []
+            prev = None
+            sorted_ts = sorted(delta_by_ts.keys())
+            idx = 0
+            for b in boundaries:
+                bucket_delta = 0
+                if prev is None:
+                    while idx < len(sorted_ts) and sorted_ts[idx] <= b:
+                        bucket_delta += delta_by_ts[sorted_ts[idx]]
+                        idx += 1
+                else:
+                    while idx < len(sorted_ts) and sorted_ts[idx] <= b:
+                        bucket_delta += delta_by_ts[sorted_ts[idx]]
+                        idx += 1
+                out.append((b, int(bucket_delta)))
+                prev = b
+            result[uid] = out
+        return result
     finally:
         db.close()
 
 
-def get_total_series(*, player_uuid: str, metric: str, granularity: str = "10min",
+def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity: str = "10min",
                      start: Optional[str] = None, end: Optional[str] = None,
-                     namespace: str = DEFAULT_NAMESPACE,
-                     server_ids: Optional[List[int]] = None) -> List[Tuple[int, int]]:
-    metric = _normalize_metric(metric)
-    step = _GRANULARITY_SECONDS.get(granularity)
-    if step is None:
+                     namespace: str = DEFAULT_NAMESPACE) -> Dict[str, List[Tuple[int, int]]]:
+    if not player_uuids:
+        raise ValueError("必须提供至少一个 player_uuid")
+    if not metrics:
+        raise ValueError("必须提供至少一个 metric")
+    if granularity not in SUPPORTED_GRANULARITIES:
         raise ValueError(f"不支持的粒度: {granularity}")
+
+    start_ts = _parse_iso(start) if start else None
+    end_ts = _parse_iso(end) if end else None
+    pairs = _normalize_metrics(metrics, namespace)
 
     db = SessionLocal()
     try:
-        cat, item = metric.split(".", 1)
-        cat_key = f"{namespace}:{cat}"
-        item_key = f"{namespace}:{item}"
-        metric_id = db.scalar(
-            select(models.MetricsDim.metric_id)
-            .where(models.MetricsDim.category == cat_key, models.MetricsDim.item == item_key)
-        )
-        if metric_id is None:
-            return []
+        metric_ids = _resolve_metric_ids(db, pairs)
+        if not metric_ids:
+            return {uid: [] for uid in player_uuids}
 
-        player_id = db.scalar(select(models.Player.id).where(models.Player.uuid == player_uuid))
-        if player_id is None:
-            return []
+        result: Dict[str, List[Tuple[int, int]]] = {}
+        for uid in player_uuids:
+            player_id = db.scalar(select(models.Player.id).where(models.Player.uuid == uid))
+            if player_id is None:
+                result[uid] = []
+                continue
 
-        tmin_stmt = select(func.min(models.PlayerMetrics.ts)).where(
-            models.PlayerMetrics.player_id == player_id,
-            models.PlayerMetrics.metric_id == metric_id,
-        )
-        tmax_stmt = select(func.max(models.PlayerMetrics.ts)).where(
-            models.PlayerMetrics.player_id == player_id,
-            models.PlayerMetrics.metric_id == metric_id,
-        )
-        if server_ids:
-            tmin_stmt = tmin_stmt.where(models.PlayerMetrics.server_id.in_(server_ids))
-            tmax_stmt = tmax_stmt.where(models.PlayerMetrics.server_id.in_(server_ids))
-        t_min = db.scalar(tmin_stmt)
-        t_max = db.scalar(tmax_stmt)
-        pool_min = t_min
-        pool_max = t_max
-        if pool_min is None or pool_max is None:
-            return []
-
-        req_start = _parse_iso(start) or int(pool_min)
-        req_end = _parse_iso(end) or int(pool_max)
-        start_ts = _align_floor(req_start, step)
-        end_ts = _align_floor(req_end, step)
-
-        # 基准：各 server 在 start_ts 时刻（或之前）最新一条 total 的和
-        base_stmt = (
-            select(
-                models.PlayerMetrics.server_id,
-                models.PlayerMetrics.ts,
-                models.PlayerMetrics.total,
+            boundaries, delta_by_ts, first_boundary, last_ts = _build_boundaries_for_player(
+                db, player_id=player_id, metric_ids=metric_ids, granularity=granularity,
+                start_ts=start_ts, end_ts=end_ts,
             )
-            .where(
-                models.PlayerMetrics.player_id == player_id,
-                models.PlayerMetrics.metric_id == metric_id,
-                models.PlayerMetrics.ts <= start_ts,
-            )
-            .order_by(models.PlayerMetrics.server_id.asc(), models.PlayerMetrics.ts.asc())
-        )
-        if server_ids:
-            base_stmt = base_stmt.where(models.PlayerMetrics.server_id.in_(server_ids))
-        base_rows = db.execute(base_stmt).all()
-        last_total_by_server: dict[int, Tuple[int, int]] = {}
-        for sid, t, tot in base_rows:
-            # 仅保留每个 server 最新（<= start_ts）的记录
-            prev = last_total_by_server.get(int(sid))
-            if prev is None or int(t) >= prev[0]:
-                last_total_by_server[int(sid)] = (int(t), int(tot or 0))
-        base_total = sum(v[1] for v in last_total_by_server.values())
+            if not boundaries:
+                result[uid] = []
+                continue
 
-        # 取 start_ts 之后的增量（汇总不同 server）
-        delta_stmt = (
-            select(models.PlayerMetrics.ts, func.sum(models.PlayerMetrics.delta))
-            .where(
-                models.PlayerMetrics.player_id == player_id,
-                models.PlayerMetrics.metric_id == metric_id,
-                models.PlayerMetrics.ts > start_ts,
-                models.PlayerMetrics.ts <= end_ts,
-            )
-            .group_by(models.PlayerMetrics.ts)
-            .order_by(models.PlayerMetrics.ts.asc())
-        )
-        if server_ids:
-            delta_stmt = delta_stmt.where(models.PlayerMetrics.server_id.in_(server_ids))
-        delta_rows = db.execute(delta_stmt).all()
+            # total(E_i) = sum_{ts <= E_i}(delta)
+            out: List[Tuple[int, int]] = []
+            sorted_ts = sorted(delta_by_ts.keys())
+            idx = 0
+            cumulative = 0
 
-        out: List[Tuple[int, int]] = []
-        cumulative = int(base_total)
-        idx = 0
-        bucket_ts = start_ts
-        while bucket_ts <= end_ts:
-            while idx < len(delta_rows) and delta_rows[idx][0] <= bucket_ts:
-                cumulative += int(delta_rows[idx][1] or 0)
+            # 累计到第一个边界（含）
+            first_b = boundaries[0]
+            while idx < len(sorted_ts) and sorted_ts[idx] <= first_b:
+                cumulative += delta_by_ts[sorted_ts[idx]]
                 idx += 1
-            out.append((bucket_ts, cumulative))
-            bucket_ts += step
-        return out
+            out.append((first_b, int(cumulative)))
+
+            # 后续边界增量叠加
+            for b in boundaries[1:]:
+                while idx < len(sorted_ts) and sorted_ts[idx] <= b:
+                    cumulative += delta_by_ts[sorted_ts[idx]]
+                    idx += 1
+                out.append((b, int(cumulative)))
+
+            result[uid] = out
+        return result
     finally:
         db.close()
