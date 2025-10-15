@@ -52,6 +52,12 @@ if str(_ROOT) not in sys.path:
 from backend.database import SessionLocal
 from backend import models
 
+# 进度条（可选）
+try:
+    from tqdm import tqdm  # type: ignore
+except Exception:  # pragma: no cover
+    tqdm = None  # 若未安装 tqdm，自动降级为无进度条
+
 
 STEP = 600  # 10min
 
@@ -223,13 +229,26 @@ def ingest_record_root(server_id: int, record_root: Path, namespace: str = "mine
         print(f"[WARN] 未在 {record_root} 发现快照目录")
         return 0
 
+    # 预扫描以统计总文件数（用于总进度）
+    snap_infos = []  # [(ts, dir, [files])]
+    total_files = 0
+    for raw_ts, snap_dir in snaps:
+        files = sorted(snap_dir.glob("*.json"))
+        if not files:
+            continue
+        ts = align_10min(raw_ts)
+        snap_infos.append((ts, snap_dir, files))
+        total_files += len(files)
+
+    if total_files == 0:
+        print(f"[WARN] 在 {record_root} 未发现任何 *.json 快照文件")
+        return 0
+
+    pbar = tqdm(total=total_files, unit="file", desc="Ingesting", ncols=80) if tqdm else None
+
     total_rows = 0
     with SessionLocal() as db:
-        for raw_ts, snap_dir in snaps:
-            ts = align_10min(raw_ts)
-            files = sorted(snap_dir.glob("*.json"))
-            if not files:
-                continue
+        for ts, snap_dir, files in snap_infos:
             batch_rows = 0
             for fp in files:
                 uuid = fp.stem
@@ -237,19 +256,26 @@ def ingest_record_root(server_id: int, record_root: Path, namespace: str = "mine
                     js = json.loads(fp.read_text(encoding="utf-8"))
                 except Exception:
                     print(f"[WARN] 解析失败，跳过: {fp}")
+                    if pbar: pbar.update(1)
                     continue
                 pairs = _metric_pairs_from_json(js, namespace)
                 if not pairs:
+                    if pbar: pbar.update(1)
                     continue
                 if not dry_run:
                     n = upsert_metrics_for_snapshot(db, server_id=server_id, ts=ts, uuid=uuid, metrics=pairs)
                 else:
                     n = len(pairs)
                 batch_rows += int(n or 0)
+                if pbar:
+                    pbar.update(1)
             if not dry_run:
                 db.commit()
             print(f"[INFO] 导入快照 {snap_dir.name} (ts={ts}) | 写入行数={batch_rows}")
             total_rows += batch_rows
+
+    if pbar:
+        pbar.close()
     return total_rows
 
 
