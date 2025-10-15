@@ -230,7 +230,7 @@ async def _handle_single(payload: Dict[str, Any]):
         return
     # 记录日志：接收到的单条事件
     try:
-        logger.debug(f"[MCDR-WS] 收到事件: {event} | 内容: {json.dumps(payload, ensure_ascii=False)}")
+        logger.debug(f"[MCDR-WS] 收到事件: {event}")
     except Exception:
         pass
 
@@ -561,8 +561,6 @@ async def _forward_event_to_plugins(event: str, data: Dict[str, Any], original_p
     try:
         if forwarded:
             logger.debug(f"[MCDR-WS] 事件转发 | event={event} 源服务器={src_server} 转发客户端数={forwarded}")
-        else:
-            logger.debug(f"[MCDR-WS] 事件无需转发 | event={event} 源服务器={src_server}")
     except Exception:
         pass
 
@@ -579,11 +577,6 @@ async def mcdr_ws_endpoint(ws: WebSocket):
     try:
         while True:
             text = await ws.receive_text()
-            try:
-                # 记录原始消息内容
-                logger.debug(f"[MCDR-WS] 收到原始消息: {text}")
-            except Exception:
-                pass
             payload = _safe_json_loads(text)
             if payload is None:
                 continue
