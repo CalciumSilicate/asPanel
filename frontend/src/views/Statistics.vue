@@ -209,6 +209,34 @@ const selectedPlayerCount = computed(() => {
 
 let currentDeltaXTimestamps: number[] = []
 let currentTotalXTimestamps: number[] = []
+// 序列原始缓存（用于本地重绘，避免重复请求）
+let lastDeltaDictRaw: Record<string, [number, number][]> = {}
+let lastTotalDictRaw: Record<string, [number, number][]> = {}
+
+function rerenderFromCache() {
+  try {
+    if (lastDeltaDictRaw && lastTotalDictRaw) {
+      // 重用现有 queryStatsForTopPlayers 的渲染逻辑：
+      // 复制一份最小化流程以保持行为一致
+      const deltaDict = convertDict(lastDeltaDictRaw)
+      const totalDict = convertDict(lastTotalDictRaw)
+      totalDeltaSum.value = Number(Object.values(deltaDict).reduce((acc, arr) => acc + arr.reduce((s, [,v]) => s + Number(v||0), 0), 0).toFixed(2))
+      totalLastTotal.value = Number(Object.values(totalDict).reduce((acc, arr) => acc + (arr.length ? Number(arr[arr.length-1][1]||0) : 0), 0).toFixed(2))
+
+      const baseForPercent = percentBaseValueRank.value || 1
+      const pct = (v:number) => Number(((v / (baseForPercent || 1)) * 100).toPrecision(5))
+      const scaledTotalDict = percentEnabled.value
+        ? Object.fromEntries(Object.entries(totalDict).map(([k, arr]) => [k, arr.map(([t, v]) => [t, pct(Number(v||0))]) as [number, number][]]))
+        : totalDict
+      const deltaOpt: any = buildSeriesOption(deltaDict, 'bar', granularity.value, 'delta')
+      const totalOpt: any = buildSeriesOption(scaledTotalDict, 'line', granularity.value, 'total')
+      deltaChart && deltaChart.setOption(deltaOpt, true)
+      totalChart && totalChart.setOption(totalOpt, true)
+      currentDeltaXTimestamps = deltaOpt._xTs
+      currentTotalXTimestamps = totalOpt._xTs
+    }
+  } catch {}
+}
 
 // 换算单位配置
 const convertEnabled = ref<'boolean'>(false)
@@ -339,7 +367,13 @@ function buildSeriesOption(dict: Record<string, [number, number][]>, type: 'line
   }
 }
 
-function toIso(d?: Date) { return d ? new Date(d).toISOString().slice(0,19) : undefined }
+function toIso(d?: Date) {
+  if (!d) return undefined
+  const dt = new Date(d)
+  const pad = (n:number) => String(n).padStart(2,'0')
+  // 生成本地时区 ISO，避免后端按本地解析产生时区偏移
+  return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`
+}
 
 async function queryStatsForTopPlayers() {
   // 依据当前排行榜前五名作为右图玩家，自动查询与渲染
@@ -356,6 +390,8 @@ async function queryStatsForTopPlayers() {
   if (topUuids.length === 0) return
   const base = { player_uuid: topUuids, metric: selectedMetrics.value, granularity: granularity.value, namespace: 'minecraft', server_id: selectedServerIds.value }
   const [deltaDictRaw, totalDictRaw] = await Promise.all([ fetchDeltaSeries(base), fetchTotalSeries(base) ])
+  lastDeltaDictRaw = deltaDictRaw
+  lastTotalDictRaw = totalDictRaw
   // 先按原始值计算，再统一进行单位换算
   const deltaDict = convertDict(deltaDictRaw)
   const totalDict = convertDict(totalDictRaw)
@@ -384,14 +420,31 @@ async function queryStatsForTopPlayers() {
       refreshRanks(true)
     }
   })
-  const onZoom = (chart:any, which:'delta'|'total') => () => {
-    // 根据当前 dataZoom 选区，计算 KPI：
-    const opt = chart.getOption() || {}
-    const dz = (opt.dataZoom||[])[0] || {}
+  const onZoom = (chart:any, which:'delta'|'total') => (evt?: any) => {
+    // 根据当前 dataZoom 选区，计算 KPI：优先使用事件参数，回退到 getOption
     const xArr = which==='delta' ? currentDeltaXTimestamps : currentTotalXTimestamps
-    const startIdx = (dz.startValue != null) ? dz.startValue : Math.round((dz.start||0)/100*(xArr.length-1))
-    const endIdx = (dz.endValue != null) ? dz.endValue : Math.round((dz.end||100)/100*(xArr.length-1))
-    const series = (opt.series || [])
+    let startIdx: number
+    let endIdx: number
+    const payload = (evt && (evt.batch?.[0] || evt)) || null
+    if (payload) {
+      const sVal = payload.startValue
+      const eVal = payload.endValue
+      if (sVal != null && eVal != null) {
+        startIdx = Math.max(0, Math.min(xArr.length-1, Number(sVal)))
+        endIdx = Math.max(0, Math.min(xArr.length-1, Number(eVal)))
+      } else {
+        const s = Number(payload.start ?? 0)
+        const e = Number(payload.end ?? 100)
+        startIdx = Math.round(s/100*(xArr.length-1))
+        endIdx = Math.round(e/100*(xArr.length-1))
+      }
+    } else {
+      const opt = chart.getOption() || {}
+      const dz = (opt.dataZoom||[])[0] || {}
+      startIdx = (dz.startValue != null) ? dz.startValue : Math.round((dz.start||0)/100*(xArr.length-1))
+      endIdx = (dz.endValue != null) ? dz.endValue : Math.round((dz.end||100)/100*(xArr.length-1))
+    }
+    const series = (((chart.getOption && chart.getOption()) || {}).series || [])
     if (which === 'delta') {
       let sum = 0
       for (const s of series) {
@@ -408,13 +461,13 @@ async function queryStatsForTopPlayers() {
         endSum += b
       }
       totalLastTotal.value = Number(endSum.toFixed(2))
-      // 记录末端时间并刷新全服总计（应用单位换算）
+      // 记录末端时间并（防抖）刷新全服总计
       currentTotalEndTs = xArr[Math.min(xArr.length-1, Math.max(0,endIdx))] || null
-      currentTotalEndTs && refreshGlobalTotalAtTs(currentTotalEndTs)
+      currentTotalEndTs && scheduleGlobalTotalRefresh(currentTotalEndTs)
     }
   }
-  deltaChart && (deltaChart.off('dataZoom'), deltaChart.on('dataZoom', onZoom(deltaChart,'delta')))
-  totalChart && (totalChart.off('dataZoom'), totalChart.on('dataZoom', onZoom(totalChart,'total')))
+  deltaChart && (deltaChart.off('dataZoom'), deltaChart.on('dataZoom', (e:any)=>onZoom(deltaChart,'delta')(e)))
+  totalChart && (totalChart.off('dataZoom'), totalChart.on('dataZoom', (e:any)=>onZoom(totalChart,'total')(e)))
   // 初始根据当前 dataZoom 计算 KPI
   deltaChart && onZoom(deltaChart,'delta')()
   totalChart && onZoom(totalChart,'total')()
@@ -448,14 +501,28 @@ async function fetchServers() {
   } catch { servers.value = [] }
 }
 
+const globalTotalCache = new Map<string, number>()
+let globalTotalTimer: any = null
 async function refreshGlobalTotalAtTs(ts: number) {
+  // 缓存命中直接返回
+  const cacheKey = `${ts}|${(selectedMetrics.value||[]).join(',')}|${(selectedServerIds.value||[]).join(',')}`
+  if (globalTotalCache.has(cacheKey)) {
+    const v = globalTotalCache.get(cacheKey) as number
+    globalTotalSum.value = convertEnabled.value ? applyConvert(v) : Number(v)
+    return
+  }
   try {
     const list = await fetchLeaderboardTotal({ metric: selectedMetrics.value, server_id: selectedServerIds.value, limit: 10000, at: toIso(new Date(ts*1000)) })
     const raw = (list || []).reduce((acc:number, it:any) => acc + Number(it.value||0), 0)
+    globalTotalCache.set(cacheKey, raw)
     globalTotalSum.value = convertEnabled.value ? applyConvert(raw) : Number(raw)
   } catch {
     globalTotalSum.value = 0
   }
+}
+function scheduleGlobalTotalRefresh(ts: number) {
+  if (globalTotalTimer) clearTimeout(globalTotalTimer)
+  globalTotalTimer = setTimeout(() => { refreshGlobalTotalAtTs(ts) }, 400)
 }
 // 百分比显示
 const percentEnabled = ref<boolean>(false)
@@ -521,7 +588,7 @@ let rankRefreshTimer: any = null
 const rankItems = ref<any[]>([])
 
 
-async function drawRankChart(items: any[]) {
+async function drawRankChart(items: any[], skipRight=false) {
   const echarts = await loadECharts()
   if (!rankChartRef.value) return
   if (!rankChart) rankChart = echarts.init(rankChartRef.value)
@@ -565,7 +632,7 @@ async function drawRankChart(items: any[]) {
   rankChart.setOption(option, true)
   // 榜单变化后自动刷新右侧曲线（前五位）
   await searchPlayers('')
-  await queryStatsForTopPlayers()
+  if (!skipRight) await queryStatsForTopPlayers()
 }
 
 async function refreshRanks(_showTip=false) {
@@ -573,19 +640,21 @@ async function refreshRanks(_showTip=false) {
   // 若未选择时刻，默认使用后端“当前时刻”逻辑（不传 at）
   const list = await fetchLeaderboardTotal({ metric: selectedMetrics.value, server_id: selectedServerIds.value, limit: 10, ...(rankAtTs.value ? { at: toIso(new Date(rankAtTs.value*1000)) } : {}) })
   await drawRankChart(list)
-  // 同步刷新全服总计，用于“全服总计”为百分比基准
+  // 同步刷新全服总计（防抖）用于“全服总计”为百分比基准
   const ts = rankAtTs.value || currentTotalEndTs || Math.floor(Date.now()/1000)
-  await refreshGlobalTotalAtTs(ts)
+  scheduleGlobalTotalRefresh(ts)
 }
 
 watch(selectedMetrics, async () => {
   if (canQuery.value) {
+    globalTotalCache.clear()
     await refreshRanks(false)
   }
 })
 
 watch(selectedServerNames, async () => {
   computeSelectedServerIds()
+  globalTotalCache.clear()
   if (canQuery.value) await refreshRanks(false)
 })
 
@@ -598,23 +667,21 @@ watch(selectedPlayers, async () => {
   if (canQuery.value) await queryStatsForTopPlayers()
 })
 
-// 换算单位相关：切换源/目标或启用状态后，刷新榜单与曲线
+// 换算单位相关：切换源/目标或启用状态后，本地重绘（避免重复请求）
 watch(convertFrom, async (v) => {
   if (v === 'gt' && !['sec','min','hour','day'].includes(convertTo.value)) convertTo.value = 'hour'
   if (v === 'cm') convertTo.value = 'km'
-  if (canQuery.value) { await queryStatsForTopPlayers(); await refreshRanks(false) }
+  rerenderFromCache()
+  await drawRankChart(rankItems.value, true)
 })
-watch(convertTo, async () => { if (canQuery.value) { await queryStatsForTopPlayers(); await refreshRanks(false) } })
-watch(convertEnabled, async () => { if (canQuery.value) { await queryStatsForTopPlayers(); await refreshRanks(false) } })
+watch(convertTo, async () => { rerenderFromCache(); await drawRankChart(rankItems.value, true) })
+watch(convertEnabled, async () => { rerenderFromCache(); await drawRankChart(rankItems.value, true) })
 
-// 百分比：开关/基准变化时，仅重绘排行榜（趋势图不受影响）
-watch(percentEnabled, async () => { if (canQuery.value) { await queryStatsForTopPlayers(); await refreshRanks(false) } })
-watch(percentBase, async () => { if (canQuery.value) { await queryStatsForTopPlayers(); await refreshRanks(false) } })
-watch(globalTotalSum, async () => {
-  if (percentEnabled.value && percentBase.value === 'global' && canQuery.value) {
-    await refreshRanks(false)
-  }
-})
+// 百分比：开关/基准变化时，本地重绘（避免请求）
+watch(percentEnabled, async () => { rerenderFromCache(); await drawRankChart(rankItems.value, true) })
+watch(percentBase, async () => { rerenderFromCache(); await drawRankChart(rankItems.value, true) })
+// 全服总计变化不触发重新请求，避免循环；图表重绘在本地完成
+// watch(globalTotalSum, async () => {})
 watch(rankItems, async () => {
   if (!percentEnabled.value) return
   if (percentBase.value === 'global') return
@@ -657,8 +724,8 @@ onMounted(async () => {
 .chart { width: 100%; height: 300px; }
 .main-row { align-items: stretch; }
 .left-stack { display: flex; flex-direction: column; height: 100%; }
-.rank-card { flex: 1; padding-bottom: 8px; }
-.rank-chart { width: 100%; height: 520px; }
+.rank-card { flex: 1; padding-bottom: 8px; display: flex; flex-direction: column; }
+.rank-chart { width: 100%; flex: 1; min-height: 420px; }
 .percent-panel { margin-top: 8px; padding: 6px 8px; }
 .percent-title { color: var(--el-text-color-regular); margin-right: 6px; }
 .server-checkboxes { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; }
