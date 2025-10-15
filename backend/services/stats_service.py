@@ -634,7 +634,7 @@ def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity
 
             boundaries, delta_by_ts, first_boundary, last_ts = _build_boundaries_for_player(
                 db, player_id=player_id, metric_ids=metric_ids, granularity=granularity,
-                start_ts=start_ts, end_ts=end_ts,
+                start_ts=start_ts, end_ts=end_ts, server_ids=server_ids,
             )
             if not boundaries:
                 result[uid] = []
@@ -666,10 +666,107 @@ def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity
     finally:
         db.close()
 
+def leaderboard_total(*, metrics: List[str], at: Optional[str] = None,
+                      server_ids: Optional[List[int]] = None,
+                      namespace: str = DEFAULT_NAMESPACE,
+                      limit: int = 50) -> List[Dict[str, object]]:
+    """排行榜：某时刻各玩家（跨所选服务器与指标）total 之和，按降序返回。"""
+    from time import time as _time
+    at_ts = _parse_iso(at) if at else int(_time())
+    pairs = _normalize_metrics(metrics, namespace)
+    db = SessionLocal()
+    try:
+        metric_ids = _resolve_metric_ids(db, pairs)
+        if not metric_ids:
+            return []
+        # 子查询：每个 (server, player, metric) 在 at_ts 时刻之前的最新 ts
+        latest = (
+            select(
+                models.PlayerMetrics.server_id.label('server_id'),
+                models.PlayerMetrics.player_id.label('player_id'),
+                models.PlayerMetrics.metric_id.label('metric_id'),
+                func.max(models.PlayerMetrics.ts).label('ts'),
+            )
+            .where(
+                models.PlayerMetrics.metric_id.in_(metric_ids),
+                models.PlayerMetrics.ts <= at_ts,
+            )
+            .group_by(models.PlayerMetrics.server_id, models.PlayerMetrics.player_id, models.PlayerMetrics.metric_id)
+        )
+        if server_ids:
+            latest = latest.where(models.PlayerMetrics.server_id.in_(server_ids))
+        latest = latest.subquery('latest')
+
+        # 连接到主表取出 total，再按 player 汇总
+        agg = (
+            select(
+                latest.c.player_id.label('player_id'),
+                func.sum(models.PlayerMetrics.total).label('value')
+            )
+            .select_from(latest)
+            .join(models.PlayerMetrics, (models.PlayerMetrics.server_id == latest.c.server_id) &
+                                     (models.PlayerMetrics.player_id == latest.c.player_id) &
+                                     (models.PlayerMetrics.metric_id == latest.c.metric_id) &
+                                     (models.PlayerMetrics.ts == latest.c.ts))
+            .group_by(latest.c.player_id)
+            .order_by(func.sum(models.PlayerMetrics.total).desc())
+            .limit(max(1, int(limit)))
+        )
+        rows = db.execute(agg).all()
+        out: List[Dict[str, object]] = []
+        for pid, val in rows:
+            rec = db.query(models.Player).filter(models.Player.id == pid).first()
+            out.append({
+                'player_uuid': rec.uuid if rec else None,
+                'player_name': rec.player_name if rec else None,
+                'value': int(val or 0),
+            })
+        return out
+    finally:
+        db.close()
+
+def leaderboard_delta(*, metrics: List[str], start: Optional[str] = None, end: Optional[str] = None,
+                      server_ids: Optional[List[int]] = None,
+                      namespace: str = DEFAULT_NAMESPACE,
+                      limit: int = 50) -> List[Dict[str, object]]:
+    """排行榜：区间内各玩家（跨所选服务器与指标）delta 之和，按降序返回。"""
+    start_ts = _parse_iso(start) if start else None
+    end_ts = _parse_iso(end) if end else None
+    pairs = _normalize_metrics(metrics, namespace)
+    db = SessionLocal()
+    try:
+        metric_ids = _resolve_metric_ids(db, pairs)
+        if not metric_ids:
+            return []
+        q = (
+            select(models.PlayerMetrics.player_id, func.sum(models.PlayerMetrics.delta).label('value'))
+            .where(models.PlayerMetrics.metric_id.in_(metric_ids))
+        )
+        if start_ts is not None:
+            q = q.where(models.PlayerMetrics.ts > start_ts)
+        if end_ts is not None:
+            q = q.where(models.PlayerMetrics.ts <= end_ts)
+        if server_ids:
+            q = q.where(models.PlayerMetrics.server_id.in_(server_ids))
+        q = q.group_by(models.PlayerMetrics.player_id).order_by(func.sum(models.PlayerMetrics.delta).desc()).limit(max(1,int(limit)))
+        rows = db.execute(q).all()
+        out: List[Dict[str, object]] = []
+        for pid, val in rows:
+            rec = db.query(models.Player).filter(models.Player.id == pid).first()
+            out.append({
+                'player_uuid': rec.uuid if rec else None,
+                'player_name': rec.player_name if rec else None,
+                'value': int(val or 0),
+            })
+        return out
+    finally:
+        db.close()
+
 
 def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity: str = "10min",
                      start: Optional[str] = None, end: Optional[str] = None,
-                     namespace: str = DEFAULT_NAMESPACE) -> Dict[str, List[Tuple[int, int]]]:
+                     namespace: str = DEFAULT_NAMESPACE,
+                     server_ids: Optional[List[int]] = None) -> Dict[str, List[Tuple[int, int]]]:
     if not player_uuids:
         raise ValueError("必须提供至少一个 player_uuid")
     if not metrics:
@@ -696,7 +793,7 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
 
             boundaries, delta_by_ts, first_boundary, last_ts = _build_boundaries_for_player(
                 db, player_id=player_id, metric_ids=metric_ids, granularity=granularity,
-                start_ts=start_ts, end_ts=end_ts,
+                start_ts=start_ts, end_ts=end_ts, server_ids=server_ids,
             )
             if not boundaries:
                 result[uid] = []

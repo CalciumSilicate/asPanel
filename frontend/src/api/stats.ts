@@ -24,6 +24,7 @@ export async function fetchDeltaSeries(args: {
   start?: string
   end?: string
   namespace?: string
+  server_id?: (string|number)[]
 }): Promise<SeriesDict> {
   const q = buildQuery({
     player_uuid: args.player_uuid,
@@ -32,6 +33,7 @@ export async function fetchDeltaSeries(args: {
     start: args.start,
     end: args.end,
     namespace: args.namespace ?? 'minecraft',
+    server_id: args.server_id?.map(String),
   })
   const res = await apiClient.get(`/api/stats/series/delta?${q}`)
   return res.data || {}
@@ -44,6 +46,7 @@ export async function fetchTotalSeries(args: {
   start?: string
   end?: string
   namespace?: string
+  server_id?: (string|number)[]
 }): Promise<SeriesDict> {
   const q = buildQuery({
     player_uuid: args.player_uuid,
@@ -52,8 +55,52 @@ export async function fetchTotalSeries(args: {
     start: args.start,
     end: args.end,
     namespace: args.namespace ?? 'minecraft',
+    server_id: args.server_id?.map(String),
   })
   const res = await apiClient.get(`/api/stats/series/total?${q}`)
   return res.data || {}
 }
 
+export async function fetchMetrics(q: string, limit = 50, namespace = 'minecraft'): Promise<string[]> {
+  const qs = buildQuery({ q, limit: String(limit), namespace })
+  const res = await apiClient.get(`/api/stats/metrics?${qs}`)
+  return res.data || []
+}
+
+export async function fetchLeaderboardTotal(args: {
+  metric: string[]
+  at?: string
+  server_id?: (string|number)[]
+  namespace?: string
+  limit?: number
+}) {
+  const q = buildQuery({
+    metric: args.metric,
+    at: args.at,
+    server_id: args.server_id?.map(String),
+    namespace: args.namespace ?? 'minecraft',
+    limit: args.limit != null ? String(args.limit) : undefined,
+  })
+  const res = await apiClient.get(`/api/stats/leaderboard/total?${q}`)
+  return res.data || []
+}
+
+export async function fetchLeaderboardDelta(args: {
+  metric: string[]
+  start?: string
+  end?: string
+  server_id?: (string|number)[]
+  namespace?: string
+  limit?: number
+}) {
+  const q = buildQuery({
+    metric: args.metric,
+    start: args.start,
+    end: args.end,
+    server_id: args.server_id?.map(String),
+    namespace: args.namespace ?? 'minecraft',
+    limit: args.limit != null ? String(args.limit) : undefined,
+  })
+  const res = await apiClient.get(`/api/stats/leaderboard/delta?${q}`)
+  return res.data || []
+}
