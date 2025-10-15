@@ -1,6 +1,22 @@
 <template>
   <div class="statistics-view">
 
+    <!-- 顶部数据统计顶栏：标题 + 玩家范围筛选 -->
+    <el-card shadow="never" class="topbar-card" :body-style="{ display: 'none', padding: '0' }">
+      <template #header>
+        <div class="topbar">
+          <div class="topbar-title">数据统计</div>
+          <div class="topbar-actions">
+            <el-radio-group v-model="scope" @change="onScopeChange">
+              <el-radio-button label="all">所有玩家</el-radio-button>
+              <el-radio-button label="official_only">仅正版玩家</el-radio-button>
+              <el-radio-button label="include_cracked">包括盗版玩家</el-radio-button>
+            </el-radio-group>
+          </div>
+        </div>
+      </template>
+    </el-card>
+
     <el-row :gutter="16" class="main-row">
       <!-- 左：排行榜 -->
       <el-col :xs="24" :lg="7">
@@ -141,6 +157,8 @@ import { loadECharts } from '@/utils/echartsLoader'
 
 const players = ref<any[]>([])
 const servers = ref<any[]>([])
+// 玩家范围筛选：所有 / 仅正版 / 包括盗版
+const scope = ref<'official_only'|'include_cracked'|'all'>('official_only')
 const serverNames = computed(() => servers.value.map((s:any) => (s.path?.split('/').pop()) || s.name))
 const selectedServerNames = ref<string[]>([])
 const selectedServerIds = ref<number[]>([])
@@ -545,7 +563,7 @@ async function queryStatsForTopPlayers() {
 
 async function fetchPlayers() {
   try {
-    const res = await apiClient.get('/api/players')
+    const res = await apiClient.get('/api/players', { params: { scope: scope.value } })
     players.value = Array.isArray(res.data) ? res.data : []
     // 初始填充一次可选项（按当前排行榜顺序）
     await searchPlayers('')
@@ -742,6 +760,11 @@ watch(selectedServerNames, async () => {
   if (canQuery.value) await refreshRanks(false)
 })
 
+const onScopeChange = async () => {
+  await fetchPlayers()
+  // 维持当前排行榜不变，仅刷新右侧玩家搜索与可选项
+}
+
 watch(granularity, async () => {
   if (canQuery.value) await queryStatsForTopPlayers()
 })
@@ -814,5 +837,4 @@ onMounted(async () => {
 .percent-title { color: var(--el-text-color-regular); margin-right: 6px; }
 .server-checkboxes { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; }
 .preset-panel { display: flex; flex-wrap: wrap; gap: 6px; }
-
 </style>
