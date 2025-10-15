@@ -179,8 +179,8 @@ class PlayerMetrics(Base):
     metric_id = Column(Integer, ForeignKey("metrics_dim.metric_id"))
     total = Column(Integer)
     delta = Column(Integer)
-    __table_args__ = [
+    __table_args__ = (
         PrimaryKeyConstraint("server_id", "player_id", "metric_id", "ts", name="pk_player_metrics"),
         Index("idx_player_metrics_ts", "ts"),
         Index("idx_player_metrics_metric_ts", "metric_id", "ts"),
-    ]
+    )
