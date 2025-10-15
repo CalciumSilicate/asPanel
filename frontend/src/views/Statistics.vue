@@ -741,7 +741,10 @@ async function refreshRanks(_showTip=false) {
   if (!canQuery.value) return
   // 若未选择时刻，默认使用后端“当前时刻”逻辑（不传 at）
   const list = await fetchLeaderboardTotal({ metric: selectedMetrics.value, server_id: selectedServerIds.value, limit: 10000, ...(rankAtTs.value ? { at: toIso(new Date(rankAtTs.value*1000)) } : {}) })
-  await drawRankChart(list)
+  // 依据 scope 过滤：仅保留 players 列表内（按 scope 拉取）的玩家
+  const allowed = new Set((players.value || []).map((p:any)=>String(p.uuid)))
+  const filtered = (list || []).filter((it:any) => allowed.has(String(it.player_uuid)))
+  await drawRankChart(filtered)
   // 同步刷新全服总计（防抖）用于“全服总计”为百分比基准
   const ts = rankAtTs.value || currentTotalEndTs || Math.floor(Date.now()/1000)
   scheduleGlobalTotalRefresh(ts)
@@ -760,9 +763,20 @@ watch(selectedServerNames, async () => {
   if (canQuery.value) await refreshRanks(false)
 })
 
+function currentRankContextTs(): number {
+  return rankAtTs.value || currentTotalEndTs || Math.floor(Date.now()/1000)
+}
+
 const onScopeChange = async () => {
   await fetchPlayers()
-  // 维持当前排行榜不变，仅刷新右侧玩家搜索与可选项
+  // 将已选玩家限制在当前 scope 范围内
+  const allowed = new Set((players.value || []).map((p:any)=>String(p.uuid)))
+  selectedPlayers.value = selectedPlayers.value.filter(u => allowed.has(String(u)))
+  // 刷新排行榜与右侧图表
+  await refreshRanks(false)
+  if (canQuery.value) await queryStatsForTopPlayers()
+  // 同步全服总计（应用可能的换算）
+  scheduleGlobalTotalRefresh(currentRankContextTs())
 }
 
 watch(granularity, async () => {
@@ -780,9 +794,17 @@ watch(convertFrom, async (v) => {
   if (v === 'cm') convertTo.value = 'km'
   rerenderFromCache()
   await drawRankChart(rankItems.value, true)
+  // 全服总计也应受换算影响：重算（命中缓存，不会重复请求）
+  const ts = currentRankContextTs(); if (ts) await refreshGlobalTotalAtTs(ts)
 })
-watch(convertTo, async () => { rerenderFromCache(); await drawRankChart(rankItems.value, true) })
-watch(convertEnabled, async () => { rerenderFromCache(); await drawRankChart(rankItems.value, true) })
+watch(convertTo, async () => { 
+  rerenderFromCache(); await drawRankChart(rankItems.value, true)
+  const ts = currentRankContextTs(); if (ts) await refreshGlobalTotalAtTs(ts)
+})
+watch(convertEnabled, async () => { 
+  rerenderFromCache(); await drawRankChart(rankItems.value, true)
+  const ts = currentRankContextTs(); if (ts) await refreshGlobalTotalAtTs(ts)
+})
 
 // 百分比：开关/基准变化时，本地重绘（避免请求）
 watch(percentEnabled, async () => { rerenderFromCache(); await drawRankChart(rankItems.value, true) })
