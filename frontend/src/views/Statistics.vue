@@ -413,7 +413,7 @@ async function drawRankChart(items: any[]) {
   const names = items.map(it => it.player_name || shortUuid(it.player_uuid))
   const vals = items.map(it => applyConvert(Number(it.value||0)))
   const option = {
-    grid: { left: 20, right: 16, top: 8, bottom: 26, containLabel: true },
+    grid: { left: 20, right: 30, top: 8, bottom: 26, containLabel: true },
     xAxis: { type: 'value' },
     yAxis: {
       type: 'category',
