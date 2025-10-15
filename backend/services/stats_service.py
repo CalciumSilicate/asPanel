@@ -789,7 +789,8 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                 result[uid] = []
                 continue
 
-            boundaries, delta_by_ts, first_boundary, last_ts = _build_boundaries_for_player(
+            # 仍然复用边界构建逻辑（仅用于确定时间锚点，不再使用 delta 计算 total）
+            boundaries, _delta_by_ts, _first_boundary, last_ts = _build_boundaries_for_player(
                 db, player_id=player_id, metric_ids=metric_ids, granularity=granularity,
                 start_ts=start_ts, end_ts=end_ts, server_ids=server_ids,
             )
@@ -797,25 +798,84 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                 result[uid] = []
                 continue
 
-            # total(E_i) = sum_{ts <= E_i}(delta)
-            out: List[Tuple[int, int]] = []
-            sorted_ts = sorted(delta_by_ts.keys())
-            idx = 0
-            cumulative = 0
-
-            # 累计到第一个边界（含）
             first_b = boundaries[0]
-            while idx < len(sorted_ts) and sorted_ts[idx] <= first_b:
-                cumulative += delta_by_ts[sorted_ts[idx]]
-                idx += 1
-            out.append((first_b, int(cumulative)))
 
-            # 后续边界增量叠加
+            # 1) 计算基线：在 first_b 时刻（含）之前，每个 (server, metric) 的最新 total 之和
+            latest_baseline = (
+                select(
+                    models.PlayerMetrics.server_id.label('server_id'),
+                    models.PlayerMetrics.metric_id.label('metric_id'),
+                    func.max(models.PlayerMetrics.ts).label('ts'),
+                )
+                .where(
+                    models.PlayerMetrics.player_id == player_id,
+                    models.PlayerMetrics.metric_id.in_(metric_ids),
+                    models.PlayerMetrics.ts <= first_b,
+                )
+                .group_by(models.PlayerMetrics.server_id, models.PlayerMetrics.metric_id)
+            )
+            if server_ids:
+                latest_baseline = latest_baseline.where(models.PlayerMetrics.server_id.in_(server_ids))
+            latest_baseline = latest_baseline.subquery('latest_baseline')
+
+            baseline_rows = db.execute(
+                select(
+                    latest_baseline.c.server_id,
+                    latest_baseline.c.metric_id,
+                    models.PlayerMetrics.total,
+                )
+                .select_from(latest_baseline)
+                .join(
+                    models.PlayerMetrics,
+                    (models.PlayerMetrics.server_id == latest_baseline.c.server_id)
+                    & (models.PlayerMetrics.metric_id == latest_baseline.c.metric_id)
+                    & (models.PlayerMetrics.ts == latest_baseline.c.ts)
+                )
+            ).all()
+
+            totals_by_key: Dict[Tuple[int, int], int] = {}
+            current_sum = 0
+            for sid, mid, tot in baseline_rows:
+                key = (int(sid), int(mid))
+                val = int(tot or 0)
+                totals_by_key[key] = val
+                current_sum += val
+
+            # 2) 拉取 first_b..last_ts 期间的所有变更事件（按时间升序），逐边界推进最新值
+            events_q = (
+                select(
+                    models.PlayerMetrics.ts,
+                    models.PlayerMetrics.server_id,
+                    models.PlayerMetrics.metric_id,
+                    models.PlayerMetrics.total,
+                )
+                .where(
+                    models.PlayerMetrics.player_id == player_id,
+                    models.PlayerMetrics.metric_id.in_(metric_ids),
+                    models.PlayerMetrics.ts > first_b,
+                    models.PlayerMetrics.ts <= last_ts,
+                )
+                .order_by(models.PlayerMetrics.ts.asc())
+            )
+            if server_ids:
+                events_q = events_q.where(models.PlayerMetrics.server_id.in_(server_ids))
+            events = db.execute(events_q).all()
+
+            # 3) 沿边界推进，应用事件更新 current_sum，并记录 total 值
+            out: List[Tuple[int, int]] = []
+            idx = 0
+            out.append((first_b, int(current_sum)))
             for b in boundaries[1:]:
-                while idx < len(sorted_ts) and sorted_ts[idx] <= b:
-                    cumulative += delta_by_ts[sorted_ts[idx]]
+                while idx < len(events) and int(events[idx][0]) <= b:
+                    _ts, sid, mid, tot = events[idx]
+                    key = (int(sid), int(mid))
+                    new_val = int(tot or 0)
+                    prev_val = totals_by_key.get(key, 0)
+                    if new_val != prev_val:
+                        current_sum += (new_val - prev_val)
+                        totals_by_key[key] = new_val
                     idx += 1
-                out.append((b, int(cumulative)))
+                out.append((b, int(current_sum)))
 
             result[uid] = out
         return result
