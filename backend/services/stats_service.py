@@ -80,17 +80,19 @@ def _fmt_full_key(metric: str, *, namespace: str = DEFAULT_NAMESPACE) -> str:
     return f"{namespace}:{cat}.{namespace}:{item}"
 
 
-def _filter_metrics(all_metrics: Iterable[str]) -> List[str]:
+def _filter_metrics(all_metrics: Iterable[str], *, namespace: str = DEFAULT_NAMESPACE) -> List[str]:
     """按配置过滤指标集合。支持通配符：如 '*.minecraft:stone' 或 'minecraft:used.minecraft:*_pickaxe'。
 
     - STATS_WHITELIST_ON 为真：先按白名单匹配，再应用忽略列表剔除
     - 否则：在全部集合上应用忽略列表剔除
+
+    参数 all_metrics 为 'cat.item' 形式的集合；namespace 用于拼接完整键参与匹配。
     """
     metrics = set(all_metrics)
     if STATS_WHITELIST_ON:
         allowed = set()
         for m in metrics:
-            full = _fmt_full_key(m)
+            full = _fmt_full_key(m, namespace=namespace)
             if any(fnmatch.fnmatch(full, pat) for pat in STATS_WHITELIST):
                 allowed.add(m)
         metrics = allowed
@@ -98,7 +100,7 @@ def _filter_metrics(all_metrics: Iterable[str]) -> List[str]:
     # 忽略项
     filtered = set()
     for m in metrics:
-        full = _fmt_full_key(m)
+        full = _fmt_full_key(m, namespace=namespace)
         if any(fnmatch.fnmatch(full, pat) for pat in STATS_IGNORE):
             continue
         filtered.add(m)
@@ -127,7 +129,7 @@ def discover_metrics_from_all_servers() -> List[str]:
         stats_dir = _server_stats_dir(srv.path)
         all_metrics |= _list_metrics_in_stats_dir(stats_dir)
 
-    metrics = _filter_metrics(all_metrics)
+    metrics = _filter_metrics(all_metrics, namespace=DEFAULT_NAMESPACE)
     if not metrics:
         # 回退至少包含游玩时长（历史兼容）
         metrics = ["custom.play_one_minute"]
@@ -459,7 +461,9 @@ def _resolve_metric_ids(db: Session, pairs: List[Tuple[str, str]]) -> List[int]:
 
 def list_metrics(db: Session, q: Optional[str] = None, limit: int = 50,
                  namespace: str = DEFAULT_NAMESPACE) -> List[str]:
-    """列出已存在的指标（归一为 'cat.item' 形式），支持按关键字模糊过滤。"""
+    """列出已存在的指标（归一为 'cat.item' 形式），支持按关键字模糊过滤；
+    并依据 STATS_WHITELIST_ON/WHITELIST/IGNORE 约束输出。
+    """
     # 简单 LIKE 过滤，尽量利用索引；否则回退到 Python 过滤
     like = None
     if q:
@@ -487,7 +491,8 @@ def list_metrics(db: Session, q: Optional[str] = None, limit: int = 50,
         if m not in seen:
             seen.add(m)
             uniq.append(m)
-    return uniq
+    # 应用白名单/忽略过滤输出
+    return _filter_metrics(uniq, namespace=namespace)
 
 
 def _align_down_calendar(ts: int, granularity: str, tz) -> int:
@@ -709,7 +714,20 @@ def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity
     start_ts = _parse_iso(start) if start else None
     end_ts = _parse_iso(end) if end else None
 
-    pairs = _normalize_metrics(metrics, namespace)
+    # 输入指标按白名单/忽略进行过滤（支持通配符），并归一为 cat.item
+    normed: List[str] = []
+    for m in metrics:
+        nm = _normalize_metric(m)
+        try:
+            cat, item = nm.split('.', 1)
+            normed.append(f"{cat}.{item}")
+        except Exception:
+            continue
+    allowed = _filter_metrics(normed, namespace=namespace)
+    if not allowed:
+        return {uid: [] for uid in player_uuids}
+
+    pairs = _normalize_metrics(allowed, namespace)
     db = SessionLocal()
     try:
         metric_ids = _resolve_metric_ids(db, pairs)
@@ -765,10 +783,26 @@ def leaderboard_total(*, metrics: List[str], at: Optional[str] = None,
                       server_ids: Optional[List[int]] = None,
                       namespace: str = DEFAULT_NAMESPACE,
                       limit: int = 50) -> List[Dict[str, object]]:
-    """排行榜：某时刻各玩家（跨所选服务器与指标）total 之和，按降序返回。"""
+    """排行榜：某时刻各玩家（跨所选服务器与指标）total 之和，按降序返回。
+    输入 metrics 将按配置进行白名单/忽略过滤。
+    """
     from time import time as _time
     at_ts = _parse_iso(at) if at else int(_time())
-    pairs = _normalize_metrics(metrics, namespace)
+
+    # 过滤输入指标
+    normed: List[str] = []
+    for m in metrics:
+        nm = _normalize_metric(m)
+        try:
+            cat, item = nm.split('.', 1)
+            normed.append(f"{cat}.{item}")
+        except Exception:
+            continue
+    allowed = _filter_metrics(normed, namespace=namespace)
+    if not allowed:
+        return []
+
+    pairs = _normalize_metrics(allowed, namespace)
     db = SessionLocal()
     try:
         metric_ids = _resolve_metric_ids(db, pairs)
@@ -824,10 +858,26 @@ def leaderboard_delta(*, metrics: List[str], start: Optional[str] = None, end: O
                       server_ids: Optional[List[int]] = None,
                       namespace: str = DEFAULT_NAMESPACE,
                       limit: int = 50) -> List[Dict[str, object]]:
-    """排行榜：区间内各玩家（跨所选服务器与指标）delta 之和，按降序返回。"""
+    """排行榜：区间内各玩家（跨所选服务器与指标）delta 之和，按降序返回。
+    输入 metrics 将按配置进行白名单/忽略过滤。
+    """
     start_ts = _parse_iso(start) if start else None
     end_ts = _parse_iso(end) if end else None
-    pairs = _normalize_metrics(metrics, namespace)
+
+    # 过滤输入指标
+    normed: List[str] = []
+    for m in metrics:
+        nm = _normalize_metric(m)
+        try:
+            cat, item = nm.split('.', 1)
+            normed.append(f"{cat}.{item}")
+        except Exception:
+            continue
+    allowed = _filter_metrics(normed, namespace=namespace)
+    if not allowed:
+        return []
+
+    pairs = _normalize_metrics(allowed, namespace)
     db = SessionLocal()
     try:
         metric_ids = _resolve_metric_ids(db, pairs)
@@ -871,7 +921,21 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
 
     start_ts = _parse_iso(start) if start else None
     end_ts = _parse_iso(end) if end else None
-    pairs = _normalize_metrics(metrics, namespace)
+
+    # 输入指标按白名单/忽略进行过滤（支持通配符），并归一为 cat.item
+    normed: List[str] = []
+    for m in metrics:
+      nm = _normalize_metric(m)
+      try:
+          cat, item = nm.split('.', 1)
+          normed.append(f"{cat}.{item}")
+      except Exception:
+          continue
+    allowed = _filter_metrics(normed, namespace=namespace)
+    if not allowed:
+        return {uid: [] for uid in player_uuids}
+
+    pairs = _normalize_metrics(allowed, namespace)
 
     db = SessionLocal()
     try:
