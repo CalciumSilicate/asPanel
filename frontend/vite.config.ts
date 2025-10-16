@@ -16,7 +16,8 @@ export default defineConfig(({ mode }) => {
     server: {
       // 开发环境通过 Vite 代理到后端，目标由 VITE_API_URL 指定
       host: true,
-      allowedHosts: ['assx.top'],
+      // 允许从环境变量读取：VITE_ALLOWED_HOSTS（逗号/空白分隔）；默认空
+      allowedHosts: (env.VITE_ALLOWED_HOSTS || '').split(/[\s,]+/).map(s => s.trim()).filter(Boolean),
       proxy: {
         '/api': {
           target,

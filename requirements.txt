@@ -21,3 +21,4 @@ argon2-cffi
 async-cache
 mcdreforged
 websocket-client
+litemapy
