@@ -438,7 +438,7 @@ def get_server_link_group_by_name(db: Session, name: str) -> Optional[models.Ser
 
 
 def list_server_link_groups(db: Session) -> List[models.ServerLinkGroup]:
-    return db.query(models.ServerLinkGroup).order_by(models.ServerLinkGroup.created_at.desc()).all()
+    return db.query(models.ServerLinkGroup).all()
 
 
 def create_server_link_group(db: Session, payload: schemas.ServerLinkGroupCreate) -> models.ServerLinkGroup:
