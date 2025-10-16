@@ -23,6 +23,17 @@ export default defineConfig(({ mode }) => {
           target,
           changeOrigin: true
           // 不进行 rewrite，后端本身以 /api 为前缀
+        },
+        // 静态资源（头像等）也通过代理，保证开发环境与生产一致的相对路径访问
+        '/avatars': {
+          target,
+          changeOrigin: true
+        },
+        // WebSocket（socket.io）代理，开发环境转发到后端
+        '/ws': {
+          target,
+          changeOrigin: true,
+          ws: true
         }
       }
     }

@@ -1079,7 +1079,6 @@
 </template>
 
 <script setup>
-import { API_BASE_URL } from '@/config'
 import {
   Plus, VideoPlay, SwitchButton, Refresh, Monitor, ArrowDown, Promotion,
   View, Hide, Setting, Cpu, Delete, Document, FolderAdd, FolderChecked, Rank, Loading, CircleClose, DocumentCopy
@@ -2224,8 +2223,8 @@ onMounted(() => {
   fetchServers();
   fetchFabricGameVersions();
 
-  const wsUrl = API_BASE_URL;
-  socket = io(wsUrl, {path: '/ws/socket.io'});
+  // 同源连接 WebSocket（开发环境走 Vite 代理 /ws，生产由反代处理）
+  socket = io({ path: '/ws/socket.io' });
 
   socket.on('connect', () => {
     console.log('WebSocket for ServerList connected successfully.');

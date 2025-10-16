@@ -121,13 +121,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, ArrowDown, Promotion } from '@element-plus/icons-vue'
 import apiClient from '@/api'
 import { io } from 'socket.io-client'
-import { API_BASE_URL } from '@/config'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import { settings } from '@/store/settings'
 
 const defaultAvatar = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="24" r="14" fill="#bbb"/><rect x="12" y="40" width="40" height="18" rx="9" fill="#bbb"/></svg>'
 
-const socket = io(API_BASE_URL, { path: '/ws/socket.io' })
+// 同源连接 WebSocket（开发环境走 Vite 代理 /ws，生产由反代处理）
+const socket = io({ path: '/ws/socket.io' })
 
 const groups = ref([])
 const servers = ref([])
@@ -347,7 +347,7 @@ const resolveAvatar = (url) => {
   if (!url) return null
   if (url.startsWith('http://') || url.startsWith('https://')) return url
   const path = url.startsWith('/') ? url : `/${url}`
-  return `${API_BASE_URL}${path}`
+  return path
 }
 
 const mcAvatar = (name) => {

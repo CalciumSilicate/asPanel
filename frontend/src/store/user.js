@@ -2,7 +2,6 @@
 
 import { reactive, computed, ref } from 'vue';
 import apiClient from '@/api';
-import { API_BASE_URL } from '@/config';
 
 // 存储用户基本信息
 export const user = reactive({
@@ -18,29 +17,10 @@ const avatarVersion = ref(0);
 
 // 计算属性，生成完整的、带缓存破坏参数的头像 URL
 export const fullAvatarUrl = computed(() => {
-  if (user.avatar_url) {
-    // 确保从后端获取的路径是以 / 开头的
-    const path = user.avatar_url.startsWith('/') ? user.avatar_url : `/${user.avatar_url}`;
-
-    // 从环境变量中读取后端的基地址 (例如 "http://localhost:8000")
-    // 这是解决图片404问题的关键！
-    const baseUrl = API_BASE_URL;
-
-    if (!baseUrl) {
-      console.error(
-        "CRITICAL: VITE_API_URL is not defined in your .env.development file. " +
-        "Avatar images may not load as expected. Please create the file and add VITE_API_URL=http://localhost:8000"
-      );
-      // 提供一个降级，但很可能因为跨域或路径问题失败
-      return path;
-    }
-
-    // 组合成完整的绝对 URL，并附加版本号参数来强制刷新
-    // 最终生成的 URL 示例: "http://localhost:8000/avatars/user_1.png?v=1"
-    return `${baseUrl}${path}?v=${avatarVersion.value}`;
-  }
-  // 如果用户没有设置头像，返回 undefined，el-avatar 会显示默认的 icon
-  return undefined;
+  if (!user.avatar_url) return undefined
+  // 始终使用相对路径（由 Vite 代理或生产反代转发到后端）
+  const path = user.avatar_url.startsWith('/') ? user.avatar_url : `/${user.avatar_url}`
+  return `${path}?v=${avatarVersion.value}`
 });
 
 // 角色等级映射与便捷检查
