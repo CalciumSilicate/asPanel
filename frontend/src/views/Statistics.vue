@@ -156,11 +156,13 @@ import apiClient from '@/api'
 import { fetchDeltaSeries, fetchTotalSeries, fetchMetrics, fetchLeaderboardTotal, fetchLeaderboardDelta } from '@/api/stats'
 import { loadECharts } from '@/utils/echartsLoader'
 
+/** =========================
+ *  基础状态
+ *  ========================= */
 const players = ref<any[]>([])
 const servers = ref<any[]>([])
-// 玩家范围筛选：所有 / 仅正版 / 包括盗版
+
 const scope = ref<'official_only'|'include_cracked'|'all'>('official_only')
-// 白名单筛选
 const whitelistUUIDs = ref<string[]>([])
 const whitelistOnly = ref<boolean>(true)
 const whitelistSet = computed(() => new Set(whitelistUUIDs.value))
@@ -168,30 +170,31 @@ const whitelistSet = computed(() => new Set(whitelistUUIDs.value))
 const serverNames = computed(() => servers.value.map((s:any) => (s.path?.split('/').pop()) || s.name))
 const selectedServerNames = ref<string[]>([])
 const selectedServerIds = ref<number[]>([])
-// 选中的玩家 UUID 列表（用于右侧图表与筛选）
-const selectedPlayers = ref<string[]>([])
 
-// 玩家远程搜索
+const selectedPlayers = ref<string[]>([]) // 右侧图表玩家
+
+// 远程搜索
 const playersLoading = ref(false)
 const playerOptions = ref<{label:string,value:string}[]>([])
 
 const metricOptions = ref<string[]>([])
 const metricsLoading = ref(false)
 const selectedMetrics = ref<string[]>(['custom.play_time','custom.play_one_minute'])
-// 与后端保持一致的粒度集合
+
+// 粒度
 const granularities = ['10min','20min','30min','1h','6h','12h','24h','1week','1month','3month','6month','1year']
+const granularity = ref<string>('12h')
 const granularityOptions = computed(() => granularities.map(g => ({
   value: g,
   label: (g==='10min' || g==='20min' || g==='30min' || g==='1h') ? `${g}（数据量大时易卡，慎选）` : g,
 })))
-const granularity = ref<string>('12h')
 const range = ref<[Date, Date] | null>(null)
 
 // 指标预设
 const metricPresets = [
   { key: 'online_time', name: '在线时长', metrics: ['custom.play_one_minute','custom.play_time'], conv: { on: true, from: 'gt', to: 'hour' } },
   { key: 'deaths', name: '死亡次数', metrics: ['custom.deaths'], conv: { on: false } },
-  { key: 'mined_total', name: '挖掘总数', metrics: (()=>{ const mats=['wooden','stone','iron','golden','diamond','netherite','copper']; const tools=['axe','sword','pickaxe','shovel','hoe']; const combos = mats.flatMap(m=>tools.map(t=>`used.${m}_${t}`)); return ['used.shears', ...combos] })(), conv: { on: false } },
+  { key: 'm i n e d_total', name: '挖掘总数', metrics: (()=>{ const mats=['wooden','stone','iron','golden','diamond','netherite','copper']; const tools=['axe','sword','pickaxe','shovel','hoe']; const combos = mats.flatMap(m=>tools.map(t=>`used.${m}_${t}`)); return ['used.shears', ...combos] })(), conv: { on: false } },
   { key: 'elytra_km', name: '鞘翅飞行距离', metrics: ['custom.aviate_one_cm'], conv: { on: true, from: 'cm', to: 'km' } },
   { key: 'pearl_km', name: '珍珠传送距离', metrics: ['custom.ender_pearl_one_cm'], conv: { on: true, from: 'cm', to: 'km' } },
   { key: 'vehicle_km', name: '载具行进距离', metrics: (()=>{ const vehicles=['boat','horse','minecart','pig','crouch']; return vehicles.map(v=>`custom.${v}_one_cm`) })(), conv: { on: true, from: 'cm', to: 'km' } },
@@ -200,24 +203,23 @@ const metricPresets = [
   { key: 'break_bedrock', name: '破基岩次数', metrics: ['custom.break_bedrock'], conv: { on: false } },
   { key: 'totem_used', name: '不死图腾使用次数', metrics: ['used.totem_of_undying'], conv: { on: false } },
 ]
-
 async function applyPreset(key: string) {
   const p = metricPresets.find(x=>x.key===key)
   if (!p) return
   selectedMetrics.value = p.metrics.slice()
-  // 设置换算
   convertEnabled.value = !!p.conv?.on
   if (p.conv?.from) convertFrom.value = p.conv.from as any
   if (p.conv?.to) convertTo.value = p.conv.to as any
-  // 刷新视图
   await refreshRanks(false)
   await queryStatsForTopPlayers()
 }
 
-const rankAtTs = ref<number | null>(null) // 由右侧 Total 图点击选择
+/** =========================
+ *  ECharts 实例
+ *  ========================= */
+const rankAtTs = ref<number | null>(null) // 由 Total 图点击选择
 const rankChartRef = ref<HTMLElement | null>(null)
 let rankChart: any = null
-
 const deltaChartRef = ref<HTMLElement | null>(null)
 const totalChartRef = ref<HTMLElement | null>(null)
 let deltaChart: any = null
@@ -225,49 +227,18 @@ let totalChart: any = null
 
 const canQuery = computed(() => selectedMetrics.value.length > 0)
 
-const totalDeltaSum = ref<number>(0)
-const totalLastTotal = ref<number>(0)
-const globalTotalSum = ref<number>(0)
+const totalDeltaSum = ref<number>(0)   // KPI：区间合计(Δ)
+const totalLastTotal = ref<number>(0)  // KPI：选中玩家总计（窗口末端）
+const globalTotalSum = ref<number>(0)  // KPI：全服总计
 let currentTotalEndTs: number | null = null
 
-const selectedPlayerCount = computed(() => {
-  if (selectedPlayers.value && selectedPlayers.value.length > 0) return selectedPlayers.value.length
-  if (rankItems.value && rankItems.value.length > 0) return Math.min(5, rankItems.value.length)
-  return Math.min(5, players.value.length || 0)
-})
-
-let currentDeltaXTimestamps: number[] = []
-let currentTotalXTimestamps: number[] = []
-// 序列原始缓存（用于本地重绘，避免重复请求）
+// 缓存最后一次查询的原始数据（稀疏）
 let lastDeltaDictRaw: Record<string, [number, number][]> = {}
 let lastTotalDictRaw: Record<string, [number, number][]> = {}
 
-function rerenderFromCache() {
-  try {
-    if (lastDeltaDictRaw && lastTotalDictRaw) {
-      // 重用现有 queryStatsForTopPlayers 的渲染逻辑：
-      // 复制一份最小化流程以保持行为一致
-      const deltaDict = convertDict(lastDeltaDictRaw)
-      const totalDict = convertDict(lastTotalDictRaw)
-      totalDeltaSum.value = Number(Object.values(deltaDict).reduce((acc, arr) => acc + arr.reduce((s, [,v]) => s + Number(v||0), 0), 0).toFixed(2))
-      totalLastTotal.value = Number(Object.values(totalDict).reduce((acc, arr) => acc + (arr.length ? Number(arr[arr.length-1][1]||0) : 0), 0).toFixed(2))
-
-      const baseForPercent = percentBaseValueRank.value || 1
-      const pct = (v:number) => Number(((v / (baseForPercent || 1)) * 100).toPrecision(5))
-      const scaledTotalDict = percentEnabled.value
-        ? Object.fromEntries(Object.entries(totalDict).map(([k, arr]) => [k, arr.map(([t, v]) => [t, pct(Number(v||0))]) as [number, number][]]))
-        : totalDict
-      const deltaOpt: any = buildSeriesOption(deltaDict, 'bar', granularity.value, 'delta')
-      const totalOpt: any = buildSeriesOption(scaledTotalDict, 'line', granularity.value, 'total')
-      deltaChart && deltaChart.setOption(deltaOpt, true)
-      totalChart && totalChart.setOption(totalOpt, true)
-      currentDeltaXTimestamps = deltaOpt._xTs
-      currentTotalXTimestamps = totalOpt._xTs
-    }
-  } catch {}
-}
-
-// 换算单位配置
+/** =========================
+ *  单位换算 & 百分比
+ *  ========================= */
 const convertEnabled = ref<'boolean'>(true)
 const convertFrom = ref<'gt'|'cm'>('gt')
 const convertTo = ref<'sec'|'min'|'hour'|'day'|'km'>('hour')
@@ -275,57 +246,289 @@ const convertTo = ref<'sec'|'min'|'hour'|'day'|'km'>('hour')
 function getConvertFactor(): number {
   if (!convertEnabled.value) return 1
   if (convertFrom.value === 'gt') {
-    // 1 gt = 1/20 sec
     if (convertTo.value === 'sec') return 1/20
     if (convertTo.value === 'min') return 1/(20*60)
     if (convertTo.value === 'hour') return 1/(20*3600)
     if (convertTo.value === 'day') return 1/(20*86400)
     return 1
   } else {
-    // cm -> km
     return convertTo.value === 'km' ? 1/100000 : 1
   }
 }
-
 function applyConvert(v: number): number {
   const f = getConvertFactor()
   return Number(((Number(v || 0) * f)).toFixed(2))
 }
 
-function convertDict(dict: Record<string, [number, number][]>): Record<string, [number, number][]> {
+// 百分比：仅用于 Total 累计趋势
+const percentEnabled = ref<boolean>(false)
+const percentBase = ref<string>('global') // 'global' 或 'player:<uuid>'
+const percentBaseCandidates = computed(() => {
+  const arr = [] as {label:string,value:string}[]
+  for (const it of (rankItems.value || [])) {
+    const v = Number(it?.value || 0)
+    if (v > 0 && it?.player_uuid) arr.push({ label: it.player_name || shortUuid(String(it.player_uuid)), value: `player:${String(it.player_uuid)}` })
+  }
+  return arr
+})
+const percentBaseValueRank = computed<number>(() => {
+  if (!percentEnabled.value) return 1
+  if (percentBase.value === 'global') return Number(globalTotalSum.value || 1)
+  if (percentBase.value.startsWith('player:')) {
+    const uid = percentBase.value.slice(7)
+    const it = (rankItems.value || []).find((x:any)=> String(x.player_uuid) === uid)
+    const raw = Number(it?.value || 0)
+    return convertEnabled.value ? applyConvert(raw) : raw
+  }
+  return 1
+})
+function toPercent(val: number): number {
+  const base = percentBaseValueRank.value || 1
+  return (Number(val || 0) / base) * 100
+}
+function fmtKpi(val: number): string {
+  if (percentEnabled.value) return Number(toPercent(val)).toPrecision(5) + '%'
+  if (convertEnabled.value) return Number(val || 0).toFixed(2)
+  return String(Math.round(Number(val || 0)))
+}
+function formatAxisValueTick(v: number): string {
+  const val = Number(v || 0)
+  if (percentEnabled.value) return Number(val).toPrecision(5) + '%'
+  if (convertEnabled.value) return Number(val).toFixed(2)
+  const abs = Math.abs(val)
+  if (abs >= 1e9) return (val/1e9).toFixed(1) + 'B'
+  if (abs >= 1e6) return (val/1e6).toFixed(1) + 'M'
+  if (abs >= 1e3) return (val/1e3).toFixed(1) + 'k'
+  return String(Math.round(val))
+}
+
+/** =========================
+ *  稀疏渲染相关（关键优化）
+ *  ========================= */
+// 稀疏：直接换算但保留原始 ts
+function convertDictSparse(dict: Record<string, [number, number][]>): Record<string, [number, number][]> {
   const out: Record<string, [number, number][]> = {}
   for (const [k, arr] of Object.entries(dict)) {
-    out[k] = arr.map(([t, v]) => [t, applyConvert(Number(v||0))]) as [number, number][]
+    out[k] = arr.map(([t, v]) => [t, applyConvert(Number(v||0))])
   }
   return out
 }
 
+// granularity -> 秒
+function granToSec(g: string): number {
+  if (g==='10min') return 600
+  if (g==='20min') return 1200
+  if (g==='30min') return 1800
+  if (g==='1h') return 3600
+  if (g==='6h') return 21600
+  if (g==='12h') return 43200
+  if (g==='24h') return 86400
+  if (g==='1week') return 604800
+  if (g==='1month') return 86400*30
+  if (g==='3month') return 86400*90
+  if (g==='6month') return 86400*180
+  if (g==='1year') return 86400*365
+  return 600
+}
 
+// 对可见窗口聚合 delta 为有限桶
+function bucketizeDelta(
+  arr: [number,number][],
+  gran: string,
+  winStart: number,
+  winEnd: number,
+  maxBuckets = 1000
+): [number,number][] {
+  if (!arr.length) return []
+  const clipped = arr.filter(([t]) => t >= winStart && t <= winEnd)
+  if (clipped.length === 0) return []
+  const span = Math.max(1, winEnd - winStart)
+  const bucketCount = Math.min(maxBuckets, Math.ceil(span / granToSec(gran)))
+  const bucketWidth = Math.max(1, Math.ceil(span / bucketCount))
+  const firstBucketStart = Math.floor(winStart / bucketWidth) * bucketWidth
+  const buckets = new Map<number, number>()
+  for (const [t, v] of clipped) {
+    const b = firstBucketStart + Math.floor((t - firstBucketStart)/bucketWidth)*bucketWidth
+    buckets.set(b, (buckets.get(b) || 0) + (v||0))
+  }
+  const out: [number,number][] = Array.from(buckets.entries())
+    .sort((a,b)=>a[0]-b[0])
+    .map(([b, sum]) => [b + Math.floor(bucketWidth/2), Number(sum.toFixed(2))])
+  return out
+}
+
+// 获取 total 图当前可见窗口（ms -> s）
+function currentWindowSecFromChart(chart:any): [number,number] {
+  const opt = chart?.getOption?.()
+  if (!opt) return [0,0]
+  // 尝试从第一条 series 取 x 范围
+  const s0 = opt.series?.[0]?.data || []
+  if (!s0.length) return [0,0]
+  const xs = s0.map((d:any)=>Array.isArray(d)?d[0]:d) as number[]
+  const min = xs[0], max = xs[xs.length-1]
+  const dz = (opt.dataZoom||[])[0] || {}
+  const start = dz.startValue!=null ? xs[Math.max(0, Math.min(xs.length-1, dz.startValue))] : min + (dz.start||0)/100*(max-min)
+  const end   = dz.endValue!=null   ? xs[Math.max(0, Math.min(xs.length-1, dz.endValue))]   : min + (dz.end??100)/100*(max-min)
+  return [Math.floor(start/1000), Math.floor(end/1000)]
+}
+
+/** 用稀疏 total（阶梯）+ 窗口桶化 delta 渲染 */
+function renderSparseChartsFromCache(initial=false) {
+  if (!deltaChart || !totalChart) return
+  const totalDictSparse = convertDictSparse(lastTotalDictRaw)
+  const baseForPercent = percentBaseValueRank.value || 1
+  const pct = (v:number) => Number(((v / (baseForPercent || 1)) * 100).toPrecision(5))
+  const totalSeries = Object.entries(totalDictSparse).map(([uuid, arr]) => {
+    const seriesData = (percentEnabled.value ? arr.map(([t,v]) => [t*1000, pct(v)]) : arr.map(([t,v]) => [t*1000, v]))
+    return {
+      name: showName(uuid),
+      type: 'line',
+      step: 'end',
+      showSymbol: false,
+      sampling: 'lttb',
+      data: seriesData,
+    }
+  })
+  totalChart.setOption({
+    animation: false,
+    tooltip: { trigger: 'axis' },
+    legend: { type: 'scroll' },
+    xAxis: { type: 'time' },
+    yAxis: { type: 'value', scale: true, axisLabel: { formatter: (val:any)=>formatAxisValueTick(Number(val)) } },
+    dataZoom: [{ type:'inside' }, { type:'slider', height:18, bottom:4 }],
+    series: totalSeries,
+    progressive: 4000,
+    progressiveThreshold: 3000,
+    progressiveChunkMode: 'mod',
+    hoverLayerThreshold: 2000,
+  }, true)
+
+  // 点击 total 图上的点 -> 更新 rankAtTs
+  totalChart.off('click')
+  totalChart.on('click', (params:any) => {
+    const v = params?.value
+    const tsMs = Array.isArray(v) ? v[0] : v
+    if (typeof tsMs === 'number') {
+      rankAtTs.value = Math.floor(tsMs/1000)
+    }
+  })
+
+  // 根据窗口渲染 delta
+  const [ws, we] = currentWindowSecFromChart(totalChart)
+  renderDeltaForWindow(ws, we)
+
+  // 绑定缩放事件：窗口变化时重算 delta + KPI
+  totalChart.off('dataZoom')
+  totalChart.on('dataZoom', () => {
+    const [s, e] = currentWindowSecFromChart(totalChart)
+    renderDeltaForWindow(s, e)
+    recomputeKpisFromCharts()
+  })
+
+  // 初次也算一次 KPI
+  if (initial) recomputeKpisFromCharts()
+}
+
+function renderDeltaForWindow(winStart:number, winEnd:number) {
+  const deltaDictSparse = convertDictSparse(lastDeltaDictRaw)
+  const deltaSeries = Object.entries(deltaDictSparse).map(([uuid, arr]) => {
+    const bucketed = bucketizeDelta(arr, granularity.value, winStart, winEnd, 1000)
+    return {
+      name: showName(uuid),
+      type: 'bar',
+      large: true,
+      largeThreshold: 500,
+      data: bucketed.map(([t,v]) => [t*1000, v]),
+    }
+  })
+  deltaChart.setOption({
+    animation: false,
+    tooltip: { trigger: 'axis' },
+    legend: { type:'scroll' },
+    xAxis: { type:'time' },
+    yAxis: { type:'value', scale: true, axisLabel: { formatter: (val:any)=>formatAxisValueTick(Number(val)) } },
+    dataZoom: [{ type:'inside' }, { type:'slider', height:18, bottom:4 }],
+    series: deltaSeries,
+    progressive: 4000,
+    progressiveThreshold: 3000,
+    progressiveChunkMode: 'mod',
+    hoverLayerThreshold: 2000,
+  }, true)
+}
+
+/** 从当前图表（窗口）重算 KPI */
+function recomputeKpisFromCharts() {
+  // totalLastTotal：窗口末端（每条线的最后一个可见点）之和
+  let endSum = 0
+  const totOpt = totalChart.getOption?.() || {}
+  const dz = (totOpt.dataZoom||[])[0] || {}
+  const series = (totOpt.series || [])
+  for (const s of series) {
+    const data = s.data || []
+    if (!data.length) continue
+    const endIdx = (dz.endValue!=null) ? Math.min(data.length-1, dz.endValue) : Math.round(((dz.end??100)/100) * (data.length-1))
+    const val = Array.isArray(data[endIdx]) ? Number(data[endIdx][1]||0) : Number(data[endIdx]||0)
+    endSum += val
+  }
+  totalLastTotal.value = Number(endSum.toFixed(2))
+
+  // totalDeltaSum：delta 可见窗口内的和
+  const delOpt = deltaChart.getOption?.() || {}
+  const delDz = (delOpt.dataZoom||[])[0] || {}
+  let sum = 0
+  for (const s of (delOpt.series || [])) {
+    const data = s.data || []
+    if (!data.length) continue
+    const sIdx = (delDz.startValue!=null) ? Math.max(0, delDz.startValue) : Math.round(((delDz.start||0)/100) * (data.length-1))
+    const eIdx = (delDz.endValue!=null) ? Math.min(data.length-1, delDz.endValue) : Math.round(((delDz.end??100)/100) * (data.length-1))
+    for (let i = Math.max(0,sIdx); i <= Math.min(eIdx, data.length-1); i++) {
+      const v = Array.isArray(data[i]) ? Number(data[i][1]||0) : Number(data[i]||0)
+      sum += v
+    }
+  }
+  totalDeltaSum.value = Number(sum.toFixed(2))
+
+  // 记录末端时间并刷新全服总计
+  const [ws, we] = currentWindowSecFromChart(totalChart)
+  currentTotalEndTs = we || null
+  if (currentTotalEndTs) scheduleGlobalTotalRefresh(currentTotalEndTs)
+}
+
+/** 单位或百分比变化时：从缓存重绘（不重新请求） */
+function rerenderFromCache() {
+  try {
+    if (lastDeltaDictRaw && lastTotalDictRaw) {
+      renderSparseChartsFromCache()
+      // 排行榜也要重绘（单位/百分比会影响显示）
+      drawRankChart(rankItems.value, true)
+      // 全服总计（命中缓存后再做单位换算）
+      const ts = currentRankContextTs()
+      if (ts) refreshGlobalTotalAtTs(ts)
+      // KPI
+      recomputeKpisFromCharts()
+    }
+  } catch {}
+}
+
+/** =========================
+ *  其它工具函数
+ *  ========================= */
 async function ensureCharts() {
   const echarts = await loadECharts()
   if (deltaChartRef.value && !deltaChart) deltaChart = echarts.init(deltaChartRef.value)
   if (totalChartRef.value && !totalChart) totalChart = echarts.init(totalChartRef.value)
   if (rankChartRef.value && !rankChart) rankChart = echarts.init(rankChartRef.value)
 }
-
-function tsToLabel(ts: number): string {
-  const d = new Date(ts * 1000)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
 function shortUuid(u: string): string { return (u||'').slice(0,8) }
 function showName(u: string): string {
   const p = players.value.find((x:any) => x.uuid === u)
   return p?.player_name || shortUuid(u)
 }
-
 function visiblePlayers(): any[] {
   if (!whitelistOnly.value) return players.value
   const set = whitelistSet.value
   return players.value.filter((p:any) => set.has(String(p.uuid)))
 }
-
 async function searchPlayers(query: string) {
   playersLoading.value = true
   try {
@@ -343,139 +546,17 @@ async function searchPlayers(query: string) {
     playerOptions.value = list.slice(0,50).map((p:any) => ({ label: p.player_name ? `${p.player_name} (${p.uuid.slice(0,8)})` : p.uuid, value: p.uuid }))
   } finally { playersLoading.value = false }
 }
-
-// 日历对齐版本：与后端保持完全一致的边界生成（本地时区）
-function alignDown(ts: number, gran: string): number {
-  const d = new Date(ts * 1000)
-  const set = (y:number, m:number, day:number, h:number, min:number) => new Date(y, m, day, h, min, 0, 0)
-  if (gran === '10min') { const m = Math.floor(d.getMinutes()/10)*10; return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), m).getTime()/1000) }
-  if (gran === '20min') { const m = Math.floor(d.getMinutes()/20)*20; return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), m).getTime()/1000) }
-  if (gran === '30min') { const m = d.getMinutes()<30?0:30; return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), m).getTime()/1000) }
-  if (gran === '1h') { return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), 0).getTime()/1000) }
-  if (gran === '6h') { const h = Math.floor(d.getHours()/6)*6; return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), h, 0).getTime()/1000) }
-  if (gran === '12h') { const h = d.getHours()<12?0:12; return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), h, 0).getTime()/1000) }
-  if (gran === '24h') { return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0).getTime()/1000) }
-  if (gran === '1week') {
-    // 周起始：周日 00:00（与后端一致）
-    const weekday = d.getDay() // 0..6 (Sun..Sat)
-    const start = new Date(d)
-    start.setDate(d.getDate() - weekday)
-    start.setHours(0,0,0,0)
-    return Math.floor(start.getTime()/1000)
-  }
-  if (gran === '1month') { return Math.floor(new Date(d.getFullYear(), d.getMonth(), 1, 0,0,0,0).getTime()/1000) }
-  if (gran === '3month') {
-    const m = d.getMonth() // 0..11
-    const qStart = (m<3)?0:(m<6)?3:(m<9)?6:9
-    return Math.floor(new Date(d.getFullYear(), qStart, 1, 0,0,0,0).getTime()/1000)
-  }
-  if (gran === '6month') { const m = d.getMonth(); const h = (m<=5)?0:6; return Math.floor(new Date(d.getFullYear(), h, 1, 0,0,0,0).getTime()/1000) }
-  if (gran === '1year') { return Math.floor(new Date(d.getFullYear(), 0, 1, 0,0,0,0).getTime()/1000) }
-  // 回退：10min
-  const m = Math.floor(d.getMinutes()/10)*10
-  return Math.floor(set(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), m).getTime()/1000)
-}
-function nextBoundary(ts: number, gran: string): number {
-  const d = new Date(ts * 1000)
-  if (gran === '10min') { d.setMinutes(Math.floor(d.getMinutes()/10)*10); d.setSeconds(0,0); d.setMinutes(d.getMinutes()+10); return Math.floor(d.getTime()/1000) }
-  if (gran === '20min') { d.setMinutes(Math.floor(d.getMinutes()/20)*20); d.setSeconds(0,0); d.setMinutes(d.getMinutes()+20); return Math.floor(d.getTime()/1000) }
-  if (gran === '30min') { d.setMinutes(d.getMinutes()<30?0:30); d.setSeconds(0,0); d.setMinutes(d.getMinutes()+30); return Math.floor(d.getTime()/1000) }
-  if (gran === '1h') { d.setMinutes(0,0,0); d.setHours(d.getHours()+1); return Math.floor(d.getTime()/1000) }
-  if (gran === '6h') { d.setMinutes(0,0,0); d.setHours(Math.floor(d.getHours()/6)*6 + 6); return Math.floor(d.getTime()/1000) }
-  if (gran === '12h') { d.setMinutes(0,0,0); d.setHours(d.getHours()<12?12:24); return Math.floor(d.getTime()/1000) }
-  if (gran === '24h') { d.setHours(0,0,0,0); d.setDate(d.getDate()+1); return Math.floor(d.getTime()/1000) }
-  if (gran === '1week') { const weekday = d.getDay(); const start = new Date(d); start.setDate(d.getDate() - weekday); start.setHours(0,0,0,0); start.setDate(start.getDate()+7); return Math.floor(start.getTime()/1000) }
-  if (gran === '1month') { return Math.floor(new Date(d.getFullYear(), d.getMonth()+1, 1, 0,0,0,0).getTime()/1000) }
-  if (gran === '3month') {
-    const m = d.getMonth()
-    const qStart = (m<3)?0:(m<6)?3:(m<9)?6:9
-    const next = (qStart===9) ? new Date(d.getFullYear()+1, 0, 1, 0,0,0,0) : new Date(d.getFullYear(), qStart+3, 1, 0,0,0,0)
-    return Math.floor(next.getTime()/1000)
-  }
-  if (gran === '6month') { const m = d.getMonth(); const next = (m<=5) ? new Date(d.getFullYear(), 6, 1, 0,0,0,0) : new Date(d.getFullYear()+1, 0, 1, 0,0,0,0); return Math.floor(next.getTime()/1000) }
-  if (gran === '1year') { return Math.floor(new Date(d.getFullYear()+1, 0, 1, 0,0,0,0).getTime()/1000) }
-  // 回退：10min
-  d.setMinutes(Math.floor(d.getMinutes()/10)*10); d.setSeconds(0,0); d.setMinutes(d.getMinutes()+10); return Math.floor(d.getTime()/1000)
-}
-
-function buildCalendarXTs(minTs: number, maxTs: number, gran: string): number[] {
-  // 使第一点就是对齐后的边界：若 minTs 已经在边界上，直接纳入；否则取下一个边界
-  const anchor = alignDown(minTs - 1, gran) // (start, end] 语义：从前一锚点推进
-  const xTs: number[] = []
-  let cur = anchor
-  while (true) {
-    cur = nextBoundary(cur, gran)
-    xTs.push(cur)
-    if (cur >= maxTs) break
-  }
-  return xTs
-}
-
-function fillGaps(dict: Record<string, [number, number][]>, gran: string, mode: 'delta'|'total') {
-  // 找到全局最小/最大 ts（均为右边界时刻）
-  let minTs = Number.MAX_SAFE_INTEGER, maxTs = 0
-  for (const arr of Object.values(dict)) {
-    if (!arr.length) continue
-    minTs = Math.min(minTs, arr[0][0])
-    maxTs = Math.max(maxTs, arr[arr.length-1][0])
-  }
-  if (!isFinite(minTs) || maxTs <= 0) return { dict, xTs: [] }
-  const xTs: number[] = buildCalendarXTs(minTs, maxTs, gran)
-
-  const out: Record<string, [number, number][]> = {}
-  for (const [uuid, arr] of Object.entries(dict)) {
-    const map = new Map<number, number>(arr.map(([t,v]) => [t, Number(v||0)]))
-    const series: [number, number][] = []
-    let prevNonZero = 0
-    for (const t of xTs) {
-      let v = map.get(t)
-      if (v == null) {
-        if (mode === 'delta') v = 0
-        else v = prevNonZero
-      }
-      if (mode === 'total' && (v||0) !== 0) prevNonZero = v as number
-      series.push([t, v as number])
-    }
-    out[uuid] = series
-  }
-  return { dict: out, xTs }
-}
-
-function buildSeriesOption(dict: Record<string, [number, number][]>, type: 'line'|'bar', gran: string, which: 'delta'|'total') {
-  const { dict: filled, xTs } = fillGaps(dict, gran, which)
-  const xLabels = xTs.map(tsToLabel)
-  const series = Object.keys(filled).map(u => ({
-    name: showName(u),
-    type,
-    smooth: type==='line',
-    symbol: 'none',
-    data: filled[u].map(([,v]) => v),
-  }))
-  return {
-    tooltip: { trigger: 'axis' },
-    legend: { type: 'scroll' },
-    grid: [{ left: 56, right: 20, top: 28, height: 220, containLabel: true }],
-    xAxis: [{ type: 'category', data: xLabels }],
-    yAxis: [{ type: 'value', scale: true }],
-    dataZoom: [
-      { type: 'inside', xAxisIndex: 0 },
-      { type: 'slider', xAxisIndex: 0, height: 18, bottom: 4 },
-    ],
-    series,
-    _xTs: xTs,
-  }
-}
-
 function toIso(d?: Date) {
   if (!d) return undefined
   const dt = new Date(d)
   const pad = (n:number) => String(n).padStart(2,'0')
-  // 生成本地时区 ISO，避免后端按本地解析产生时区偏移
   return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`
 }
 
+/** =========================
+ *  查询 & 渲染（稀疏）
+ *  ========================= */
 async function queryStatsForTopPlayers() {
-  // 依据当前排行榜前十名作为右图玩家，自动查询与渲染
   if (!canQuery.value) return
   await ensureCharts()
   let topUuids = selectedPlayers.value.slice(0,10)
@@ -483,127 +564,88 @@ async function queryStatsForTopPlayers() {
     topUuids = rankItems.value.map((x:any)=>x.player_uuid).filter(Boolean).slice(0,10)
   }
   if (topUuids.length === 0) {
-    // 回退：玩家列表前 10 个（应用白名单过滤）
     topUuids = visiblePlayers().slice(0,10).map((p:any)=>p.uuid)
   }
   if (topUuids.length === 0) return
+
   const base = { player_uuid: topUuids, metric: selectedMetrics.value, granularity: granularity.value, namespace: 'minecraft', server_id: selectedServerIds.value }
   const [deltaDictRaw, totalDictRaw] = await Promise.all([ fetchDeltaSeries(base), fetchTotalSeries(base) ])
-  lastDeltaDictRaw = deltaDictRaw
-  lastTotalDictRaw = totalDictRaw
-  // 先按原始值计算，再统一进行单位换算
-  const deltaDict = convertDict(deltaDictRaw)
-  const totalDict = convertDict(totalDictRaw)
-  totalDeltaSum.value = Number(Object.values(deltaDict).reduce((acc, arr) => acc + arr.reduce((s, [,v]) => s + Number(v||0), 0), 0).toFixed(2))
-  totalLastTotal.value = Number(Object.values(totalDict).reduce((acc, arr) => acc + (arr.length ? Number(arr[arr.length-1][1]||0) : 0), 0).toFixed(2))
+  lastDeltaDictRaw = deltaDictRaw || {}
+  lastTotalDictRaw = totalDictRaw || {}
 
-  // 百分比应用到 Total 累计趋势（按当前基准常量缩放）
-  const baseForPercent = percentBaseValueRank.value || 1
-  const pct = (v:number) => Number(((v / (baseForPercent || 1)) * 100).toPrecision(5))
-  const scaledTotalDict = percentEnabled.value
-    ? Object.fromEntries(Object.entries(totalDict).map(([k, arr]) => [k, arr.map(([t, v]) => [t, pct(Number(v||0))]) as [number, number][]]))
-    : totalDict
-  const deltaOpt: any = buildSeriesOption(deltaDict, 'bar', granularity.value, 'delta')
-  const totalOpt: any = buildSeriesOption(scaledTotalDict, 'line', granularity.value, 'total')
+  // KPI 初算（以全量—随后在 dataZoom 时重算）
+  const convDelta = convertDictSparse(lastDeltaDictRaw)
+  const convTotal = convertDictSparse(lastTotalDictRaw)
+  totalDeltaSum.value = Number(Object.values(convDelta).reduce((acc, arr) => acc + arr.reduce((s, [,v]) => s + Number(v||0), 0), 0).toFixed(2))
+  totalLastTotal.value = Number(Object.values(convTotal).reduce((acc, arr) => acc + (arr.length ? Number(arr[arr.length-1][1]||0) : 0), 0).toFixed(2))
 
-  deltaChart && deltaChart.setOption(deltaOpt, true)
-  totalChart && totalChart.setOption(totalOpt, true)
-  currentDeltaXTimestamps = deltaOpt._xTs
-  currentTotalXTimestamps = totalOpt._xTs
+  // 渲染（不补点）
+  renderSparseChartsFromCache(true)
+}
 
-  totalChart && totalChart.off('click')
-  totalChart && totalChart.on('click', (params:any) => {
-    const idx = params?.dataIndex
-    if (typeof idx === 'number' && currentTotalXTimestamps[idx]) {
-      rankAtTs.value = currentTotalXTimestamps[idx]
-      refreshRanks(true)
-    }
-  })
-  const onZoom = (chart:any, which:'delta'|'total') => (evt?: any) => {
-    // 根据当前 dataZoom 选区，计算 KPI：优先使用事件参数，回退到 getOption
-    const xArr = which==='delta' ? currentDeltaXTimestamps : currentTotalXTimestamps
-    let startIdx: number
-    let endIdx: number
-    const payload = (evt && (evt.batch?.[0] || evt)) || null
-    if (payload) {
-      const sVal = payload.startValue
-      const eVal = payload.endValue
-      if (sVal != null && eVal != null) {
-        startIdx = Math.max(0, Math.min(xArr.length-1, Number(sVal)))
-        endIdx = Math.max(0, Math.min(xArr.length-1, Number(eVal)))
-      } else {
-        const s = Number(payload.start ?? 0)
-        const e = Number(payload.end ?? 100)
-        startIdx = Math.round(s/100*(xArr.length-1))
-        endIdx = Math.round(e/100*(xArr.length-1))
-      }
-    } else {
-      const opt = chart.getOption() || {}
-      const dz = (opt.dataZoom||[])[0] || {}
-      startIdx = (dz.startValue != null) ? dz.startValue : Math.round((dz.start||0)/100*(xArr.length-1))
-      endIdx = (dz.endValue != null) ? dz.endValue : Math.round((dz.end||100)/100*(xArr.length-1))
-    }
-    const series = (((chart.getOption && chart.getOption()) || {}).series || [])
-    if (which === 'delta') {
-      let sum = 0
-      for (const s of series) {
-        const arr = (s.data || [])
-        for (let i = Math.max(0,startIdx); i <= Math.min(arr.length-1,endIdx); i++) sum += Number(arr[i] || 0)
-      }
-      totalDeltaSum.value = Number(sum.toFixed(2))
-    } else {
-      // Total：取每条曲线在区间末端（endIdx）数值之和
-      let endSum = 0
-      for (const s of series) {
-        const arr = (s.data || [])
-        const b = Number(arr[Math.min(arr.length-1,endIdx)] || 0)
-        endSum += b
-      }
-      totalLastTotal.value = Number(endSum.toFixed(2))
-      // 记录末端时间并（防抖）刷新全服总计
-      currentTotalEndTs = xArr[Math.min(xArr.length-1, Math.max(0,endIdx))] || null
-      currentTotalEndTs && scheduleGlobalTotalRefresh(currentTotalEndTs)
-    }
+/** =========================
+ *  排行榜
+ *  ========================= */
+let rankRefreshTimer: any = null
+const rankItems = ref<any[]>([])
+
+async function drawRankChart(items: any[], skipRight=false) {
+  const echarts = await loadECharts()
+  if (!rankChartRef.value) return
+  if (!rankChart) rankChart = echarts.init(rankChartRef.value)
+  rankItems.value = items || []
+  const names = items.map(it => it.player_name || shortUuid(it.player_uuid))
+  const rawVals = items.map(it => Number(it.value||0))
+  const convVals = convertEnabled.value ? rawVals.map(v => applyConvert(v)) : rawVals
+
+  let base = 1
+  if (percentEnabled.value) base = percentBaseValueRank.value || 1
+  const scaled = percentEnabled.value ? convVals.map(v => (v / (base || 1)) * 100) : convVals
+  const vals = (!percentEnabled.value && !convertEnabled.value) ? scaled.map(v => Math.round(v)) : scaled
+  const initialEndIdx = Math.min(names.length - 1, 14)
+  const option = {
+    grid: { left: 20, right: 30, top: 8, bottom: 36, containLabel: true },
+    xAxis: {
+      type: 'value',
+      axisLabel: { hideOverlap: true, formatter: (val:any) => formatAxisValueTick(Number(val)) },
+      splitNumber: 4,
+    },
+    yAxis: {
+      type: 'category',
+      data: names,
+      inverse: true,
+      axisLabel: { interval: 0, width: 80, overflow: 'truncate', ellipsis: '…', margin: 4 },
+    },
+    dataZoom: [
+      { type: 'inside', yAxisIndex: 0, startValue: 0, endValue: initialEndIdx },
+      { type: 'slider', yAxisIndex: 0, orient: 'vertical', right: 6, top: 24, bottom: 24, width: 12, startValue: 0, endValue: initialEndIdx },
+    ],
+    series: [{ type: 'bar', data: vals, label: { show: true, position: 'right', formatter: (p:any) => {
+      const v = Number(p.value||0)
+      if (percentEnabled.value) return Number(v).toPrecision(5) + '%'
+      return convertEnabled.value ? Number(v).toFixed(2) : String(Math.round(v))
+    } } }],
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
   }
-  deltaChart && (deltaChart.off('dataZoom'), deltaChart.on('dataZoom', (e:any)=>onZoom(deltaChart,'delta')(e)))
-  totalChart && (totalChart.off('dataZoom'), totalChart.on('dataZoom', (e:any)=>onZoom(totalChart,'total')(e)))
-  // 初始根据当前 dataZoom 计算 KPI
-  deltaChart && onZoom(deltaChart,'delta')()
-  totalChart && onZoom(totalChart,'total')()
+  rankChart.setOption(option, true)
+
+  // 榜单变化后自动刷新右侧曲线（前十位）
+  await searchPlayers('')
+  if (!skipRight) await queryStatsForTopPlayers()
 }
 
-
-
-async function fetchPlayers() {
-  try {
-    const res = await apiClient.get('/api/players', { params: { scope: scope.value } })
-    players.value = Array.isArray(res.data) ? res.data : []
-    // 初始填充一次可选项（按当前排行榜顺序）
-    await searchPlayers('')
-  } catch { players.value = [] }
-}
-
-async function fetchServers() {
-  try {
-    const res = await apiClient.get('/api/servers')
-    servers.value = Array.isArray(res.data) ? res.data : []
-    // 默认全选（先赋值，后尝试从服务器取上次保存的选择覆盖）
-    selectedServerNames.value = serverNames.value.slice()
-    try {
-      const saved = await apiClient.get('/api/players/data-source-selection')
-      const lst: string[] = Array.isArray(saved.data) ? saved.data : []
-      const set = new Set(serverNames.value)
-      const picked = lst.filter(x => set.has(String(x)))
-      if (picked.length > 0) selectedServerNames.value = picked
-    } catch {}
-    computeSelectedServerIds()
-  } catch { servers.value = [] }
+/** =========================
+ *  服务器 & 全服总计缓存
+ *  ========================= */
+function computeSelectedServerIds() {
+  const nameToId = new Map<string, number>()
+  servers.value.forEach((s:any) => nameToId.set((s.path?.split('/').pop()) || s.name, Number(s.id)))
+  selectedServerIds.value = selectedServerNames.value.map(n => nameToId.get(n)!).filter(Boolean)
 }
 
 const globalTotalCache = new Map<string, number>()
 let globalTotalTimer: any = null
 async function refreshGlobalTotalAtTs(ts: number) {
-  // 缓存命中直接返回
   const cacheKey = `${ts}|${(selectedMetrics.value||[]).join(',')}|${(selectedServerIds.value||[]).join(',')}`
   if (globalTotalCache.has(cacheKey)) {
     const v = globalTotalCache.get(cacheKey) as number
@@ -623,59 +665,36 @@ function scheduleGlobalTotalRefresh(ts: number) {
   if (globalTotalTimer) clearTimeout(globalTotalTimer)
   globalTotalTimer = setTimeout(() => { refreshGlobalTotalAtTs(ts) }, 400)
 }
-// 百分比显示
-const percentEnabled = ref<boolean>(false)
-const percentBase = ref<string>('global') // 'global' 或 'player:<uuid>'
-const percentBaseCandidates = computed(() => {
-  const arr = [] as {label:string,value:string}[]
-  // 仅加入数值不为 0 的玩家
-  for (const it of (rankItems.value || [])) {
-    const v = Number(it?.value || 0)
-    if (v > 0 && it?.player_uuid) arr.push({ label: it.player_name || shortUuid(String(it.player_uuid)), value: `player:${String(it.player_uuid)}` })
-  }
-  return arr
-})
-const percentBaseValueRank = computed<number>(() => {
-  if (!percentEnabled.value) return 1
-  if (percentBase.value === 'global') return Number(globalTotalSum.value || 1)
-  if (percentBase.value.startsWith('player:')) {
-    const uid = percentBase.value.slice(7)
-    const it = (rankItems.value || []).find((x:any)=> String(x.player_uuid) === uid)
-    const raw = Number(it?.value || 0)
-    return convertEnabled.value ? applyConvert(raw) : raw
-  }
-  return 1
-})
 
-function toPercent(val: number): number {
-  const base = percentBaseValueRank.value || 1
-  return (Number(val || 0) / base) * 100
+function currentRankContextTs(): number {
+  return rankAtTs.value || currentTotalEndTs || Math.floor(Date.now()/1000)
 }
 
-function fmtKpi(val: number): string {
-  if (percentEnabled.value) return Number(toPercent(val)).toPrecision(5) + '%'
-  if (convertEnabled.value) return Number(val || 0).toFixed(2)
-  return String(Math.round(Number(val || 0)))
+/** =========================
+ *  后端数据
+ *  ========================= */
+async function fetchPlayers() {
+  try {
+    const res = await apiClient.get('/api/players', { params: { scope: scope.value } })
+    players.value = Array.isArray(res.data) ? res.data : []
+    await searchPlayers('')
+  } catch { players.value = [] }
 }
-
-function valueForChart(val: number): number {
-  if (!percentEnabled.value) return Number(val || 0)
-  return Number(toPercent(val))
+async function fetchServers() {
+  try {
+    const res = await apiClient.get('/api/servers')
+    servers.value = Array.isArray(res.data) ? res.data : []
+    selectedServerNames.value = serverNames.value.slice()
+    try {
+      const saved = await apiClient.get('/api/players/data-source-selection')
+      const lst: string[] = Array.isArray(saved.data) ? saved.data : []
+      const set = new Set(serverNames.value)
+      const picked = lst.filter(x => set.has(String(x)))
+      if (picked.length > 0) selectedServerNames.value = picked
+    } catch {}
+    computeSelectedServerIds()
+  } catch { servers.value = [] }
 }
-
-function computeSelectedServerIds() {
-  const nameToId = new Map<string, number>()
-  servers.value.forEach((s:any) => nameToId.set((s.path?.split('/').pop()) || s.name, Number(s.id)))
-  selectedServerIds.value = selectedServerNames.value.map(n => nameToId.get(n)!).filter(Boolean)
-}
-
-async function onServersSelectionChange() {
-  computeSelectedServerIds()
-  try { await apiClient.patch('/api/players/data-source-selection', { servers: selectedServerNames.value }) } catch {}
-  // 自动刷新排行榜/曲线
-  if (canQuery.value) await refreshRanks(false)
-}
-
 async function searchMetrics(query: string) {
   metricsLoading.value = true
   try {
@@ -683,84 +702,29 @@ async function searchMetrics(query: string) {
   } finally { metricsLoading.value = false }
 }
 
-let rankRefreshTimer: any = null
-const rankItems = ref<any[]>([])
-
-
-function formatAxisValueTick(v: number): string {
-  const val = Number(v || 0)
-  if (percentEnabled.value) return Number(val).toPrecision(5) + '%'
-  if (convertEnabled.value) return Number(val).toFixed(2)
-  const abs = Math.abs(val)
-  if (abs >= 1e9) return (val/1e9).toFixed(1) + 'B'
-  if (abs >= 1e6) return (val/1e6).toFixed(1) + 'M'
-  if (abs >= 1e3) return (val/1e3).toFixed(1) + 'k'
-  return String(Math.round(val))
-}
-
-async function drawRankChart(items: any[], skipRight=false) {
-  const echarts = await loadECharts()
-  if (!rankChartRef.value) return
-  if (!rankChart) rankChart = echarts.init(rankChartRef.value)
-  rankItems.value = items || []
-  const names = items.map(it => it.player_name || shortUuid(it.player_uuid))
-  const rawVals = items.map(it => Number(it.value||0))
-  const convVals = convertEnabled.value ? rawVals.map(v => applyConvert(v)) : rawVals
-  // 计算百分比基准（若开启百分比：默认用全服总计。若存在 rankAtTs 则以该时刻刷新全服总计）
-  let base = 1
-  if (percentEnabled.value) base = percentBaseValueRank.value || 1
-  const scaled = percentEnabled.value ? convVals.map(v => (v / (base || 1)) * 100) : convVals
-  const vals = (!percentEnabled.value && !convertEnabled.value)
-    ? scaled.map(v => Math.round(v))
-    : scaled
-  const initialEndIdx = Math.min(names.length - 1, 14)
-  const option = {
-    grid: { left: 20, right: 30, top: 8, bottom: 36, containLabel: true },
-    xAxis: {
-      type: 'value',
-      axisLabel: { hideOverlap: true, formatter: (val:any) => formatAxisValueTick(Number(val)) },
-      splitNumber: 4,
-    },
-    yAxis: {
-      type: 'category',
-      data: names,
-      inverse: true,
-      axisLabel: {
-        interval: 0,
-        width: 80,
-        overflow: 'truncate',
-        ellipsis: '…',
-        margin: 4,
-      },
-    },
-    dataZoom: [
-      { type: 'inside', yAxisIndex: 0, startValue: 0, endValue: initialEndIdx },
-      { type: 'slider', yAxisIndex: 0, orient: 'vertical', right: 6, top: 24, bottom: 24, width: 12, startValue: 0, endValue: initialEndIdx },
-    ],
-    series: [{ type: 'bar', data: vals, label: { show: true, position: 'right', formatter: (p:any) => {
-      const v = Number(p.value||0)
-      if (percentEnabled.value) return Number(v).toPrecision(5) + '%'
-      return convertEnabled.value ? Number(v).toFixed(2) : String(Math.round(v))
-    } } }],
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-  }
-  rankChart.setOption(option, true)
-  // 榜单变化后自动刷新右侧曲线（前十位）
-  await searchPlayers('')
-  if (!skipRight) await queryStatsForTopPlayers()
-}
-
+/** =========================
+ *  排行榜刷新（支持 rankAtTs）
+ *  ========================= */
 async function refreshRanks(_showTip=false) {
   if (!canQuery.value) return
-  // 若未选择时刻，默认使用后端“当前时刻”逻辑（不传 at）
   const list = await fetchLeaderboardTotal({ metric: selectedMetrics.value, server_id: selectedServerIds.value, limit: 10000, ...(rankAtTs.value ? { at: toIso(new Date(rankAtTs.value*1000)) } : {}) })
-  // 依据 scope + 白名单过滤
   const allowed = new Set(visiblePlayers().map((p:any)=>String(p.uuid)))
   const filtered = (list || []).filter((it:any) => allowed.has(String(it.player_uuid)))
   await drawRankChart(filtered)
-  // 同步刷新全服总计（防抖）用于“全服总计”为百分比基准
   const ts = rankAtTs.value || currentTotalEndTs || Math.floor(Date.now()/1000)
   scheduleGlobalTotalRefresh(ts)
+}
+
+/** =========================
+ *  事件与副作用
+ *  ========================= */
+const onScopeChange = async () => {
+  await fetchPlayers()
+  const allowed = new Set((players.value || []).map((p:any)=>String(p.uuid)))
+  selectedPlayers.value = selectedPlayers.value.filter(u => allowed.has(String(u)))
+  await refreshRanks(false)
+  if (canQuery.value) await queryStatsForTopPlayers()
+  scheduleGlobalTotalRefresh(currentRankContextTs())
 }
 
 watch(selectedMetrics, async () => {
@@ -769,61 +733,32 @@ watch(selectedMetrics, async () => {
     await refreshRanks(false)
   }
 })
-
 watch(selectedServerNames, async () => {
   computeSelectedServerIds()
   globalTotalCache.clear()
   if (canQuery.value) await refreshRanks(false)
 })
-
-function currentRankContextTs(): number {
-  return rankAtTs.value || currentTotalEndTs || Math.floor(Date.now()/1000)
-}
-
-const onScopeChange = async () => {
-  await fetchPlayers()
-  // 将已选玩家限制在当前 scope 范围内
-  const allowed = new Set((players.value || []).map((p:any)=>String(p.uuid)))
-  selectedPlayers.value = selectedPlayers.value.filter(u => allowed.has(String(u)))
-  // 刷新排行榜与右侧图表
-  await refreshRanks(false)
-  if (canQuery.value) await queryStatsForTopPlayers()
-  // 同步全服总计（应用可能的换算）
-  scheduleGlobalTotalRefresh(currentRankContextTs())
-}
-
 watch(granularity, async () => {
   if (canQuery.value) await queryStatsForTopPlayers()
 })
-
 watch(selectedPlayers, async () => {
-  // 手动选择玩家时，右图按所选玩家渲染
   if (canQuery.value) await queryStatsForTopPlayers()
 })
 
-// 换算单位相关：切换源/目标或启用状态后，本地重绘（避免重复请求）
+// 换算单位：本地重绘
 watch(convertFrom, async (v) => {
   if (v === 'gt' && !['sec','min','hour','day'].includes(convertTo.value)) convertTo.value = 'hour'
   if (v === 'cm') convertTo.value = 'km'
   rerenderFromCache()
-  await drawRankChart(rankItems.value, true)
-  // 全服总计也应受换算影响：重算（命中缓存，不会重复请求）
-  const ts = currentRankContextTs(); if (ts) await refreshGlobalTotalAtTs(ts)
 })
-watch(convertTo, async () => { 
-  rerenderFromCache(); await drawRankChart(rankItems.value, true)
-  const ts = currentRankContextTs(); if (ts) await refreshGlobalTotalAtTs(ts)
-})
-watch(convertEnabled, async () => { 
-  rerenderFromCache(); await drawRankChart(rankItems.value, true)
-  const ts = currentRankContextTs(); if (ts) await refreshGlobalTotalAtTs(ts)
-})
+watch(convertTo, async () => { rerenderFromCache() })
+watch(convertEnabled, async () => { rerenderFromCache() })
 
-// 百分比：开关/基准变化时，本地重绘（避免请求）
-watch(percentEnabled, async () => { rerenderFromCache(); await drawRankChart(rankItems.value, true) })
-watch(percentBase, async () => { rerenderFromCache(); await drawRankChart(rankItems.value, true) })
-// 全服总计变化不触发重新请求，避免循环；图表重绘在本地完成
-// watch(globalTotalSum, async () => {})
+// 百分比：只影响 total
+watch(percentEnabled, async () => { rerenderFromCache() })
+watch(percentBase, async () => { rerenderFromCache() })
+
+// 当 rankItems 变化时，若基准是某玩家且其不在榜单则回退到全服
 watch(rankItems, async () => {
   if (!percentEnabled.value) return
   if (percentBase.value === 'global') return
@@ -832,10 +767,18 @@ watch(rankItems, async () => {
   const exists = (rankItems.value || []).some((x:any)=> String(x.player_uuid) === uid && Number(x.value||0) > 0)
   if (!exists) percentBase.value = 'global'
 })
-
 watch(rankAtTs, async () => {
   if (canQuery.value) await refreshRanks(false)
 })
+
+// 白名单切换
+const onWhitelistToggle = async () => {
+  const allowed = new Set(visiblePlayers().map((p:any)=>String(p.uuid)))
+  selectedPlayers.value = selectedPlayers.value.filter(u => allowed.has(String(u)))
+  await refreshRanks(false)
+  if (canQuery.value) await queryStatsForTopPlayers()
+  scheduleGlobalTotalRefresh(currentRankContextTs())
+}
 
 async function fetchWhitelist() {
   try {
@@ -844,22 +787,13 @@ async function fetchWhitelist() {
   } catch { whitelistUUIDs.value = [] }
 }
 
-const onWhitelistToggle = async () => {
-  // 裁剪已选玩家
-  const allowed = new Set(visiblePlayers().map((p:any)=>String(p.uuid)))
-  selectedPlayers.value = selectedPlayers.value.filter(u => allowed.has(String(u)))
-  // 刷新榜单与图表
-  await refreshRanks(false)
-  if (canQuery.value) await queryStatsForTopPlayers()
-  // 同步刷新全服总计（命中缓存）
-  scheduleGlobalTotalRefresh(currentRankContextTs())
-}
-
+/** =========================
+ *  挂载
+ *  ========================= */
 onMounted(async () => {
   await Promise.all([fetchPlayers(), fetchServers(), fetchWhitelist()])
   if (canQuery.value) {
     await refreshRanks(false)
-    // 初始同步全服总计
     const ts = rankAtTs.value || currentTotalEndTs || Math.floor(Date.now()/1000)
     await refreshGlobalTotalAtTs(ts)
   }
