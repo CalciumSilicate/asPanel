@@ -232,8 +232,8 @@ let currentTotalEndTs: number | null = null
 
 const selectedPlayerCount = computed(() => {
   if (selectedPlayers.value && selectedPlayers.value.length > 0) return selectedPlayers.value.length
-  if (rankItems.value && rankItems.value.length > 0) return Math.min(5, rankItems.value.length)
-  return Math.min(5, players.value.length || 0)
+  if (rankItems.value && rankItems.value.length > 0) return Math.min(10, rankItems.value.length)
+  return Math.min(10, players.value.length || 0)
 })
 
 let currentDeltaXTimestamps: number[] = []
