@@ -184,7 +184,7 @@ const granularityOptions = computed(() => granularities.map(g => ({
   value: g,
   label: (g==='10min' || g==='20min' || g==='30min' || g==='1h') ? `${g}（数据量大时易卡，慎选）` : g,
 })))
-const granularity = ref<string>('12h')
+const granularity = ref<string>('24h')
 const range = ref<[Date, Date] | null>(null)
 
 // 指标预设
