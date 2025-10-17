@@ -236,8 +236,7 @@ const selectedPlayerCount = computed(() => {
   return Math.min(5, players.value.length || 0)
 })
 
-let currentDeltaXTimestamps: number[] = []
-let currentTotalXTimestamps: number[] = []
+// 稀疏渲染：不再维护按索引对齐的 X 轴时间戳数组
 // 序列原始缓存（用于本地重绘，避免重复请求）
 let lastDeltaDictRaw: Record<string, [number, number][]> = {}
 let lastTotalDictRaw: Record<string, [number, number][]> = {}
@@ -245,8 +244,6 @@ let lastTotalDictRaw: Record<string, [number, number][]> = {}
 function rerenderFromCache() {
   try {
     if (lastDeltaDictRaw && lastTotalDictRaw) {
-      // 重用现有 queryStatsForTopPlayers 的渲染逻辑：
-      // 复制一份最小化流程以保持行为一致
       const deltaDict = convertDict(lastDeltaDictRaw)
       const totalDict = convertDict(lastTotalDictRaw)
       totalDeltaSum.value = Number(Object.values(deltaDict).reduce((acc, arr) => acc + arr.reduce((s, [,v]) => s + Number(v||0), 0), 0).toFixed(2))
@@ -257,12 +254,10 @@ function rerenderFromCache() {
       const scaledTotalDict = percentEnabled.value
         ? Object.fromEntries(Object.entries(totalDict).map(([k, arr]) => [k, arr.map(([t, v]) => [t, pct(Number(v||0))]) as [number, number][]]))
         : totalDict
-      const deltaOpt: any = buildSeriesOption(deltaDict, 'bar', granularity.value, 'delta')
-      const totalOpt: any = buildSeriesOption(scaledTotalDict, 'line', granularity.value, 'total')
+      const deltaOpt: any = buildDeltaOptionTime(deltaDict, granularity.value)
+      const totalOpt: any = buildTotalOptionTime(scaledTotalDict, granularity.value)
       deltaChart && deltaChart.setOption(deltaOpt, true)
       totalChart && totalChart.setOption(totalOpt, true)
-      currentDeltaXTimestamps = deltaOpt._xTs
-      currentTotalXTimestamps = totalOpt._xTs
     }
   } catch {}
 }
@@ -411,58 +406,158 @@ function buildCalendarXTs(minTs: number, maxTs: number, gran: string): number[] 
   return xTs
 }
 
-function fillGaps(dict: Record<string, [number, number][]>, gran: string, mode: 'delta'|'total') {
-  // 找到全局最小/最大 ts（均为右边界时刻）
-  let minTs = Number.MAX_SAFE_INTEGER, maxTs = 0
-  for (const arr of Object.values(dict)) {
-    if (!arr.length) continue
-    minTs = Math.min(minTs, arr[0][0])
-    maxTs = Math.max(maxTs, arr[arr.length-1][0])
-  }
-  if (!isFinite(minTs) || maxTs <= 0) return { dict, xTs: [] }
-  const xTs: number[] = buildCalendarXTs(minTs, maxTs, gran)
-
-  const out: Record<string, [number, number][]> = {}
-  for (const [uuid, arr] of Object.entries(dict)) {
-    const map = new Map<number, number>(arr.map(([t,v]) => [t, Number(v||0)]))
-    const series: [number, number][] = []
-    let prevNonZero = 0
-    for (const t of xTs) {
-      let v = map.get(t)
-      if (v == null) {
-        if (mode === 'delta') v = 0
-        else v = prevNonZero
-      }
-      if (mode === 'total' && (v||0) !== 0) prevNonZero = v as number
-      series.push([t, v as number])
-    }
-    out[uuid] = series
-  }
-  return { dict: out, xTs }
+// 将粒度字符串转换为毫秒宽度（一个 bin 的时间跨度）
+function granularityToMs(gran: string): number {
+  if (gran === '10min') return 10 * 60 * 1000
+  if (gran === '20min') return 20 * 60 * 1000
+  if (gran === '30min') return 30 * 60 * 1000
+  if (gran === '1h') return 60 * 60 * 1000
+  if (gran === '6h') return 6 * 60 * 60 * 1000
+  if (gran === '12h') return 12 * 60 * 60 * 1000
+  if (gran === '24h') return 24 * 60 * 60 * 1000
+  if (gran === '1week') return 7 * 24 * 60 * 60 * 1000
+  if (gran === '1month') return 30 * 24 * 60 * 60 * 1000 // 仅用于柱宽近似
+  if (gran === '3month') return 90 * 24 * 60 * 60 * 1000
+  if (gran === '6month') return 180 * 24 * 60 * 60 * 1000
+  if (gran === '1year') return 365 * 24 * 60 * 60 * 1000
+  return 10 * 60 * 1000
 }
 
-function buildSeriesOption(dict: Record<string, [number, number][]>, type: 'line'|'bar', gran: string, which: 'delta'|'total') {
-  const { dict: filled, xTs } = fillGaps(dict, gran, which)
-  const xLabels = xTs.map(tsToLabel)
-  const series = Object.keys(filled).map(u => ({
-    name: showName(u),
-    type,
-    smooth: type==='line',
-    symbol: 'none',
-    data: filled[u].map(([,v]) => v),
+// 计算全局起止时间（秒）
+function computeMinMaxSec(dict: Record<string, [number, number][]>): [number|null, number|null] {
+  let minTs = Number.MAX_SAFE_INTEGER, maxTs = 0
+  for (const arr of Object.values(dict)) {
+    if (!arr || arr.length === 0) continue
+    minTs = Math.min(minTs, arr[0][0])
+    maxTs = Math.max(maxTs, arr[arr.length - 1][0])
+  }
+  if (!isFinite(minTs) || maxTs <= 0) return [null, null]
+  return [minTs, maxTs]
+}
+
+// 将秒级范围对齐到粒度边界，并转成毫秒
+function alignedRangeMs(minSec: number, maxSec: number, gran: string): [number, number] {
+  const startAligned = nextBoundary(alignDown(minSec - 1, gran), gran) // 第一个右边界
+  const endAligned = nextBoundary(alignDown(maxSec - 1, gran), gran)   // 覆盖 maxSec 的下一右边界
+  return [startAligned * 1000, endAligned * 1000]
+}
+
+// custom 柱的渲染器：按像素画“脉冲柱”
+function makePulseRenderer(BIN_MS: number) {
+  return function renderPulse(params: any, api: any) {
+    const t = api.value(0) as number // 毫秒
+    const v = Number(api.value(1) || 0)
+    const x0 = api.coord([t - BIN_MS / 2, 0])[0]
+    const x1 = api.coord([t + BIN_MS / 2, 0])[0]
+    const y0 = api.coord([t, 0])[1]
+    const y1 = api.coord([t, v])[1]
+    const width = Math.max(1, x1 - x0)
+    const height = Math.max(1, y0 - y1)
+    return { type: 'rect', shape: { x: x0, y: y1, width, height } }
+  }
+}
+
+// 使用 time 轴 + 稀疏点渲染 delta：仅画非 0 点
+function buildDeltaOptionTime(dict: Record<string, [number, number][]>, gran: string) {
+  const [minSec, maxSec] = computeMinMaxSec(dict)
+  const nowMs = Date.now()
+  const [xmin, xmax] = (minSec && maxSec) ? alignedRangeMs(minSec, maxSec, gran) : [nowMs - 24*3600*1000, nowMs]
+  const BIN_MS = granularityToMs(gran)
+
+  // 聚合到 binStart(ms) -> 合计值（用于 tooltip 显示 0/合计）
+  const binSum = new Map<number, number>()
+  for (const arr of Object.values(dict)) {
+    for (const [tSec, v] of (arr || [])) {
+      const tMs = tSec * 1000
+      const binStart = Math.floor(tMs / BIN_MS) * BIN_MS
+      binSum.set(binStart, (binSum.get(binStart) || 0) + Number(v || 0))
+    }
+  }
+
+  const series = Object.entries(dict).map(([uuid, arr]) => ({
+    id: `delta-${uuid}`,
+    name: showName(uuid),
+    type: 'custom' as const,
+    renderItem: makePulseRenderer(BIN_MS),
+    encode: { x: 0, y: 1 },
+    large: true,
+    progressive: 4000,
+    progressiveThreshold: 12000,
+    data: (arr || []).map(([tSec, v]) => [tSec * 1000, Number(v || 0)]),
   }))
+
   return {
-    tooltip: { trigger: 'axis' },
+    animation: false,
+    useUTC: true,
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line', snap: true },
+      formatter: (items: any[]) => {
+        const ts = Number(items?.[0]?.axisValue || items?.[0]?.value?.[0] || 0)
+        const binStart = Math.floor(ts / BIN_MS) * BIN_MS
+        const v = binSum.get(binStart) || 0
+        const d = new Date(binStart)
+        return `${d.toLocaleString()}<br/>Δ 合计：${v}`
+      }
+    },
     legend: { type: 'scroll' },
-    grid: [{ left: 56, right: 20, top: 28, height: 220, containLabel: true }],
-    xAxis: [{ type: 'category', data: xLabels }],
-    yAxis: [{ type: 'value', scale: true }],
-    dataZoom: [
-      { type: 'inside', xAxisIndex: 0 },
-      { type: 'slider', xAxisIndex: 0, height: 18, bottom: 4 },
-    ],
+    grid: { left: 56, right: 20, top: 28, height: 220, containLabel: true },
+    xAxis: { type: 'time', min: xmin, max: xmax, boundaryGap: false, axisLabel: { hideOverlap: true } },
+    yAxis: { type: 'value', scale: true },
+    dataZoom: [ { type: 'inside', filterMode: 'none' }, { type: 'slider', height: 18, bottom: 4, filterMode: 'none' } ],
     series,
-    _xTs: xTs,
+  }
+}
+
+// 使用 time 轴 + 阶梯线渲染 total：仅在变化点画点
+function buildTotalOptionTime(dict: Record<string, [number, number][]>, gran: string) {
+  const [minSec, maxSec] = computeMinMaxSec(dict)
+  const nowMs = Date.now()
+  const [xmin, xmax] = (minSec && maxSec) ? alignedRangeMs(minSec, maxSec, gran) : [nowMs - 24*3600*1000, nowMs]
+
+  // 悬浮时取“<= ts”的状态值
+  function valueAt(arr: [number, number][], tsMs: number): number {
+    let lo = 0, hi = arr.length - 1, ans = 0
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1
+      const t = arr[mid][0] * 1000
+      if (t <= tsMs) { ans = Number(arr[mid][1] || 0); lo = mid + 1 } else hi = mid - 1
+    }
+    return ans
+  }
+
+  const series = Object.entries(dict).map(([uuid, arr]) => ({
+    id: `total-${uuid}`,
+    name: showName(uuid),
+    type: 'line' as const,
+    step: 'end' as const,
+    showSymbol: false,
+    connectNulls: true,
+    sampling: 'lttb',
+    data: (arr || []).map(([tSec, v]) => [tSec * 1000, Number(v || 0)]),
+  }))
+
+  // 生成 tooltip（显示合计状态值）
+  return {
+    animation: false,
+    useUTC: true,
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line', snap: true },
+      formatter: (items: any[]) => {
+        const tsMs = Number(items?.[0]?.axisValue || items?.[0]?.value?.[0] || 0)
+        let sum = 0
+        for (const arr of Object.values(dict)) sum += valueAt(arr || [], tsMs)
+        const d = new Date(tsMs)
+        return `${d.toLocaleString()}<br/>Total 合计：${sum}`
+      }
+    },
+    legend: { type: 'scroll' },
+    grid: { left: 56, right: 20, top: 28, height: 220, containLabel: true },
+    xAxis: { type: 'time', min: xmin, max: xmax, boundaryGap: false, axisLabel: { hideOverlap: true } },
+    yAxis: { type: 'value', scale: true },
+    dataZoom: [ { type: 'inside', filterMode: 'none' }, { type: 'slider', height: 18, bottom: 4, filterMode: 'none' } ],
+    series,
   }
 }
 
@@ -503,65 +598,80 @@ async function queryStatsForTopPlayers() {
   const scaledTotalDict = percentEnabled.value
     ? Object.fromEntries(Object.entries(totalDict).map(([k, arr]) => [k, arr.map(([t, v]) => [t, pct(Number(v||0))]) as [number, number][]]))
     : totalDict
-  const deltaOpt: any = buildSeriesOption(deltaDict, 'bar', granularity.value, 'delta')
-  const totalOpt: any = buildSeriesOption(scaledTotalDict, 'line', granularity.value, 'total')
+  const deltaOpt: any = buildDeltaOptionTime(deltaDict, granularity.value)
+  const totalOpt: any = buildTotalOptionTime(scaledTotalDict, granularity.value)
 
   deltaChart && deltaChart.setOption(deltaOpt, true)
   totalChart && totalChart.setOption(totalOpt, true)
-  currentDeltaXTimestamps = deltaOpt._xTs
-  currentTotalXTimestamps = totalOpt._xTs
 
   totalChart && totalChart.off('click')
   totalChart && totalChart.on('click', (params:any) => {
-    const idx = params?.dataIndex
-    if (typeof idx === 'number' && currentTotalXTimestamps[idx]) {
-      rankAtTs.value = currentTotalXTimestamps[idx]
+    const val = params?.value
+    const tsMs = Array.isArray(val) ? Number(val[0]) : Number(params?.axisValue || 0)
+    if (isFinite(tsMs) && tsMs > 0) {
+      rankAtTs.value = Math.floor(tsMs / 1000)
       refreshRanks(true)
     }
   })
   const onZoom = (chart:any, which:'delta'|'total') => (evt?: any) => {
-    // 根据当前 dataZoom 选区，计算 KPI：优先使用事件参数，回退到 getOption
-    const xArr = which==='delta' ? currentDeltaXTimestamps : currentTotalXTimestamps
-    let startIdx: number
-    let endIdx: number
+    // 根据当前 dataZoom 选区（时间轴），计算 KPI
+    const opt = chart.getOption ? chart.getOption() : {}
+    const xOpt = (opt.xAxis && opt.xAxis[0]) || {}
+    const xmin = Number(xOpt.min || 0)
+    const xmax = Number(xOpt.max || 0)
+
     const payload = (evt && (evt.batch?.[0] || evt)) || null
-    if (payload) {
-      const sVal = payload.startValue
-      const eVal = payload.endValue
-      if (sVal != null && eVal != null) {
-        startIdx = Math.max(0, Math.min(xArr.length-1, Number(sVal)))
-        endIdx = Math.max(0, Math.min(xArr.length-1, Number(eVal)))
-      } else {
-        const s = Number(payload.start ?? 0)
-        const e = Number(payload.end ?? 100)
-        startIdx = Math.round(s/100*(xArr.length-1))
-        endIdx = Math.round(e/100*(xArr.length-1))
-      }
+    let startMs: number
+    let endMs: number
+    if (payload && payload.startValue != null && payload.endValue != null) {
+      startMs = Number(payload.startValue)
+      endMs = Number(payload.endValue)
+    } else if (payload && (payload.start != null || payload.end != null)) {
+      const s = Number(payload.start ?? 0) / 100
+      const e = Number(payload.end ?? 100) / 100
+      startMs = xmin + (xmax - xmin) * s
+      endMs = xmin + (xmax - xmin) * e
     } else {
-      const opt = chart.getOption() || {}
       const dz = (opt.dataZoom||[])[0] || {}
-      startIdx = (dz.startValue != null) ? dz.startValue : Math.round((dz.start||0)/100*(xArr.length-1))
-      endIdx = (dz.endValue != null) ? dz.endValue : Math.round((dz.end||100)/100*(xArr.length-1))
+      if (dz.startValue != null && dz.endValue != null) {
+        startMs = Number(dz.startValue)
+        endMs = Number(dz.endValue)
+      } else {
+        const s = Number(dz.start ?? 0) / 100
+        const e = Number(dz.end ?? 100) / 100
+        startMs = xmin + (xmax - xmin) * s
+        endMs = xmin + (xmax - xmin) * e
+      }
     }
-    const series = (((chart.getOption && chart.getOption()) || {}).series || [])
+
+    const series = (opt.series || [])
     if (which === 'delta') {
       let sum = 0
       for (const s of series) {
-        const arr = (s.data || [])
-        for (let i = Math.max(0,startIdx); i <= Math.min(arr.length-1,endIdx); i++) sum += Number(arr[i] || 0)
+        const data = s.data || []
+        for (const p of data) {
+          const t = Array.isArray(p) ? Number(p[0]) : Number(p)
+          const v = Array.isArray(p) ? Number(p[1] || 0) : 0
+          if (t >= startMs && t <= endMs) sum += v
+        }
       }
       totalDeltaSum.value = Number(sum.toFixed(2))
     } else {
-      // Total：取每条曲线在区间末端（endIdx）数值之和
+      // Total：取每条曲线在窗口末端的“状态值”（<= endMs 最近点）
       let endSum = 0
       for (const s of series) {
-        const arr = (s.data || [])
-        const b = Number(arr[Math.min(arr.length-1,endIdx)] || 0)
-        endSum += b
+        const data = s.data || []
+        let best = 0
+        for (let i = 0; i < data.length; i++) {
+          const t = Array.isArray(data[i]) ? Number(data[i][0]) : Number(data[i])
+          if (t <= endMs) best = Array.isArray(data[i]) ? Number(data[i][1] || 0) : 0
+          else break
+        }
+        endSum += best
       }
       totalLastTotal.value = Number(endSum.toFixed(2))
       // 记录末端时间并（防抖）刷新全服总计
-      currentTotalEndTs = xArr[Math.min(xArr.length-1, Math.max(0,endIdx))] || null
+      currentTotalEndTs = Math.floor(endMs / 1000)
       currentTotalEndTs && scheduleGlobalTotalRefresh(currentTotalEndTs)
     }
   }
