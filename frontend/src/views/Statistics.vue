@@ -162,7 +162,7 @@ const servers = ref<any[]>([])
 const scope = ref<'official_only'|'include_cracked'|'all'>('official_only')
 // 白名单筛选
 const whitelistUUIDs = ref<string[]>([])
-const whitelistOnly = ref<boolean>(false)
+const whitelistOnly = ref<boolean>(true)
 const whitelistSet = computed(() => new Set(whitelistUUIDs.value))
 
 const serverNames = computed(() => servers.value.map((s:any) => (s.path?.split('/').pop()) || s.name))
@@ -268,7 +268,7 @@ function rerenderFromCache() {
 }
 
 // 换算单位配置
-const convertEnabled = ref<'boolean'>(false)
+const convertEnabled = ref<'boolean'>(true)
 const convertFrom = ref<'gt'|'cm'>('gt')
 const convertTo = ref<'sec'|'min'|'hour'|'day'|'km'>('hour')
 
