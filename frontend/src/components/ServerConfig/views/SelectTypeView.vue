@@ -32,6 +32,6 @@ const serverTypes = [
   {label: 'Vanilla Legacy / Beta 1.8 (旧版官方)', value: 'beta18'},
   {label: 'Velocity (新一代群组服)', value: 'velocity'},
   {label: 'Bukkit (暂不支持配置)', value: 'bukkit', disabled: true},
-  {label: 'Forge (暂不支持配置)', value: 'forge', disabled: true},
+  {label: 'Forge', value: 'forge'},
 ];
 </script>
