@@ -236,6 +236,14 @@ class FabricLoaderVersionManifest(BaseModel):
     versions: List[str]
 
 
+class ForgeGameVersionManifest(BaseModel):
+    versions: List[str]
+
+
+class ForgeLoaderVersionManifest(BaseModel):
+    versions: List[str]
+
+
 class PortStatusResponse(BaseModel):
     is_available: bool
 

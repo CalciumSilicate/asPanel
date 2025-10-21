@@ -11,7 +11,7 @@ import yaml
 import tomli
 import tomli_w
 
-from backend.core.utils import get_fabric_jar_version, get_vanilla_jar_version, get_velocity_jar_version
+from backend.core.utils import get_fabric_jar_version, get_forge_jar_version, get_vanilla_jar_version, get_velocity_jar_version
 from backend.logger import logger
 from backend.schemas import ServerType
 
@@ -225,6 +225,11 @@ def infer_server_type_and_analyze_core_config(db_server: models.Server) -> schem
             logger.info(f"Server {db_server.name} was inferred as a vanilla server")
             vanilla_version = get_vanilla_jar_version(server_path / 'server' / jar_name)
             new_core_config.core_version = vanilla_version
+    elif server_type == schemas.ServerType.FORGE:
+        logger.info(f"Server {db_server.name} was inferred as a forge server")
+        mc_version, forge_loader_version = get_forge_jar_version(server_path / 'server' / jar_name)
+        new_core_config.core_version = mc_version
+        new_core_config.loader_version = forge_loader_version
     elif server_type == schemas.ServerType.VELOCITY:
         logger.info(f"Server {db_server.name} was inferred as a velocity server")
         new_core_config.core_version = get_velocity_jar_version(server_path / 'server' / jar_name)

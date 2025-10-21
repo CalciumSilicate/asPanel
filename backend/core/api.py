@@ -1,10 +1,10 @@
 # core/api.py
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional, Set
 from cache import AsyncTTL
 from fastapi.exceptions import HTTPException
 from backend.core.config import MINECRAFT_VERSION_MANIFEST_URL, VELOCITY_VERSION_MANIFEST_URL, \
     VELOCITY_BUILD_MANIFEST_URL, FABRIC_GAME_VERSION_LIST_MANIFEST_URL, FABRIC_LOADER_VERSION_LIST_MANIFEST_URL, \
-    FABRIC_LOADER_VERSION_MANIFEST_URL, MCDR_PLUGINS_CATALOGUE_URL
+    FABRIC_LOADER_VERSION_MANIFEST_URL, MCDR_PLUGINS_CATALOGUE_URL, FORGE_PROMOTIONS_MANIFEST_URL, FORGE_MAVEN_REPO_URL
 import httpx
 
 async_client = httpx.AsyncClient(timeout=10)
@@ -71,6 +71,52 @@ async def get_fabric_loader_version_list(vanilla_core_version: str) -> List:
 @AsyncTTL(time_to_live=3600, maxsize=1024)
 async def get_fabric_version_meta(vanilla_core_version: str, fabric_loader_version: str) -> Dict:
     return await async_get(FABRIC_LOADER_VERSION_MANIFEST_URL.format(vanilla_core_version, fabric_loader_version))
+
+
+@AsyncTTL(time_to_live=3600, maxsize=1)
+async def get_forge_promotions_manifest() -> Dict[str, Any]:
+    return await async_get(FORGE_PROMOTIONS_MANIFEST_URL)
+
+
+@AsyncTTL(time_to_live=3600, maxsize=1)
+async def get_forge_game_version_list() -> List[str]:
+    manifest = await get_forge_promotions_manifest()
+    versions: Set[str] = set()
+    for entry in manifest.get("versions", []):
+        mc_version = entry.get("mcversion")
+        forge_version = entry.get("version")
+        if mc_version and forge_version:
+            versions.add(mc_version)
+    return sorted(versions, reverse=True)
+
+
+@AsyncTTL(time_to_live=3600, maxsize=128)
+async def get_forge_loader_version_list(mc_version: str) -> List[str]:
+    manifest = await get_forge_promotions_manifest()
+    versions: Set[str] = set()
+    for entry in manifest.get("versions", []):
+        if entry.get("mcversion") == mc_version and entry.get("version"):
+            versions.add(entry["version"])
+    return sorted(versions, reverse=True)
+
+
+@AsyncTTL(time_to_live=3600, maxsize=512)
+async def get_forge_installer_meta(mc_version: str, forge_version: str) -> Dict[str, Optional[str]]:
+    artifact_path = f"net/minecraftforge/forge/{mc_version}-{forge_version}/"
+    installer_name = f"forge-{mc_version}-{forge_version}-installer.jar"
+    installer_url = f"{FORGE_MAVEN_REPO_URL}{artifact_path}{installer_name}"
+    sha1: Optional[str] = None
+    try:
+        response = await async_client.get(installer_url + ".sha1")
+        if response.status_code == 200:
+            sha1 = response.text.strip()
+    except httpx.RequestError:
+        sha1 = None
+    return {
+        "installer_url": installer_url,
+        "installer_sha1": sha1,
+        "installer_name": installer_name,
+    }
 
 
 @AsyncTTL(time_to_live=3600, maxsize=1)

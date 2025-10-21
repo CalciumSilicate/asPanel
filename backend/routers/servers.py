@@ -17,11 +17,11 @@ from backend.database import get_db
 from backend.dependencies import mcdr_manager, server_service
 from backend.dependencies import task_manager
 from backend.schemas import TaskType, Role, PaperBuild, PaperBuildDownload, ServerCoreConfig
-from backend.tasks.background import background_download_jar, background_install_fabric
+from backend.tasks.background import background_download_jar, background_install_fabric, background_install_forge
 from backend.core.config import DEFAULT_SERVER_PROPERTIES_CONFIG, PUBLIC_PLUGINS_DIRECTORIES
-from backend.core.utils import get_file_sha1, get_file_sha256, get_fabric_jar_version, Timer
+from backend.core.utils import get_file_sha1, get_file_sha256, get_fabric_jar_version, get_forge_jar_version, Timer
 from backend.core.api import get_velocity_version_detail, get_minecraft_version_detail_by_version_id, \
-    get_fabric_version_meta
+    get_fabric_version_meta, get_forge_installer_meta
 
 router = APIRouter(
     prefix="/api",
@@ -201,7 +201,9 @@ async def get_server_config(server_id: int, db: Session = Depends(get_db),
         launcher_jar = server.core_config.launcher_jar
         launcher_jar_path = server_dir / launcher_jar if launcher_jar else None
 
-        if server_type in ['vanilla', 'beta18']:
+        core_file_exists = launcher_jar_path.exists() if launcher_jar_path else False
+
+        if server_type in ['vanilla', 'beta18', 'forge']:
             server_properties = server_parser.parse_properties(server_dir / 'server.properties')
             if not server_properties.get("enable-rcon"):
                 server_properties["rcon.port"] = '未启用RCON'
@@ -213,7 +215,7 @@ async def get_server_config(server_id: int, db: Session = Depends(get_db),
             )
             return schemas.ServerConfigResponse(
                 is_new_setup=False,
-                core_file_exists=launcher_jar_path.exists(),
+                core_file_exists=core_file_exists,
                 config_file_exists=True,
                 config=config
             )
@@ -228,7 +230,7 @@ async def get_server_config(server_id: int, db: Session = Depends(get_db),
             )
             return schemas.ServerConfigResponse(
                 is_new_setup=False,
-                core_file_exists=launcher_jar_path.exists(),
+                core_file_exists=core_file_exists,
                 config_file_exists=velocity_toml_path.exists(),
                 config=config
             )
@@ -261,12 +263,24 @@ async def save_server_config(
     core_config = config_data.core_config
     server_type = core_config.server_type
     core_version = core_config.core_version
-    is_fabric = core_config.is_fabric
     server_jar = core_config.server_jar
-    if is_fabric:
+    if server_type != schemas.ServerType.VANILLA:
+        core_config.is_fabric = False
+
+    if server_type == schemas.ServerType.FORGE:
+        if not core_version:
+            raise HTTPException(400, "Forge 服务器需要指定游戏版本")
+        if not core_config.loader_version:
+            raise HTTPException(400, "Forge 服务器需要指定 Forge 版本")
+        forge_launcher = f"forge-{core_version}-{core_config.loader_version}.jar"
+        core_config.launcher_jar = forge_launcher
+        core_config.server_jar = forge_launcher
+    elif core_config.is_fabric:
         core_config.launcher_jar = 'fabric-server-launch.jar'
+        core_config.server_jar = server_jar or 'server.jar'
     else:
         core_config.launcher_jar = server_jar
+    is_fabric = core_config.is_fabric
     _, legacy_core_config = crud.update_server_core_config(db, payload.server_id, core_config)
     try:
         mcdr_config_path = mcdr_path / 'config.yml'
@@ -338,6 +352,36 @@ async def save_server_config(
                         core_config.loader_version,
                         fabric_loader_task,
                     )
+
+            if len(task_list) > 1:
+                combined_task = task_manager.create_task(TaskType.COMBINED)
+                combined_task.ids = list(task.id for task in task_list)
+                return {"status": "downloading", "task_id": combined_task.id}
+            elif len(task_list) == 1:
+                return {"status": "downloading", "task_id": task_list[0].id}
+            else:
+                return {"status": "success", "message": "Configuration saved"}
+
+        elif server_type == 'forge':
+            server_dir.mkdir(exist_ok=True)
+            if vanilla_props is not None:
+                server_parser.write_properties_file(server_dir / 'server.properties', vanilla_props)
+            jar_name = core_config.launcher_jar
+            jar_path = server_dir / jar_name
+            task_list = []
+            current_mc_version, current_loader_version = get_forge_jar_version(jar_path)
+            needs_install = not jar_path.exists() or current_mc_version != core_version or \
+                current_loader_version != core_config.loader_version
+            if needs_install:
+                forge_task = task_manager.create_task(TaskType.DOWNLOAD)
+                task_list.append(forge_task)
+                background_tasks.add_task(
+                    background_install_forge,
+                    await get_forge_installer_meta(core_version, core_config.loader_version),
+                    server_dir,
+                    java_cmd,
+                    forge_task,
+                )
 
             if len(task_list) > 1:
                 combined_task = task_manager.create_task(TaskType.COMBINED)
