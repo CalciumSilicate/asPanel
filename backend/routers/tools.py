@@ -411,11 +411,12 @@ async def litematic_download_cl(litematic_file_name: str, db: Session = Depends(
 
 # ===================== Server Link（服务器组） =====================
 from backend.tools import server_link as sl
-from backend.services.ws import broadcast_server_link_update
+from backend.services.ws import broadcast_server_link_update, broadcast_chat_to_plugins
 from pathlib import Path
 from backend.auth import get_current_user
 from backend import models as _models
 from backend.ws import sio
+from backend.services import onebot
 
 
 @router.get("/tools/server-link/groups", response_model=list[schemas.ServerLinkGroup])
@@ -435,6 +436,7 @@ async def sl_groups_create(payload: schemas.ServerLinkGroupCreate, db: Session =
                 # 计算该服务器当前所有分组名称
                 names = [g.name for g in crud.list_server_link_groups(db) if sid in (g and __import__('json').loads(getattr(g,'server_ids','[]')))]
                 await broadcast_server_link_update(server_name, names)
+        await onebot.refresh_bindings()
         return created
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -471,6 +473,7 @@ async def sl_groups_update(group_id: int, payload: schemas.ServerLinkGroupUpdate
                 if sid in ids:
                     names.append(g.name)
             await broadcast_server_link_update(Path(s.path).name, names)
+        await onebot.refresh_bindings()
         return updated
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -510,6 +513,7 @@ async def sl_groups_delete(group_id: int, db: Session = Depends(get_db), _user=D
                 if sid in ids:
                     names.append(g.name)
             await broadcast_server_link_update(Path(s.path).name, names)
+    await onebot.refresh_bindings()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -600,55 +604,18 @@ async def chat_send(payload: schemas.ChatSendPayload, db: Session = Depends(get_
     })
     # 广播给 Web 前端
     await sio.emit("chat_message", out.model_dump(mode='json'))
-    # 广播给插件端
-    await _broadcast_chat_to_plugins(db, payload, current_user)
-    return out
-
-
-async def _broadcast_chat_to_plugins(db: Session, payload: schemas.ChatSendPayload, current_user: _models.User):
-    """将聊天消息通过 WS 推送到插件端。
-    结构：event='chat.message', data={ level, message, user, avatar, group_id }
-    ALERT: 推送全部；NORMAL: 推送到该组内所有服务器。
-    """
-    data = {
-        "level": payload.level,
-        "message": payload.message,
-        "user": current_user.username,
-        "avatar": current_user.avatar_url,
-        "group_id": payload.group_id,
-    }
-    # 借用 ws.py 的插件连接表：直接组装文本广播
-    from backend.services.ws import _PLUGIN_CLIENTS  # type: ignore
-    import json as _json
-    text = _json.dumps({"event": "chat.message", "ts": "-", "data": data}, ensure_ascii=False)
-    # 计算目标服务器集合
-    target_servers: set[str] = set()
-    if payload.level == "ALERT":
-        # 广播到所有连接
-        for _, name in list(_PLUGIN_CLIENTS.items()):
-            if name:
-                target_servers.add(name)
-    else:
-        rec = crud.get_server_link_group_by_id(db, int(payload.group_id))
-        if rec:
-            try:
-                import json as _json2
-                ids = list(map(int, _json2.loads(rec.server_ids or '[]')))
-            except Exception:
-                ids = []
-            for sid in ids:
-                s = crud.get_server_by_id(db, sid)
-                if s:
-                    target_servers.add(Path(s.path).name)
-    # 发送
-    dead = []
-    for ws, name in list(_PLUGIN_CLIENTS.items()):
+    # 广播给插件端 / QQ
+    await broadcast_chat_to_plugins(
+        level=level,
+        group_id=payload.group_id,
+        user=current_user.username,
+        message=payload.message,
+        source="web",
+        avatar=current_user.avatar_url,
+    )
+    if level == "NORMAL" and payload.group_id:
         try:
-            if not name:
-                continue
-            if payload.level == "ALERT" or name in target_servers:
-                await ws.send_text(text)
+            await onebot.relay_web_message_to_qq(payload.group_id, current_user.username, payload.message)
         except Exception:
-            dead.append(ws)
-    for ws in dead:
-        _PLUGIN_CLIENTS.pop(ws, None)
+            pass
+    return out
