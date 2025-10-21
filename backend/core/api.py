@@ -4,7 +4,8 @@ from cache import AsyncTTL
 from fastapi.exceptions import HTTPException
 from backend.core.config import MINECRAFT_VERSION_MANIFEST_URL, VELOCITY_VERSION_MANIFEST_URL, \
     VELOCITY_BUILD_MANIFEST_URL, FABRIC_GAME_VERSION_LIST_MANIFEST_URL, FABRIC_LOADER_VERSION_LIST_MANIFEST_URL, \
-    FABRIC_LOADER_VERSION_MANIFEST_URL, MCDR_PLUGINS_CATALOGUE_URL, FORGE_PROMOTIONS_MANIFEST_URL, FORGE_MAVEN_REPO_URL
+    FABRIC_LOADER_VERSION_MANIFEST_URL, MCDR_PLUGINS_CATALOGUE_URL, FORGE_PROMOTIONS_MANIFEST_URL, FORGE_MAVEN_REPO_URL, \
+    FORGE_LOADER_VERSION_API_URL
 import httpx
 
 async_client = httpx.AsyncClient(timeout=10)
@@ -78,26 +79,38 @@ async def get_forge_promotions_manifest() -> Dict[str, Any]:
     return await async_get(FORGE_PROMOTIONS_MANIFEST_URL)
 
 
+@AsyncTTL(time_to_live=3600, maxsize=128)
+async def get_forge_loader_version(mc_version: str) -> Dict[str, List]:
+    return await async_get(FORGE_LOADER_VERSION_API_URL.format(mc_version))
+
+
 @AsyncTTL(time_to_live=3600, maxsize=1)
 async def get_forge_game_version_list() -> List[str]:
     manifest = await get_forge_promotions_manifest()
-    versions: Set[str] = set()
-    for entry in manifest.get("versions", []):
-        mc_version = entry.get("mcversion")
-        forge_version = entry.get("version")
-        if mc_version and forge_version:
-            versions.add(mc_version)
-    return sorted(versions, reverse=True)
+    result = []
+    for entry in manifest.get("promos", {}):
+        vid = entry.split("-")[0]
+        if vid not in result:
+            result.append(vid)
+    result.reverse()
+    return result
 
 
 @AsyncTTL(time_to_live=3600, maxsize=128)
 async def get_forge_loader_version_list(mc_version: str) -> List[str]:
-    manifest = await get_forge_promotions_manifest()
-    versions: Set[str] = set()
-    for entry in manifest.get("versions", []):
-        if entry.get("mcversion") == mc_version and entry.get("version"):
-            versions.add(entry["version"])
-    return sorted(versions, reverse=True)
+    forge_game_list = await get_forge_game_version_list()
+    versions = []
+    if mc_version in forge_game_list:
+        loader_list = await get_forge_loader_version(mc_version)
+        versions = loader_list["result"]
+        if not versions:
+            manifest = await get_forge_promotions_manifest()
+            promos = manifest.get("promos", {})
+            for k in [f'{mc_version}-latest', f'{mc_version}-recommended']:
+                if k in promos:
+                    versions.append(promos.get(k))
+    versions = list(set(versions))
+    return versions
 
 
 @AsyncTTL(time_to_live=3600, maxsize=512)
