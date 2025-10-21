@@ -12,6 +12,11 @@ FABRIC_GAME_VERSION_LIST_MANIFEST_URL = "https://meta.fabricmc.net/v2/versions/g
 FABRIC_LOADER_VERSION_LIST_MANIFEST_URL = "https://meta.fabricmc.net/v2/versions/loader/{0}"
 FABRIC_LOADER_VERSION_MANIFEST_URL = "https://meta.fabricmc.net/v2/versions/loader/{0}/{1}"
 FABRIC_REPO_URL = "https://maven.fabricmc.net/"
+# Forge promotions manifest is served from files.minecraftforge.net instead of the Maven
+# repository. Using the Maven domain results in a 404 response during application
+# startup. Point directly to the canonical promotions manifest endpoint.
+FORGE_PROMOTIONS_MANIFEST_URL = "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json"
+FORGE_MAVEN_REPO_URL = "https://maven.minecraftforge.net/"
 MCDR_PLUGINS_CATALOGUE_URL = "https://api.mcdreforged.com/catalogue/everything_slim.json"
 
 # --- Path Configure ---

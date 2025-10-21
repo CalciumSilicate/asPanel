@@ -157,6 +157,8 @@ async def startup_event():
     await get_velocity_versions_raw()
     logger.debug(f"正在获取Fabric支持版本列表...")
     await get_fabric_game_version_list()
+    logger.debug(f"正在获取Forge支持版本列表...")
+    await get_forge_game_version_list()
     logger.debug(f"正在获取MCDR插件列表...")
     await get_mcdr_plugins_catalogue()
     try:
