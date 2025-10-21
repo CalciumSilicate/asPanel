@@ -74,27 +74,17 @@
                 </el-select>
               </el-form-item>
 
-              <el-form-item label="QQ群聊链接（群号，回车添加）">
+              <el-form-item label="QQ群聊（群号）">
                 <div class="chat-bindings">
                   <el-input
-                    v-model="chatInput"
-                    placeholder="请输入QQ群号，回车添加"
-                    @keyup.enter.native="handleAddChatBinding"
+                    v-model="activeGroup.qqGroup"
+                    placeholder="请输入QQ群号"
                     clearable
                     style="max-width: 360px;"
+                    @input="onQQInput"
+                    @blur="onQQBlur"
                   />
-                  <div class="chat-tags">
-                    <el-tag
-                      v-for="q in (activeGroup.chatBindings || [])"
-                      :key="q"
-                      size="small"
-                      closable
-                      @close="removeChatBinding(q)"
-                      class="mr-1 mb-1"
-                    >
-                      QQ群：{{ q }}
-                    </el-tag>
-                  </div>
+                  <div class="muted mt-1">留空表示不绑定QQ群</div>
                 </div>
               </el-form-item>
 
@@ -135,9 +125,7 @@ const filteredGroups = computed(() => {
 
 const selectedServersCount = computed(() => activeGroup.value?.serverIds?.length || 0)
 // 预留字段：后续可接入真实群聊绑定统计
-const connectedChatsCount = computed(() => (activeGroup.value?.chatBindings?.length || 0))
-
-const chatInput = ref('')
+const connectedChatsCount = computed(() => (activeGroup.value?.qqGroup ? 1 : 0))
 
 const handleCreateGroup = async () => {
   try {
@@ -176,31 +164,27 @@ const ensureActiveGroup = () => {
   if (!activeGroup.value) return false
   if (!activeGroup.value.serverIds) activeGroup.value.serverIds = []
   if (!activeGroup.value.chatBindings) activeGroup.value.chatBindings = []
+  if (activeGroup.value.qqGroup === undefined || activeGroup.value.qqGroup === null) {
+    activeGroup.value.qqGroup = activeGroup.value.chatBindings?.[0] || ''
+  }
   return true
 }
 
-const handleAddChatBinding = () => {
+const onQQInput = (val) => {
   if (!ensureActiveGroup()) return
-  const raw = String(chatInput.value || '').trim()
-  if (!raw) return
-  // 只允许 5-12 位数字（常见QQ群号），放宽也可
-  if (!/^\d{5,12}$/.test(raw)) {
-    ElMessage.warning('请输入有效的QQ群号（5-12位数字）')
-    return
-  }
-  const set = new Set(activeGroup.value.chatBindings)
-  if (set.has(raw)) {
-    chatInput.value = ''
-    return
-  }
-  set.add(raw)
-  activeGroup.value.chatBindings = Array.from(set)
-  chatInput.value = ''
+  const digits = String(val ?? '').replace(/\D/g, '').slice(0, 12)
+  activeGroup.value.qqGroup = digits
+  activeGroup.value.chatBindings = digits ? [digits] : []
 }
 
-const removeChatBinding = (q) => {
+const onQQBlur = () => {
   if (!ensureActiveGroup()) return
-  activeGroup.value.chatBindings = (activeGroup.value.chatBindings || []).filter(x => x !== q)
+  const value = String(activeGroup.value.qqGroup || '').trim()
+  if (value && !/^\d{5,12}$/.test(value)) {
+    ElMessage.warning('请输入有效的QQ群号（5-12位数字）')
+    activeGroup.value.qqGroup = ''
+    activeGroup.value.chatBindings = []
+  }
 }
 
 const saveGroup = async () => {
@@ -234,7 +218,7 @@ const scheduleAutoSave = () => {
 
 watch(() => activeGroup.value && activeGroup.value.name, scheduleAutoSave)
 watch(() => activeGroup.value && JSON.stringify(activeGroup.value.serverIds || []), scheduleAutoSave)
-watch(() => activeGroup.value && JSON.stringify(activeGroup.value.chatBindings || []), scheduleAutoSave)
+watch(() => activeGroup.value && activeGroup.value.qqGroup, scheduleAutoSave)
 
 const loadServers = async () => {
   serversLoading.value = true
@@ -255,8 +239,19 @@ onMounted(() => {
 })
 
 // 映射工具：API <-> UI
-const toUIGroup = (g) => ({ id: g.id, name: g.name, serverIds: g.server_ids || [], chatBindings: g.chat_bindings || [], created_at: g.created_at })
-const toAPIPayload = (g) => ({ name: g.name, server_ids: g.serverIds || [], chat_bindings: g.chatBindings || [] })
+const toUIGroup = (g) => ({
+  id: g.id,
+  name: g.name,
+  serverIds: g.server_ids || [],
+  chatBindings: g.chat_bindings || [],
+  qqGroup: (g.chat_bindings && g.chat_bindings[0]) || '',
+  created_at: g.created_at
+})
+const toAPIPayload = (g) => ({
+  name: g.name,
+  server_ids: g.serverIds || [],
+  chat_bindings: g.qqGroup ? [g.qqGroup] : []
+})
 
 const loadGroups = async () => {
   try {
