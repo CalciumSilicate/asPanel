@@ -181,6 +181,38 @@ def get_fabric_jar_version(jar_path: Path) -> Tuple[Optional[str], Optional[str]
         return None, None
 
 
+def get_forge_jar_version(jar_path: Path) -> Tuple[Optional[str], Optional[str]]:
+    if not os.path.exists(jar_path):
+        return None, None
+    jar_name = os.path.basename(jar_path)
+    patterns = [
+        r"forge-(?P<mc>[0-9.]+)-(?P<forge>[0-9.]+)(?:-[\w.]+)?\.jar$",
+        r"forge-(?P<mc>[0-9.]+)-(?P<forge>[0-9.]+)(?:-[\w.]+)?-server\.jar$",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, jar_name)
+        if match:
+            return match.group("mc"), match.group("forge")
+    try:
+        with zipfile.ZipFile(jar_path, 'r') as jar_file:
+            for candidate in ["version.json", "META-INF/version.json"]:
+                if candidate in jar_file.namelist():
+                    try:
+                        version_info = json.loads(jar_file.read(candidate).decode())
+                    except Exception:
+                        continue
+                    version_id = version_info.get("id") or version_info.get("version")
+                    if isinstance(version_id, str) and version_id.startswith("forge-"):
+                        parts = version_id.split("-")
+                        if len(parts) >= 3:
+                            return parts[1], parts[2]
+    except zipfile.BadZipFile:
+        return None, None
+    except Exception:
+        return None, None
+    return None, None
+
+
 async def poll_copy_progress(source_path: Path, target_path: Path, task, interval: float = 2.0):
     try:
         total_size: int = max(1, get_size_bytes(source_path))
