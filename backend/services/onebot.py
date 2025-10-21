@@ -260,8 +260,6 @@ async def _cmd_show_players(group_id: int, qq_group: str) -> None:
         online = sorted(players_map.get(dir_name, set()))
         if online:
             lines.append(f"- {display} ({len(online)}): {' '.join(online)}")
-        else:
-            lines.append(f"- {display} (0): 无人在线")
     await _send_group_text(qq_group, "\n".join(lines))
 
 
@@ -307,14 +305,12 @@ async def _cmd_restart_server(group_id: int, qq_group: str, body: str) -> None:
         if online_players and not force:
             await _send_group_text(qq_group, f"{server.name} 当前在线 {len(online_players)} 人，使用 % {target} -f 可强制重启")
             return
-        await _send_group_text(qq_group, f"正在重启 {server.name} ...")
         success, msg = await mcdr_manager.restart(server, server.path)
         if success:
-            await _send_group_text(qq_group, f"{server.name} 已执行重启命令")
+            await _send_group_text(qq_group, f"{server.name} 已执行重启命令 (PID={msg})")
         else:
             await _send_group_text(qq_group, f"{server.name} 重启失败：{msg}")
     elif status in {schemas.ServerStatus.STOPPED, schemas.ServerStatus.ERROR}:
-        await _send_group_text(qq_group, f"正在启动 {server.name} ...")
         success, msg = await mcdr_manager.start(server)
         if success:
             await _send_group_text(qq_group, f"{server.name} 已执行启动命令 (PID={msg})")
@@ -342,7 +338,7 @@ async def _cmd_show_status(group_id: int, qq_group: str) -> None:
         if not server:
             continue
         status, _ = await mcdr_manager.get_status(server.id, server.path)
-        mark = "✅" if status == schemas.ServerStatus.RUNNING else "❌"
+        mark = "✅" if status == schemas.ServerStatus.RUNNING else ("🔄️" if status == schemas.ServerStatus.PENDING else "❌")
         name = server.name or srv.get("dir")
         lines.append(f"{mark} {name}")
     await _send_group_text(qq_group, "\n".join(lines) if lines else "无服务器")

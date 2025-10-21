@@ -10,6 +10,7 @@ MCDReforged 插件：aspanel_server_link
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from mcdreforged.api.all import *  # 采用与仓库现有插件一致的导入风格
@@ -25,6 +26,7 @@ from typing import Any, Optional, List
 # 可选依赖：websocket-client（pip 包名：websocket-client）
 try:
     import websocket  # type: ignore
+
     _HAS_WS = True
 except Exception:
     websocket = None  # type: ignore
@@ -34,7 +36,6 @@ server_name = Path(".").resolve().name
 _SERVER_GROUPS: List[str] = []  # 当前服务器所在的组名列表
 # 本服在线玩家集（用于 @mention 播放音效与存在性判断）
 _LOCAL_PLAYERS: set[str] = set()
-
 
 # ----------------------------- 工具函数与配置 -----------------------------
 
@@ -46,6 +47,16 @@ PLUGIN_METADATA = {
     "description": "将 MCDR 事件通过 WS 上报到 aspanel，并携带服务器分组信息",
     "requirements": ["mcdreforged>=2.0.0"],
 }
+
+
+def _is_bot_joined(info: Info):
+    joined_player = re.match(
+        r"(\w+)\[([0-9\.\:\/]+|local)\] logged in with entity id", info.content
+    )
+    if joined_player:
+        if joined_player.group(2) == "local":
+            return True
+    return False
 
 
 def _utc_iso() -> str:
@@ -253,7 +264,8 @@ class WsSender:
             except Exception:
                 try:
                     if logger:
-                        logger.warning(f"[asPanel] WS 连接失败或中断，{self.reconnect_interval}s 后重试 | url={self.ws_url}")
+                        logger.warning(
+                            f"[asPanel] WS 连接失败或中断，{self.reconnect_interval}s 后重试 | url={self.ws_url}")
                     else:
                         print(f"[asPanel] WS 连接失败或中断，{self.reconnect_interval}s 后重试 | url={self.ws_url}")
                 except Exception:
@@ -341,7 +353,8 @@ def _handle_forward_event(server: ServerInterface, event: str, data: dict[str, A
         return
 
     # 构建可点击的服务器标签 [server]
-    prefix = _rtext_gray("[") + _rtext_gray(src).set_click_event(RAction.suggest_command, f"/server {src}") + _rtext_gray("] ")
+    prefix = _rtext_gray("[") + _rtext_gray(src).set_click_event(RAction.suggest_command,
+                                                                 f"/server {src}") + _rtext_gray("] ")
 
     if event == "mcdr.user_info":
         payload = _extract_user_info_payload(data) or {}
@@ -363,7 +376,8 @@ def _handle_forward_event(server: ServerInterface, event: str, data: dict[str, A
                         if pattern.search(content):
                             notified.add(name)
                     for name in notified:
-                        server.execute(f"execute at {name} run playsound minecraft:entity.arrow.hit_player player {name}")
+                        server.execute(
+                            f"execute at {name} run playsound minecraft:entity.arrow.hit_player player {name}")
             except Exception:
                 pass
 
@@ -406,7 +420,10 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
     # 打印
     if level == "ALERT":
         # [ALERT] <user> message （红色粗体）
-        t = RText("[ALERT] ", color=RColor.red, styles=RStyle.bold) + RText(f"<{user}> ", color=RColor.red, styles=RStyle.bold) + RText(message, color=RColor.red, styles=RStyle.bold)
+        t = RText("[ALERT] ", color=RColor.red, styles=RStyle.bold) + RText(f"<{user}> ", color=RColor.red,
+                                                                            styles=RStyle.bold) + RText(message,
+                                                                                                        color=RColor.red,
+                                                                                                        styles=RStyle.bold)
         server.say(t)
     else:
         if source == "qq":
@@ -495,6 +512,8 @@ def on_mcdr_stop(server: ServerInterface):
 # ---- Player events ----
 
 def on_player_joined(server: ServerInterface, player: str, info: Info):
+    if _is_bot_joined(info):
+        return
     _send_event(server, "mcdr.player_joined", {"player": str(player), "info": _info_to_dict(info)})
     try:
         _LOCAL_PLAYERS.add(str(player))
@@ -503,6 +522,8 @@ def on_player_joined(server: ServerInterface, player: str, info: Info):
 
 
 def on_player_left(server: ServerInterface, player: str):
+    if str(player) not in _LOCAL_PLAYERS:
+        return
     _send_event(server, "mcdr.player_left", {"player": str(player)})
     try:
         _LOCAL_PLAYERS.discard(str(player))
