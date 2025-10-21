@@ -268,13 +268,10 @@ async def save_server_config(
         core_config.is_fabric = False
 
     if server_type == schemas.ServerType.FORGE:
-        if not core_version:
-            raise HTTPException(400, "Forge 服务器需要指定游戏版本")
-        if not core_config.loader_version:
-            raise HTTPException(400, "Forge 服务器需要指定 Forge 版本")
-        forge_launcher = f"forge-{core_version}-{core_config.loader_version}.jar"
-        core_config.launcher_jar = forge_launcher
-        core_config.server_jar = forge_launcher
+        if core_version and core_config.loader_version:
+            forge_launcher = f"forge-{core_version}-{core_config.loader_version}.jar"
+            core_config.launcher_jar = forge_launcher
+            core_config.server_jar = forge_launcher
     elif core_config.is_fabric:
         core_config.launcher_jar = 'fabric-server-launch.jar'
         core_config.server_jar = server_jar or 'server.jar'
@@ -366,31 +363,32 @@ async def save_server_config(
             server_dir.mkdir(exist_ok=True)
             if vanilla_props is not None:
                 server_parser.write_properties_file(server_dir / 'server.properties', vanilla_props)
-            jar_name = core_config.launcher_jar
-            jar_path = server_dir / jar_name
-            task_list = []
-            current_mc_version, current_loader_version = get_forge_jar_version(jar_path)
-            needs_install = not jar_path.exists() or current_mc_version != core_version or \
-                current_loader_version != core_config.loader_version
-            if needs_install:
-                forge_task = task_manager.create_task(TaskType.DOWNLOAD)
-                task_list.append(forge_task)
-                background_tasks.add_task(
-                    background_install_forge,
-                    await get_forge_installer_meta(core_version, core_config.loader_version),
-                    server_dir,
-                    java_cmd,
-                    forge_task,
-                )
+            if core_version and core_config.loader_version:
+                jar_name = core_config.launcher_jar
+                jar_path = server_dir / jar_name
+                task_list = []
+                current_mc_version, current_loader_version = get_forge_jar_version(jar_path)
+                needs_install = not jar_path.exists() or current_mc_version != core_version or \
+                    current_loader_version != core_config.loader_version
+                if needs_install:
+                    forge_task = task_manager.create_task(TaskType.DOWNLOAD)
+                    task_list.append(forge_task)
+                    background_tasks.add_task(
+                        background_install_forge,
+                        await get_forge_installer_meta(core_version, core_config.loader_version),
+                        server_dir,
+                        java_cmd,
+                        forge_task,
+                    )
 
-            if len(task_list) > 1:
-                combined_task = task_manager.create_task(TaskType.COMBINED)
-                combined_task.ids = list(task.id for task in task_list)
-                return {"status": "downloading", "task_id": combined_task.id}
-            elif len(task_list) == 1:
-                return {"status": "downloading", "task_id": task_list[0].id}
-            else:
-                return {"status": "success", "message": "Configuration saved"}
+                if len(task_list) > 1:
+                    combined_task = task_manager.create_task(TaskType.COMBINED)
+                    combined_task.ids = list(task.id for task in task_list)
+                    return {"status": "downloading", "task_id": combined_task.id}
+                elif len(task_list) == 1:
+                    return {"status": "downloading", "task_id": task_list[0].id}
+                else:
+                    return {"status": "success", "message": "Configuration saved"}
 
         elif server_type == 'velocity':
             try:

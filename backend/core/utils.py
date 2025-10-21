@@ -325,7 +325,7 @@ def copy_file_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 128
             pass
 
 
-def copytree_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 128.0):
+def copytree_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 1024.0):
     """
     受限速且可断点续传的目录复制：
     - 逐文件复制，已存在且大小一致的文件跳过

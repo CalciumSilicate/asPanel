@@ -12,8 +12,9 @@ FABRIC_GAME_VERSION_LIST_MANIFEST_URL = "https://meta.fabricmc.net/v2/versions/g
 FABRIC_LOADER_VERSION_LIST_MANIFEST_URL = "https://meta.fabricmc.net/v2/versions/loader/{0}"
 FABRIC_LOADER_VERSION_MANIFEST_URL = "https://meta.fabricmc.net/v2/versions/loader/{0}/{1}"
 FABRIC_REPO_URL = "https://maven.fabricmc.net/"
-FORGE_PROMOTIONS_MANIFEST_URL = "https://maven.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json"
+FORGE_PROMOTIONS_MANIFEST_URL = "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json"
 FORGE_MAVEN_REPO_URL = "https://maven.minecraftforge.net/"
+FORGE_LOADER_VERSION_API_URL = "https://mc-versions-api.net/api/forge?version={0}"
 MCDR_PLUGINS_CATALOGUE_URL = "https://api.mcdreforged.com/catalogue/everything_slim.json"
 
 # --- Path Configure ---
