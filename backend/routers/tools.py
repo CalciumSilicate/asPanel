@@ -613,7 +613,7 @@ async def chat_send(payload: schemas.ChatSendPayload, db: Session = Depends(get_
         source="web",
         avatar=current_user.avatar_url,
     )
-    if level == "NORMAL" and payload.group_id:
+    if payload.group_id:
         try:
             await onebot.relay_web_message_to_qq(payload.group_id, current_user.username, payload.message)
         except Exception:

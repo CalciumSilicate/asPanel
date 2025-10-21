@@ -71,7 +71,7 @@
                         <span class="time">{{ formatTime(m.created_at) }}</span>
                         <el-tag v-if="m.level==='ALERT'" size="small" type="danger">ALERT</el-tag>
                       </div>
-                      <div class="content" :class="[{ alert: m.level==='ALERT' }, m.source === 'qq' ? 'from-qq' : '']">{{ m.content }}</div>
+                      <div class="content" :class="[{ alert: m.level==='ALERT' }]">{{ m.content }}</div>
                     </div>
                   </div>
                 </template>
@@ -212,9 +212,9 @@ const toUIMsg = (r) => {
     const nickname = r.sender_username || 'QQ'
     return {
       id: r.id,
-      content: `[QQ] <${nickname}> ${r.content}`,
-      display: `[QQ] ${nickname}`,
-      avatar: defaultAvatar,
+      content: r.content,
+      display: `${nickname}@QQ`,
+      avatar: mcAvatar(nickname), // 以后实现 QQ头像
       level: r.level,
       created_at: r.created_at,
       key: `qq:${nickname}`,
@@ -441,7 +441,6 @@ const formatTime = (dt) => {
 .name { font-weight: 600; }
 .content { white-space: pre-wrap; word-break: break-word; padding: 1px 0; font-size: 13px; line-height: 1.35; }
 .content.alert { color: #b71c1c; font-weight: 700; background: #ffe6e6; border: 1px solid #ffb3b3; border-radius: 6px; padding: 6px 8px; display: inline-block; }
-.content.from-qq { color: #909399; }
 .chat-side { border: 1px solid var(--el-border-color); border-radius: 8px; padding: 8px; background: var(--el-fill-color-blank); }
 .side-title { font-weight: 600; margin-bottom: 8px; }
 .side-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
