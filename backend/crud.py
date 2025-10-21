@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from sqlalchemy.orm import Session
-from typing import List, Optional, Type, Tuple
+from typing import Any, List, Optional, Type, Tuple
 from backend import models, schemas
 from backend.models import Server
 from backend.schemas import ServerCoreConfig
@@ -441,13 +441,26 @@ def list_server_link_groups(db: Session) -> List[models.ServerLinkGroup]:
     return db.query(models.ServerLinkGroup).all()
 
 
+def _normalize_chat_bindings(bindings: Optional[List[Any]]) -> List[str]:
+    result: List[str] = []
+    for item in bindings or []:
+        try:
+            text = str(item).strip()
+        except Exception:
+            continue
+        if text.isdigit():
+            result.append(text)
+            break
+    return result
+
+
 def create_server_link_group(db: Session, payload: schemas.ServerLinkGroupCreate) -> models.ServerLinkGroup:
     if get_server_link_group_by_name(db, payload.name):
         raise ValueError("该服务器组名称已存在")
     rec = models.ServerLinkGroup(
         name=payload.name,
         server_ids=json.dumps(payload.server_ids or []),
-        chat_bindings=json.dumps(payload.chat_bindings or []),
+        chat_bindings=json.dumps(_normalize_chat_bindings(payload.chat_bindings)),
     )
     db.add(rec)
     db.commit()
@@ -469,7 +482,7 @@ def update_server_link_group(db: Session, group_id: int, payload: schemas.Server
     if payload.server_ids is not None:
         rec.server_ids = json.dumps(payload.server_ids)
     if payload.chat_bindings is not None:
-        rec.chat_bindings = json.dumps(payload.chat_bindings)
+        rec.chat_bindings = json.dumps(_normalize_chat_bindings(payload.chat_bindings))
     db.add(rec)
     db.commit()
     db.refresh(rec)

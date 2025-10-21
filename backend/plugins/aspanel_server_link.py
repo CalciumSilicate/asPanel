@@ -393,6 +393,7 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
     level = str(data.get("level") or "NORMAL").upper()
     message = str(data.get("message") or "")
     user = str(data.get("user") or "")
+    source = str(data.get("source") or "web").lower()
     gid = data.get("group_id")
     # NORMAL: 仅当该消息目标组与本服组有交集（实际上 gid 在某一组）才显示；ALERT: 全服显示
     if level != "ALERT":
@@ -408,8 +409,11 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
         t = RText("[ALERT] ", color=RColor.red, styles=RStyle.bold) + RText(f"<{user}> ", color=RColor.red, styles=RStyle.bold) + RText(message, color=RColor.red, styles=RStyle.bold)
         server.say(t)
     else:
-        # [WEB] <user> message （灰色）
-        t = _rtext_gray("[WEB] ") + _rtext_gray(f"<{user}> ") + _rtext_gray(message)
+        if source == "qq":
+            prefix = "[QQ] "
+        else:
+            prefix = "[WEB] "
+        t = _rtext_gray(prefix) + _rtext_gray(f"<{user}> ") + _rtext_gray(message)
         server.say(t)
 
 

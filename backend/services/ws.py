@@ -27,6 +27,7 @@ from pathlib import Path
 from backend.database import get_db_context
 from backend import crud
 from backend.dependencies import mcdr_manager
+from backend.services import onebot
 
 # 服务器在线玩家：key=服务器目录名，value=玩家名集合
 PLAYERS_BY_SERVER: Dict[str, Set[str]] = {}
@@ -38,6 +39,8 @@ JOINED_TIME: Dict[str, Dict[str, float]] = {}
 # 每个服务器最后一次“分钟边界”时间（对齐 floor(now/60)*60）
 SERVER_LAST_BOUNDARY: Dict[str, float] = {}
 _PLAYTIME_TASK: Optional[asyncio.Task] = None
+
+onebot.set_players_provider(lambda: PLAYERS_BY_SERVER)
 
 
 def _get_server_path_by_name(server_name: str) -> Optional[str]:
@@ -220,6 +223,58 @@ def _safe_json_loads(text: str) -> Any:
         return None
 
 
+async def broadcast_chat_to_plugins(*, level: str, group_id: Optional[int], user: str, message: str, source: str = "web", avatar: Optional[str] = None) -> None:
+    data = {
+        "level": level,
+        "message": message,
+        "user": user,
+        "avatar": avatar,
+        "group_id": group_id,
+        "source": source,
+    }
+    payload = json.dumps({"event": "chat.message", "ts": "-", "data": data}, ensure_ascii=False)
+
+    target_servers: Set[str] = set()
+    if level == "ALERT" or group_id is None:
+        for _, bound in list(_PLUGIN_CLIENTS.items()):
+            if bound:
+                target_servers.add(bound)
+    else:
+        try:
+            with get_db_context() as db:
+                rec = crud.get_server_link_group_by_id(db, int(group_id))
+                if rec:
+                    import json as _json
+                    try:
+                        ids = list(map(int, _json.loads(rec.server_ids or "[]")))
+                    except Exception:
+                        ids = []
+                    for sid in ids:
+                        srv = crud.get_server_by_id(db, sid)
+                        if not srv:
+                            continue
+                        try:
+                            name = Path(srv.path).name
+                        except Exception:
+                            name = None
+                        if name:
+                            target_servers.add(name)
+        except Exception:
+            target_servers = set()
+
+    dead: List[WebSocket] = []
+    for ws, bound_name in list(_PLUGIN_CLIENTS.items()):
+        try:
+            if level == "ALERT" or bound_name in target_servers:
+                await ws.send_text(payload)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _PLUGIN_CLIENTS.pop(ws, None)
+
+
+onebot.register_plugin_broadcaster(broadcast_chat_to_plugins)
+
 async def _handle_single(payload: Dict[str, Any]):
     """处理单条 mcdr 事件，广播至 Socket.IO"""
     if not isinstance(payload, dict):
@@ -351,6 +406,7 @@ async def _handle_single(payload: Dict[str, Any]):
                             pass
                         out = out_model.model_dump(mode='json')
                         await sio.emit("chat_message", out)
+                await onebot.handle_prefixed_game_chat(str(src_server), str(player), content)
         except Exception:
             pass
 
@@ -383,6 +439,10 @@ async def _handle_single(payload: Dict[str, Any]):
                             _pm.ensure_play_time_if_empty()
                         except Exception:
                             pass
+                except Exception:
+                    pass
+                try:
+                    await onebot.handle_player_join(server_name, player)
                 except Exception:
                     pass
         elif event == "mcdr.player_left" and isinstance(data, dict):
@@ -444,6 +504,10 @@ async def _handle_single(payload: Dict[str, Any]):
                         pass
                 except Exception:
                     pass
+                try:
+                    await onebot.handle_player_leave(server_name, player)
+                except Exception:
+                    pass
         elif event in ("mcdr.server_startup", "mcdr.server_stop") and isinstance(data, dict):
             server_name = str(data.get("server") or "")
             if server_name:
@@ -452,6 +516,10 @@ async def _handle_single(payload: Dict[str, Any]):
                     PLAYERS_BY_SERVER[server_name] = set()
                     JOINED_TIME[server_name] = {}
                     SERVER_LAST_BOUNDARY[server_name] = float(time.time())
+                    try:
+                        await onebot.handle_server_reset(server_name)
+                    except Exception:
+                        pass
                 else:
                     # 停止时清空
                     # 在清空前对仍在线玩家进行尾差累计（以分钟边界为基准）
@@ -480,6 +548,10 @@ async def _handle_single(payload: Dict[str, Any]):
                                         crud.remove_server_from_player_play_time(db, rec, server_name)
                                 except Exception:
                                     continue
+                    except Exception:
+                        pass
+                    try:
+                        await onebot.handle_server_reset(server_name)
                     except Exception:
                         pass
                     # 最后清空在线与时间表
@@ -627,6 +699,10 @@ async def mcdr_ws_endpoint(ws: WebSocket):
 
 async def broadcast_server_link_update(server_name: str, group_names: List[str]):
     """向绑定了 server_name 的插件客户端推送分组变更事件。"""
+    try:
+        await onebot.refresh_bindings()
+    except Exception:
+        pass
     dead: List[WebSocket] = []
     msg = json.dumps({
         "event": "sl.group_update",

@@ -26,6 +26,7 @@ from backend.routers import settings as settings_router
 from backend.routers import mods as mods_router
 from backend.routers import configuration as configuration_router
 from backend.services.ws import router as ws_router
+from backend.services import onebot
 from backend.routers.system import cpu_sampler
 from backend.services import stats_service
 from backend.core.api import *
@@ -140,6 +141,7 @@ app.include_router(tools.router)
 app.include_router(mods_router.router)
 app.include_router(configuration_router.router)
 app.include_router(ws_router)
+app.include_router(onebot.router)
 app.include_router(settings_router.router)
 app.include_router(players_router.router)
 app.include_router(stats_router.router)
@@ -157,6 +159,10 @@ async def startup_event():
     await get_fabric_game_version_list()
     logger.debug(f"正在获取MCDR插件列表...")
     await get_mcdr_plugins_catalogue()
+    try:
+        await onebot.startup_sync()
+    except Exception:
+        logger.warning("OneBot 绑定初始化失败", exc_info=True)
     # 启动时收集/补全玩家 UUID 列表
     try:
         from backend.services import player_manager as _pm
