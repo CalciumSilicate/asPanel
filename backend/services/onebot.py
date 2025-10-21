@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -45,6 +45,67 @@ _QQ_TO_GROUP: Dict[str, int] = {}
 _GROUP_META: Dict[int, Dict[str, Any]] = {}
 _SERVER_TO_GROUPS: Dict[str, List[int]] = {}
 _GROUP_PLAYERS: Dict[int, Set[str]] = {}
+_PLAYER_EVENT_SUPPRESS_WINDOW = 1.0
+
+
+@dataclass
+class _PendingPlayerEvent:
+    event_type: str
+    timestamp: float
+    qq_group: str
+    message: str
+    task: Optional[asyncio.Task] = None
+
+
+_PENDING_PLAYER_EVENTS: Dict[Tuple[int, str], _PendingPlayerEvent] = {}
+
+
+async def _queue_player_event(
+    group_id: int,
+    player: str,
+    event_type: str,
+    qq_group: str,
+    message: str,
+) -> None:
+    loop = asyncio.get_running_loop()
+    key = (group_id, player)
+    now = loop.time()
+
+    existing = _PENDING_PLAYER_EVENTS.get(key)
+    if existing:
+        if existing.task:
+            existing.task.cancel()
+        if (
+            existing.event_type != event_type
+            and now - existing.timestamp <= _PLAYER_EVENT_SUPPRESS_WINDOW
+        ):
+            _PENDING_PLAYER_EVENTS.pop(key, None)
+            return
+        _PENDING_PLAYER_EVENTS.pop(key, None)
+
+    pending = _PendingPlayerEvent(
+        event_type=event_type,
+        timestamp=now,
+        qq_group=qq_group,
+        message=message,
+    )
+    task = asyncio.create_task(_delayed_send_player_event(key, pending))
+    pending.task = task
+    _PENDING_PLAYER_EVENTS[key] = pending
+
+
+async def _delayed_send_player_event(
+    key: Tuple[int, str], event: _PendingPlayerEvent
+) -> None:
+    try:
+        await asyncio.sleep(_PLAYER_EVENT_SUPPRESS_WINDOW)
+        await _send_group_text(event.qq_group, event.message)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        current = _PENDING_PLAYER_EVENTS.get(key)
+        if current is event:
+            _PENDING_PLAYER_EVENTS.pop(key, None)
 _REFRESH_LOCK = asyncio.Lock()
 
 _PLAYERS_PROVIDER: Callable[[], Dict[str, Set[str]]] = lambda: {}
@@ -379,7 +440,13 @@ async def handle_player_join(server_name: str, player: str) -> None:
         if player in new and player not in prev:
             qq_group = _GROUP_TO_QQ.get(gid)
             if qq_group:
-                await _send_group_text(qq_group, f"+{player} ({len(prev)}→{len(new)})")
+                await _queue_player_event(
+                    gid,
+                    player,
+                    "join",
+                    qq_group,
+                    f"+{player} ({len(prev)}→{len(new)})",
+                )
         _GROUP_PLAYERS[gid] = new
 
 
@@ -391,7 +458,13 @@ async def handle_player_leave(server_name: str, player: str) -> None:
         if player not in new and player in prev:
             qq_group = _GROUP_TO_QQ.get(gid)
             if qq_group:
-                await _send_group_text(qq_group, f"-{player} ({len(prev)}→{len(new)})")
+                await _queue_player_event(
+                    gid,
+                    player,
+                    "leave",
+                    qq_group,
+                    f"-{player} ({len(prev)}→{len(new)})",
+                )
         _GROUP_PLAYERS[gid] = new
 
 
