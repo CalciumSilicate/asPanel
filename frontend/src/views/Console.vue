@@ -18,8 +18,10 @@
     <div class="command-input-area">
       <el-input
           v-model="command"
-          placeholder="在此输入 MCDR 命令 (例如: !!MCDR r plg)"
-          @keyup.enter="sendCommand"
+          type="textarea"
+          :autosize="{ minRows: 1, maxRows: 6 }"
+          placeholder="在此输入 MCDR 命令 (多行将逐行发送)"
+          @keydown.enter.exact.prevent="sendCommand"
           clearable
       >
         <template #prepend>
@@ -161,12 +163,22 @@ const handleActionCommand = (action) => {
 }
 
 const sendCommand = () => {
-  if (!command.value.trim() || !socket || !isConnected.value) return;
-  // 注意：后端 mcdr_manager.py 没有监听 console_command，您可能在另一个文件(如 socket_handlers.py)中处理
-  socket.emit('console_command', {
-    server_id: parseInt(serverId.value, 10),
-    command: command.value,
+  if (!socket || !isConnected.value) return;
+
+  const lines = command.value
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+
+  if (lines.length === 0) return;
+
+  lines.forEach(line => {
+    socket.emit('console_command', {
+      server_id: parseInt(serverId.value, 10),
+      command: line,
+    });
   });
+
   command.value = '';
 };
 
