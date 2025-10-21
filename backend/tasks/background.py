@@ -4,6 +4,7 @@ import textwrap
 import time
 import uuid
 import zipfile
+import subprocess
 from http.client import HTTPException
 
 import requests
@@ -11,7 +12,7 @@ import shutil
 import os
 
 from sqlalchemy.orm import Session
-from typing import Dict
+from typing import Dict, Optional
 from pathlib import Path
 
 from backend import crud, server_parser, models
@@ -113,6 +114,43 @@ def background_install_fabric(loader_meta: Dict, server_path: Path, vanilla_core
             shutil.rmtree(libraries_path)
         if launcher_jar_path.exists():
             os.remove(launcher_jar_path)
+        raise e
+
+
+def background_install_forge(installer_meta: Dict, server_path: Path, java_command: str, task: Task):
+    task.status = TaskStatus.RUNNING
+    installer_url: Optional[str] = installer_meta.get("installer_url")
+    if not installer_url:
+        task.status = TaskStatus.FAILED
+        task.error = "缺少 Forge 安装器下载地址"
+        raise ValueError("Missing installer_url in Forge metadata")
+    installer_name = installer_meta.get("installer_name") or os.path.basename(installer_url)
+    installer_path = server_path / installer_name
+    try:
+        download_file(installer_path, installer_url, task, 0, 70)
+        expected_sha1 = installer_meta.get("installer_sha1")
+        if expected_sha1 and get_file_sha1(installer_path) != expected_sha1:
+            raise ValueError("Forge installer SHA1 mismatch")
+        task.progress = 80.0
+        cmd = [java_command or 'java', '-jar', installer_name, '--installServer']
+        proc = subprocess.run(cmd, cwd=server_path, capture_output=True, text=True)
+        if proc.returncode != 0:
+            stderr = proc.stderr.strip() or proc.stdout.strip()
+            raise RuntimeError(f"Forge installer exited with code {proc.returncode}: {stderr}")
+        try:
+            installer_path.unlink(missing_ok=True)
+        except AttributeError:
+            # Python <3.8 fallback
+            try:
+                if installer_path.exists():
+                    os.remove(installer_path)
+            except Exception:
+                pass
+        task.progress = 100.0
+        task.status = TaskStatus.SUCCESS
+    except Exception as e:
+        task.status = TaskStatus.FAILED
+        task.error = str(e)
         raise e
 
 

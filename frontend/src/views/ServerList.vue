@@ -289,20 +289,30 @@
           <div v-if="currentView === 'full_config'">
             <el-form :model="configFormData" label-position="top">
               <!-- Vanilla/Beta18 专属配置 -->
-              <div
-                  v-if="configFormData.core_config.server_type === 'vanilla' || configFormData.core_config.server_type === 'beta18'">
+              <div v-if="isVanillaFamily || isForgeType">
                 <el-form-item>
                   <div class="form-item-wrapper">
-                    <div class="form-item-label"><span>游戏版本</span><small>更改会重新下载核心</small></div>
+                    <div class="form-item-label">
+                      <span>游戏版本</span>
+                      <small v-if="isForgeType">选择 Forge 支持的游戏版本</small>
+                      <small v-else>更改会重新下载核心</small>
+                    </div>
                     <div class="form-item-control version-control">
                       <el-select v-model="configFormData.core_config.core_version"
-                                 placeholder="从 Mojang API 加载版本..."
+                                 :placeholder="isForgeType ? '从 Forge 列表加载版本...' : '从 Mojang API 加载版本...'"
                                  filterable
-                                 :loading="isFetchingVersions" clearable>
-                        <el-option v-for="version in filteredMojangVersions" :key="version.id" :label="version.id"
-                                   :value="version.id"/>
+                                 clearable
+                                 :loading="isForgeType ? isFetchingForgeGameVersions : isFetchingVersions">
+                        <template v-if="isForgeType">
+                          <el-option v-for="version in forgeGameVersions" :key="version" :label="version"
+                                     :value="version"/>
+                        </template>
+                        <template v-else>
+                          <el-option v-for="version in filteredMojangVersions" :key="version.id" :label="version.id"
+                                     :value="version.id"/>
+                        </template>
                       </el-select>
-                      <div class="version-checkboxes">
+                      <div v-if="isVanillaFamily" class="version-checkboxes">
                         <el-checkbox v-model="showSnapshots" size="small">显示快照版</el-checkbox>
                         <el-checkbox v-model="showExperiments" size="small">显示实验版</el-checkbox>
                       </div>
@@ -310,7 +320,7 @@
                   </div>
                 </el-form-item>
 
-                <el-form-item>
+                <el-form-item v-if="isVanillaFamily">
                   <div class="form-item-wrapper">
                     <div class="form-item-label"><span>启用Fabric</span><small>Enable Fabric</small></div>
                     <div class="form-item-control">
@@ -325,7 +335,7 @@
                     </div>
                   </div>
                 </el-form-item>
-                <el-form-item v-if="configFormData.core_config.is_fabric">
+                <el-form-item v-if="isVanillaFamily && configFormData.core_config.is_fabric">
                   <div class="form-item-wrapper">
                     <div class="form-item-label"><span>Fabric版本</span><small>Fabric Loader Version</small></div>
                     <div class="form-item-control">
@@ -334,6 +344,20 @@
                                  filterable
                                  :loading="isFetchingFabricVersions" class="input-medium">
                         <el-option v-for="version in fabricLoaderVersions" :key="version" :label="version"
+                                   :value="version"/>
+                      </el-select>
+                    </div>
+                  </div>
+                </el-form-item>
+                <el-form-item v-if="isForgeType">
+                  <div class="form-item-wrapper">
+                    <div class="form-item-label"><span>Forge版本</span><small>Forge Loader Version</small></div>
+                    <div class="form-item-control">
+                      <el-select v-model="configFormData.core_config.loader_version"
+                                 placeholder="选择 Forge 版本"
+                                 filterable
+                                 :loading="isFetchingForgeLoaderVersions" class="input-medium">
+                        <el-option v-for="version in forgeLoaderVersions" :key="version" :label="version"
                                    :value="version"/>
                       </el-select>
                     </div>
@@ -1145,6 +1169,10 @@ const fabricGameVersions = ref([]);
 const isFetchingVersions = ref(false);
 const fabricLoaderVersions = ref([]);
 const isFetchingFabricVersions = ref(false);
+const forgeGameVersions = ref([]);
+const forgeLoaderVersions = ref([]);
+const isFetchingForgeGameVersions = ref(false);
+const isFetchingForgeLoaderVersions = ref(false);
 const showSnapshots = ref(false);
 const showExperiments = ref(false);
 const isDownloading = ref(false);
@@ -1211,6 +1239,11 @@ const dialogTitle = computed(() => {
   }
   return `配置服务器 - ${currentConfigServer.value.name}`;
 });
+const isVanillaFamily = computed(() => {
+  const type = configFormData.value?.core_config?.server_type;
+  return type === 'vanilla' || type === 'beta18';
+});
+const isForgeType = computed(() => configFormData.value?.core_config?.server_type === 'forge');
 
 const filteredMojangVersions = computed(() => {
   return mojangVersions.value.filter(v => {
@@ -1277,7 +1310,7 @@ const serverTypes = [{label: 'Vanilla / Fabric', value: 'vanilla'}, {
   label: 'Bukkit (暂不支持配置)',
   value: 'bukkit',
   disabled: true
-}, {label: 'Forge (暂不支持配置)', value: 'forge', disabled: true}];
+}, {label: 'Forge', value: 'forge'}];
 const gamemodeOptions = [{label: '生存 (Survival)', value: 'survival'}, {
   label: '创造 (Creative)',
   value: 'creative'
@@ -1287,6 +1320,7 @@ const difficultyOptions = [{label: '和平 (Peaceful)', value: 'peaceful'}, {
   value: 'easy'
 }, {label: '普通 (Normal)', value: 'normal'}, {label: '困难 (Hard)', value: 'hard'}];
 const isFabricAvailable = computed(() => {
+  if (configFormData.value?.core_config?.server_type !== 'vanilla') return false;
   if (!configFormData.value?.core_config?.core_version || fabricGameVersions.value.length === 0) {
     return false;
   }
@@ -1294,7 +1328,8 @@ const isFabricAvailable = computed(() => {
 });
 
 watch(isFabricAvailable, (isAvailable) => {
-  if (!isAvailable && configFormData.value?.core_config?.is_fabric) {
+  if (!isAvailable && configFormData.value?.core_config?.server_type === 'vanilla'
+      && configFormData.value?.core_config?.is_fabric) {
     configFormData.value.core_config.is_fabric = false;
     if (configDialogVisible.value) {
       ElMessage.warning('当前游戏版本不支持 Fabric，已自动禁用。');
@@ -1302,21 +1337,56 @@ watch(isFabricAvailable, (isAvailable) => {
   }
 });
 watch(
-    () => configFormData.value.core_config,
-    (newConfig) => {
-      if (!configDialogVisible.value || !newConfig || newConfig.server_type !== 'vanilla') {
-        return;
-      }
-      if (!newConfig.is_fabric) {
+    () => configFormData.value?.core_config?.is_fabric,
+    (enabled) => {
+      if (!configDialogVisible.value) return;
+      const coreConfig = configFormData.value?.core_config;
+      if (!coreConfig || coreConfig.server_type !== 'vanilla') return;
+      if (!enabled) {
         fabricLoaderVersions.value = [];
-        if (newConfig.fabric_loader_version) {
-          newConfig.fabric_loader_version = '';
+        if (coreConfig.loader_version) {
+          coreConfig.loader_version = '';
         }
         return;
       }
-      fetchFabricLoaderVersions(newConfig.core_version);
-    },
-    {deep: true}
+      fetchFabricLoaderVersions(coreConfig.core_version);
+    }
+);
+watch(
+    () => configFormData.value?.core_config?.core_version,
+    (newVersion) => {
+      if (!configDialogVisible.value) return;
+      const coreConfig = configFormData.value?.core_config;
+      if (!coreConfig) return;
+      if (coreConfig.server_type === 'vanilla' && coreConfig.is_fabric) {
+        fetchFabricLoaderVersions(newVersion);
+      }
+      if (coreConfig.server_type === 'forge') {
+        fetchForgeLoaderVersions(newVersion);
+      }
+    }
+);
+watch(
+    () => configFormData.value?.core_config?.server_type,
+    async (type) => {
+      if (!configDialogVisible.value) return;
+      if (type === 'forge') {
+        await fetchForgeGameVersions();
+        if (configFormData.value.core_config?.is_fabric) {
+          configFormData.value.core_config.is_fabric = false;
+        }
+        if (configFormData.value.core_config?.core_version) {
+          await fetchForgeLoaderVersions(configFormData.value.core_config.core_version);
+        } else {
+          forgeLoaderVersions.value = [];
+        }
+      } else {
+        forgeLoaderVersions.value = [];
+      }
+      if (type !== 'vanilla' && fabricLoaderVersions.value.length > 0) {
+        fabricLoaderVersions.value = [];
+      }
+    }
 );
 
 
@@ -1401,6 +1471,12 @@ const openConfigDialog = async (server) => {
           velocityTryOrderNames.value.push(velocitySubServersList.value[0].name);
         }
       }
+    } else if (type === 'forge') {
+      currentView.value = 'full_config';
+      await fetchForgeGameVersions();
+      if (configFormData.value.core_config.core_version) {
+        await fetchForgeLoaderVersions(configFormData.value.core_config.core_version);
+      }
     } else if (type === 'vanilla' || type === 'beta18') {
       currentView.value = 'full_config';
       await fetchFabricGameVersions();
@@ -1424,6 +1500,9 @@ const confirmServerType = async () => {
   if (type === 'vanilla' || type === 'beta18') {
     currentView.value = 'full_config';
     await fetchMojangVersions();
+  } else if (type === 'forge') {
+    currentView.value = 'full_config';
+    await fetchForgeGameVersions();
   } else if (type === 'velocity') {
     currentView.value = 'velocity_initial_setup';
     await fetchVelocityVersions();
@@ -1586,6 +1665,43 @@ const fetchFabricLoaderVersions = async (mcVersion) => {
     fabricLoaderVersions.value = [];
   } finally {
     isFetchingFabricVersions.value = false;
+  }
+};
+const fetchForgeGameVersions = async () => {
+  if (forgeGameVersions.value.length > 0) return;
+  isFetchingForgeGameVersions.value = true;
+  try {
+    const {data} = await apiClient.get('/api/forge/game-versions');
+    forgeGameVersions.value = data.versions;
+  } catch (error) {
+    ElMessage.error('获取 Forge 支持的游戏版本失败');
+  } finally {
+    isFetchingForgeGameVersions.value = false;
+  }
+};
+const fetchForgeLoaderVersions = async (mcVersion) => {
+  if (!mcVersion) {
+    forgeLoaderVersions.value = [];
+    if (configFormData.value?.core_config?.server_type === 'forge' &&
+        configFormData.value.core_config.loader_version) {
+      configFormData.value.core_config.loader_version = '';
+    }
+    return;
+  }
+  isFetchingForgeLoaderVersions.value = true;
+  try {
+    const {data} = await apiClient.get(`/api/forge/loader-versions?version_id=${mcVersion}`);
+    forgeLoaderVersions.value = data.versions;
+    if (configFormData.value?.core_config?.server_type === 'forge' &&
+        configFormData.value.core_config.loader_version &&
+        !forgeLoaderVersions.value.includes(configFormData.value.core_config.loader_version)) {
+      configFormData.value.core_config.loader_version = '';
+    }
+  } catch (error) {
+    ElMessage.error('获取 Forge 版本列表失败');
+    forgeLoaderVersions.value = [];
+  } finally {
+    isFetchingForgeLoaderVersions.value = false;
   }
 };
 const addManualSubServer = () => {
@@ -2222,6 +2338,7 @@ const handleInstallDbPlugins = async () => {
 onMounted(() => {
   fetchServers();
   fetchFabricGameVersions();
+  fetchForgeGameVersions();
 
   // 同源连接 WebSocket（开发环境走 Vite 代理 /ws，生产由反代处理）
   socket = io({ path: '/ws/socket.io' });
