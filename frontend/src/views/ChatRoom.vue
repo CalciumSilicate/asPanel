@@ -79,26 +79,18 @@
                             <span v-else-if="seg.kind==='reply'" class="cq-reply">{{ seg.label }}</span>
                             <span v-else-if="seg.kind==='share'" class="cq-share">
                               <span class="cq-tag">{{ seg.label }}</span>
-                              <a v-if="seg.url" :href="seg.url" target="_blank" rel="noopener noreferrer">{{ seg.url }}</a>
+                              <a v-if="seg.url" :href="seg.url" target="_blank" rel="noopener noreferrer">{{ seg.displayUrl || seg.url }}</a>
                               <span v-else class="cq-tag is-unsupported">链接缺失</span>
                               <span v-if="seg.title" class="cq-share-title">{{ seg.title }}</span>
                             </span>
                             <a v-else-if="seg.kind==='image' && seg.url" class="cq-image-link" :href="seg.url" target="_blank" rel="noopener noreferrer">
                               <img class="cq-image" :src="seg.url" alt="QQ图片" loading="lazy" referrerpolicy="no-referrer" />
+                            </a>
                             <div v-else-if="seg.kind==='record'" class="cq-record-bubble">
                               <span class="cq-tag">{{ seg.label }}</span>
                               <audio v-if="seg.url" class="cq-audio" :src="seg.url" controls preload="none"></audio>
                               <span v-else class="cq-tag is-unsupported">音频缺失</span>
                             </div>
-                            <span v-else-if="seg.kind==='share'" class="cq-share">
-                              <span class="cq-tag">{{ seg.label }}</span>
-                              <a v-if="seg.url" :href="seg.url" target="_blank" rel="noopener">{{ seg.url }}</a>
-                              <span v-else class="cq-tag is-unsupported">链接缺失</span>
-                              <span v-if="seg.title" class="cq-share-title">{{ seg.title }}</span>
-                            </span>
-                            <a v-else-if="seg.kind==='image' && seg.url" class="cq-image-link" :href="seg.url" target="_blank" rel="noopener">
-                              <img class="cq-image" :src="seg.url" alt="QQ图片" loading="lazy" />
-                            </a>
                             <span v-else-if="seg.kind==='image'" class="cq-tag is-unsupported">[图片缺失]</span>
                             <details v-else-if="seg.kind==='data'" class="cq-data" :title="seg.content">
                               <summary>{{ seg.label }}</summary>
@@ -543,18 +535,20 @@ const transformSegments = (segments) => {
       return
     }
     if (type === 'share') {
-      const url = sanitizeCqMediaUrl(data.url ?? data.jumpUrl ?? data.file ?? '')
+      const sanitizedUrl = sanitizeCqMediaUrl(data.url ?? data.jumpUrl ?? data.file ?? '')
       const rawUrl = data.url ?? data.jumpUrl ?? data.file ?? ''
-      const url = rawUrl ? String(rawUrl) : ''
+      const displayUrl = rawUrl ? String(rawUrl) : ''
+      const url = sanitizedUrl || displayUrl
       const rawTitle = data.title ?? data.content ?? ''
       const title = rawTitle ? String(rawTitle) : ''
-      mapped.push({ kind: 'share', label: '[链接]', url, title, raw: seg.raw })
+      mapped.push({ kind: 'share', label: '[链接]', url, title, displayUrl, raw: seg.raw })
       return
     }
     if (type === 'image') {
-      const url = sanitizeCqMediaUrl(data.url ?? data.file ?? '')
+      const sanitizedUrl = sanitizeCqMediaUrl(data.url ?? data.file ?? '')
       const rawUrl = data.url ?? data.file ?? ''
-      const url = rawUrl ? String(rawUrl) : ''
+      const fallbackUrl = rawUrl ? String(rawUrl) : ''
+      const url = sanitizedUrl || fallbackUrl
       mapped.push({ kind: 'image', url, raw: seg.raw })
       return
     }
