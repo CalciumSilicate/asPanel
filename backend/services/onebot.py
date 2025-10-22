@@ -203,7 +203,7 @@ async def refresh_bindings() -> None:
         _GROUP_PLAYERS = new_group_players
 
         try:
-            logger.info("[OneBot] 组绑定已刷新 | groups=%s", len(_GROUP_META))
+            logger.info(f"[OneBot] 组绑定已刷新 | groups={len(_GROUP_META)}")
         except Exception:
             pass
 
@@ -237,7 +237,7 @@ async def _send_group_text(qq_group: str, message: str) -> None:
         _SESSIONS.discard(session)
     if dead:
         try:
-            logger.warning("[OneBot] 清理失效连接 %s", len(dead))
+            logger.warning(f"[OneBot] 清理失效连接 {len(dead)}")
         except Exception:
             pass
 
@@ -294,15 +294,17 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
 async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, text: str) -> bool:
     if not text:
         return False
+    text = text.strip()
+    split_text = text.split()
     cmd = text[0]
     if cmd not in {"#", "%", "&"}:
         return False
     body = text[1:].strip()
-    if cmd == "#":
+    if cmd == "#" and len(text) == 1:
         await _cmd_show_players(group_id, qq_group)
-    elif cmd == "%":
+    elif cmd == "%" and len(split_text) in {1, 2, 3}:
         await _cmd_restart_server(group_id, qq_group, body)
-    elif cmd == "&":
+    elif cmd == "&" and len(text) == 1:
         await _cmd_show_status(group_id, qq_group)
     return True
 

@@ -19,7 +19,7 @@
       <el-input
           v-model="command"
           type="textarea"
-          :autosize="{ minRows: 1, maxRows: 6 }"
+          :autosize="{ minRows: 1, maxRows: 60 }"
           placeholder="在此输入 MCDR 命令 (多行将逐行发送)"
           @keydown.enter.exact.prevent="sendCommand"
           clearable

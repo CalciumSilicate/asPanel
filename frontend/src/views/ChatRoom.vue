@@ -367,7 +367,7 @@ const resolveAvatar = (url) => {
 
 const mcAvatar = (name) => {
   if (!name) return defaultAvatar;
-  try { return `https://mc-heads.net/avatar/${encodeURIComponent(name)}` } catch { return `https://mc-heads.net/avatar/${name}` }
+  try { return `/api/users/mc/avatar/${encodeURIComponent(name)}` } catch { return `/api/users/mc/avatar/${name}` }
 }
 const formatTime = (dt) => {
   try {

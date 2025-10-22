@@ -163,7 +163,7 @@ const refreshOfficialNames = async () => {
   } finally { busyNames.value = false }
 }
 
-const avatarUrl = (uuid: string) => `https://mc-heads.net/avatar/${encodeURIComponent(uuid)}`
+const avatarUrl = (uuid: string) => `/api/users/mc/avatar/${encodeURIComponent(uuid)}`
 
 const sumTicks = (row: Player) => {
   const pt = row.play_time || {}
