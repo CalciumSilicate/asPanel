@@ -38,7 +38,7 @@ async def get_system_stats(db: Session = Depends(get_db), _user=Depends(require_
 
 
 @router.get("/system/status")
-async def get_system_status(_user=Depends(require_role(Role.USER))):
+async def get_system_status(_user=Depends(require_role(Role.GUEST))):
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage('/')
     return {

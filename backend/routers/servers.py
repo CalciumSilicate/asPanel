@@ -31,7 +31,7 @@ router = APIRouter(
 
 # --- Server Endpoints ---
 @router.get('/servers', response_model=List[schemas.ServerDetail])
-async def get_servers(db: Session = Depends(get_db), _user: models.User = Depends(require_role(Role.USER))):
+async def get_servers(db: Session = Depends(get_db), _user: models.User = Depends(require_role(Role.GUEST))):
     return await server_service.get_servers_with_details(db)
 
 
@@ -428,7 +428,7 @@ async def save_server_config(
 
 @router.get("/servers/resource-usage")
 async def get_servers_resource_usage(db: Session = Depends(get_db),
-                                     _user: models.User = Depends(require_role(Role.USER))):
+                                     _user: models.User = Depends(require_role(Role.GUEST))):
     # PERMISSION: USER
     usage_data = []
     for server_id, process in mcdr_manager.processes.items():

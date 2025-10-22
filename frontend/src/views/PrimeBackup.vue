@@ -93,7 +93,7 @@
             <el-table-column label="操作" width="220" align="center">
               <template #default="{ row }">
                 <el-button-group>
-                  <el-button size="small" :icon="Download" @click="doExport(row)">下载</el-button>
+                  <el-button size="small" :icon="Download" @click="doExport(row)" v-if="hasRole('ADMIN')">下载</el-button>
                   <el-button size="small" type="primary" @click="openRestoreDialog(row)">恢复到服务器</el-button>
                 </el-button-group>
               </template>
@@ -155,6 +155,7 @@ import { Search, Refresh, Download } from '@element-plus/icons-vue'
 import apiClient from '@/api'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import { settings } from '@/store/settings'
+import { hasRole } from '@/store/user'
 
 const PB_PLUGIN_META_ID = 'prime_backup'
 

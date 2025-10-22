@@ -79,17 +79,23 @@ const routes = [
             // 插件配置
             { path: 'server-config/via-version-config', name: 'ViaVersionConfig', component: () => import('../views/plugin-config/ViaVersionConfig.vue'), meta: { requiredRole: 'ADMIN' } },
             { path: 'server-config/velocity-proxy-config', name: 'VelocityProxyConfig', component: () => import('../views/plugin-config/VelocityProxyConfig.vue'), meta: { requiredRole: 'ADMIN' } },
-            { path: 'server-config/prime-backup-config', name: 'PrimeBackupConfig', component: () => import('../views/plugin-config/PrimeBackupConfig.vue'), meta: { requiredRole: 'ADMIN' } },
-            { path: 'server-config/auto-plugin-reloader-config', name: 'AutoPluginReloaderConfig', component: () => import('../views/plugin-config/AutoPluginReloaderConfig.vue'), meta: { requiredRole: 'ADMIN' } },
-            { path: 'server-config/bili-live-helper-config', name: 'BiliLiveHelperConfig', component: () => import('../views/plugin-config/BiliLiveHelperConfig.vue'), meta: { requiredRole: 'ADMIN' } },
-            { path: 'server-config/where-is-config', name: 'WhereIsConfig', component: () => import('../views/plugin-config/WhereIsConfig.vue'), meta: { requiredRole: 'ADMIN' } },
-            { path: 'server-config/crash-restart-config', name: 'CrashRestartConfig', component: () => import('../views/plugin-config/CrashRestartConfig.vue'), meta: { requiredRole: 'ADMIN' } },
+            { path: 'server-config/prime-backup-config', name: 'PrimeBackupConfig', component: () => import('../views/plugin-config/PrimeBackupConfig.vue'), meta: { requiredRole: 'HELPER' } },
+            { path: 'server-config/auto-plugin-reloader-config', name: 'AutoPluginReloaderConfig', component: () => import('../views/plugin-config/AutoPluginReloaderConfig.vue'), meta: { requiredRole: 'HELPER' } },
+            { path: 'server-config/bili-live-helper-config', name: 'BiliLiveHelperConfig', component: () => import('../views/plugin-config/BiliLiveHelperConfig.vue'), meta: { requiredRole: 'HELPER' } },
+            { path: 'server-config/where-is-config', name: 'WhereIsConfig', component: () => import('../views/plugin-config/WhereIsConfig.vue'), meta: { requiredRole: 'HELPER' } },
+            { path: 'server-config/crash-restart-config', name: 'CrashRestartConfig', component: () => import('../views/plugin-config/CrashRestartConfig.vue'), meta: { requiredRole: 'HELPER' } },
             { path: 'server-config/join-motd-config', name: 'JoinMOTDConfig', component: () => import('../views/plugin-config/JoinMOTDConfig.vue'), meta: { requiredRole: 'ADMIN' } },
-            { path: 'server-config/quick-backup-multi-config', name: 'QuickBackupMultiConfig', component: () => import('../views/plugin-config/QuickBackupMultiConfig.vue'), meta: { requiredRole: 'ADMIN' } },
+            { path: 'server-config/quick-backup-multi-config', name: 'QuickBackupMultiConfig', component: () => import('../views/plugin-config/QuickBackupMultiConfig.vue'), meta: { requiredRole: 'HELPER' } },
             {
                 path: 'players',
                 name: 'PlayerManager',
                 component: () => import('../views/PlayerManager.vue'),
+                meta: { requiredRole: 'ADMIN' }
+            },
+            {
+                path: 'users',
+                name: 'UserManager',
+                component: () => import('../views/UserManager.vue'),
                 meta: { requiredRole: 'ADMIN' }
             },
             {

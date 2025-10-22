@@ -87,7 +87,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="memory_mb" label="内存占用 (MB)" width="180" align="center" />
-        <el-table-column label="操作" width="120" align="center">
+        <el-table-column label="操作" width="120" align="center" v-if="hasRole('ADMIN')">
            <template #default="scope">
               <el-button size="small" type="primary" @click="goToConsole(scope.row.id)" :icon="Monitor">
                 控制台
@@ -105,7 +105,7 @@ import { useRouter } from 'vue-router';
 import apiClient from '@/api';
 import { UserFilled, Monitor, Tickets, Cpu, DataLine, Folder } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import { user, fullAvatarUrl } from '@/store/user';
+import { user, fullAvatarUrl, hasRole } from '@/store/user';
 
 const router = useRouter();
 

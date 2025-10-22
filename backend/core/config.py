@@ -173,7 +173,7 @@ DEFAULT_SERVER_PROPERTIES_CONFIG = {
 }
 
 # --- USER SETTING ---
-ALLOW_REGISTER = False
+ALLOW_REGISTER = True
 DEFAULT_USER_ROLE = "USER"
 
 # --- CONSOLE LOG SETTING ---
@@ -194,9 +194,12 @@ PYTHON_EXECUTABLE = "python"
 CPU_PERCENT_INTERVAL = 1
 
 STATS_WHITELIST_ON = False
-STATS_WHITELIST = ["minecraft:custom.minecraft:deaths", "minecraft:custom.minecraft:play_time",
-                   "minecraft:custom.minecraft:play_one_minute", "minecraft:used.minecraft:totem_of_undying",
-                   "minecraft:used.minecraft:*_pickaxe"]
-STATS_IGNORE = ["minecraft:killed_by.minecraft:*", "*.minecraft:stone", "*.minecraft:bedrock"]
+STATS_WHITELIST = [
+    # for example
+    # "minecraft:custom.minecraft:deaths", "minecraft:custom.minecraft:play_time",
+    # "minecraft:custom.minecraft:play_one_minute", "minecraft:used.minecraft:totem_of_undying",
+    # "minecraft:used.minecraft:*_pickaxe"
+]
+STATS_IGNORE = []
 
 UUID_HYPHEN_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")

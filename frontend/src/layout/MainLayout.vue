@@ -114,74 +114,74 @@
 
 
           <!-- 插件配置（原“服务器配置”）移动至工具前 -->
-          <el-sub-menu index="server-config" v-if="hasRole('ADMIN')">
+          <el-sub-menu index="server-config" v-if="hasRole('HELPER')">
             <template #title>
               <el-icon>
                 <SetUp/>
               </el-icon>
               <span>插件配置</span>
             </template>
-            <el-menu-item index="/server-config/via-version-config">
+            <el-menu-item index="/server-config/via-version-config" v-if="hasRole('ADMIN')">
               <el-icon>
                 <Connection/>
               </el-icon>
               <span>Via Version</span>
             </el-menu-item>
-            <el-menu-item index="/server-config/velocity-proxy-config">
+            <el-menu-item index="/server-config/velocity-proxy-config" v-if="hasRole('ADMIN')">
               <el-icon>
                 <Link/>
               </el-icon>
               <span>Velocity Proxy</span>
             </el-menu-item>
-            <el-menu-item index="/server-config/prime-backup-config">
+            <el-menu-item index="/server-config/prime-backup-config" v-if="hasRole('HELPER')">
               <el-icon>
                 <Umbrella/>
               </el-icon>
               <span>Prime Backup</span>
             </el-menu-item>
-            <el-menu-item index="/server-config/auto-plugin-reloader-config">
+            <el-menu-item index="/server-config/auto-plugin-reloader-config" v-if="hasRole('HELPER')">
               <el-icon>
                 <Refresh/>
               </el-icon>
               <span>Auto Plugin Reloader</span>
             </el-menu-item>
-            <el-menu-item index="/server-config/bili-live-helper-config">
+            <el-menu-item index="/server-config/bili-live-helper-config" v-if="hasRole('HELPER')">
               <el-icon>
                 <VideoPlay/>
               </el-icon>
               <span>Bili Live Helper</span>
             </el-menu-item>
-            <el-menu-item index="/server-config/where-is-config">
+            <el-menu-item index="/server-config/where-is-config" v-if="hasRole('HELPER')">
               <el-icon>
                 <LocationInformation/>
               </el-icon>
               <span>Where Is</span>
             </el-menu-item>
-            <el-menu-item index="/server-config/bot-loader" disabled>
+            <el-menu-item index="/server-config/bot-loader" disabled v-if="hasRole('ADMIN')">
               <el-icon>
                 <User/>
               </el-icon>
               <span>Bot Loader</span>
             </el-menu-item>
-            <el-menu-item index="/server-config/command-set" disabled>
+            <el-menu-item index="/server-config/command-set" disabled v-if="hasRole('ADMIN')">
               <el-icon>
                 <List/>
               </el-icon>
               <span>Command Set</span>
             </el-menu-item>
-            <el-menu-item index="/server-config/crash-restart-config">
+            <el-menu-item index="/server-config/crash-restart-config" v-if="hasRole('HELPER')">
               <el-icon>
                 <RefreshRight/>
               </el-icon>
               <span>Crash Restart</span>
             </el-menu-item>
-            <el-menu-item index="/server-config/join-motd-config">
+            <el-menu-item index="/server-config/join-motd-config" v-if="hasRole('ADMIN')">
               <el-icon>
                 <Comment/>
               </el-icon>
               <span>joinMOTD</span>
             </el-menu-item>
-            <el-menu-item index="/server-config/quick-backup-multi-config">
+            <el-menu-item index="/server-config/quick-backup-multi-config" v-if="hasRole('HELPER')">
               <el-icon>
                 <DocumentCopy/>
               </el-icon>
@@ -190,7 +190,7 @@
           </el-sub-menu>
 
           <!-- 工具箱 -->
-          <el-sub-menu index="tools">
+          <el-sub-menu index="tools" v-if="hasRole('HELPER')">
             <template #title>
               <el-icon>
                 <Operation/>
@@ -261,6 +261,12 @@
               <User/>
             </el-icon>
             <span>玩家管理</span>
+          </el-menu-item>
+          <el-menu-item index="/users" v-if="hasRole('ADMIN')">
+            <el-icon>
+              <User/>
+            </el-icon>
+            <span>用户管理</span>
           </el-menu-item>
           <el-menu-item index="/settings" v-if="hasRole('ADMIN')">
             <el-icon>
