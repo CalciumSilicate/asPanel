@@ -36,6 +36,7 @@ server_name = Path(".").resolve().name
 _SERVER_GROUPS: List[str] = []  # 当前服务器所在的组名列表
 # 本服在线玩家集（用于 @mention 播放音效与存在性判断）
 _LOCAL_PLAYERS: set[str] = set()
+_CQ_PATTERN = re.compile(r"\[CQ:[^\]]*\]")
 
 # ----------------------------- 工具函数与配置 -----------------------------
 
@@ -343,6 +344,134 @@ def _rtext_gray(text: str) -> RText:
     return RText(text, color=RColor.gray)
 
 
+def _cq_unescape(text: str) -> str:
+    if not isinstance(text, str) or not text:
+        return ""
+    return (
+        text.replace("&amp;", "&")
+        .replace("&#91;", "[")
+        .replace("&#93;", "]")
+        .replace("&#44;", ",")
+    )
+
+
+def _cq_parse_code(raw: str) -> dict[str, Any]:
+    inner = raw[4:-1]
+    type_name, _, rest = inner.partition(",")
+    data: dict[str, str] = {}
+    if rest:
+        for part in rest.split(","):
+            if not part:
+                continue
+            key, _, value = part.partition("=")
+            data[key] = _cq_unescape(value)
+    return {"type": type_name, "data": data, "raw": raw}
+
+
+def _cq_parse_message(message: str) -> list[dict[str, Any]]:
+    if not message:
+        return []
+    text = str(message)
+    result: list[dict[str, Any]] = []
+    last = 0
+    for match in _CQ_PATTERN.finditer(text):
+        start, end = match.span()
+        if start > last:
+            piece = text[last:start]
+            if piece:
+                result.append({"type": "text", "text": _cq_unescape(piece)})
+        result.append(_cq_parse_code(match.group(0)))
+        last = end
+    if last < len(text):
+        tail = text[last:]
+        if tail:
+            result.append({"type": "text", "text": _cq_unescape(tail)})
+    return result
+
+
+def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
+    seg_type = str(segment.get("type") or "")
+    data = segment.get("data") or {}
+    raw = segment.get("raw")
+    if seg_type == "text":
+        return _rtext_gray(str(segment.get("text") or ""))
+    if seg_type == "face":
+        label = RText("[表情]", color=RColor.yellow)
+        if raw:
+            label.set_click_event(RAction.suggest_command, f".{raw}")
+            label.set_hover_text(f"点击复制 {raw}")
+        return label
+    if seg_type == "record":
+        url = str(data.get("url") or data.get("file") or "")
+        label = RText("[语音]", color=RColor.aqua)
+        if url:
+            label.set_click_event(RAction.open_url, url)
+            label.set_hover_text(f"点击播放 {url}")
+        else:
+            label.set_hover_text("语音内容缺失")
+        return label
+    if seg_type == "video":
+        return RText("[短视频]", color=RColor.gray)
+    if seg_type == "at":
+        target = str(data.get("text") or data.get("qq") or "")
+        if target.lower() == "all":
+            display = "@全体成员"
+        elif target:
+            display = f"@{target}"
+        else:
+            display = "@"
+        label = RText("[@]", color=RColor.gold)
+        if raw:
+            label.set_click_event(RAction.suggest_command, f".{raw}")
+        label.set_hover_text(display)
+        return label
+    if seg_type == "share":
+        url = str(data.get("url") or data.get("jumpUrl") or data.get("file") or "")
+        title = str(data.get("title") or data.get("content") or url or "")
+        label = RText("[链接]", color=RColor.aqua)
+        if url:
+            label.set_click_event(RAction.open_url, url)
+        label.set_hover_text(title or "链接")
+        return label
+    if seg_type == "image":
+        url = str(data.get("url") or data.get("file") or "")
+        label = RText("[图片]", color=RColor.aqua)
+        if url:
+            label.set_click_event(RAction.open_url, url)
+            label.set_hover_text(f"点击打开图片 {url}")
+        else:
+            label.set_hover_text("图片地址缺失")
+        return label
+    if seg_type == "reply":
+        label = RText("[回复]", color=RColor.light_purple)
+        if raw:
+            label.set_click_event(RAction.suggest_command, f".{raw}")
+            label.set_hover_text("点击复制回复标记")
+        return label
+    if seg_type == "forward":
+        return RText("[合并转发]", color=RColor.gray)
+    if seg_type in {"xml", "json"}:
+        label = RText("[XML/JSON]", color=RColor.green)
+        detail = str(data.get("data") or "")
+        if detail:
+            label.set_hover_text(detail[:300])
+        return label
+    if seg_type in {"rps", "dice", "shake", "anonymous", "contact", "location", "music", "redbag", "poke", "gift", "cardimage", "tts"}:
+        return RText(f"[{seg_type}]", color=RColor.gray)
+    return RText(f"[{seg_type}]", color=RColor.gray)
+
+
+def _cq_message_to_rtext(message: str) -> RText:
+    segments = _cq_parse_message(message)
+    combined: RText | None = None
+    for seg in segments:
+        part = _cq_segment_to_rtext(seg)
+        if part is None:
+            continue
+        combined = part if combined is None else combined + part
+    return combined if combined is not None else _rtext_gray(str(message or ""))
+
+
 def _handle_forward_event(server: ServerInterface, event: str, data: dict[str, Any]):
     # 仅处理与自己同组的事件
     if not _same_group(data.get("server_groups")):
@@ -430,7 +559,8 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
             prefix = "[QQ] "
         else:
             prefix = "[WEB] "
-        t = _rtext_gray(prefix) + _rtext_gray(f"<{user}> ") + _rtext_gray(message)
+        content_rtext = _cq_message_to_rtext(message) if source == "qq" else _rtext_gray(message)
+        t = _rtext_gray(prefix) + _rtext_gray(f"<{user}> ") + content_rtext
         server.say(t)
 
 
