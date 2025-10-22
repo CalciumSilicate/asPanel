@@ -421,6 +421,13 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
     if seg_type == "record":
         label = RText("[语音]", color=RColor.gray)
         label.set_hover_text("暂不支持播放语音消息")
+        url = str(data.get("url") or data.get("file") or "")
+        label = RText("[语音]", color=RColor.aqua)
+        if url:
+            label.set_click_event(RAction.open_url, url)
+            label.set_hover_text(f"点击播放 {url}")
+        else:
+            label.set_hover_text("语音内容缺失")
         return label
     if seg_type == "video":
         return RText("[短视频]", color=RColor.gray)
@@ -439,6 +446,7 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
         return label
     if seg_type == "share":
         url = _normalize_media_url(data.get("url") or data.get("jumpUrl") or data.get("file"))
+        url = str(data.get("url") or data.get("jumpUrl") or data.get("file") or "")
         title = str(data.get("title") or data.get("content") or url or "")
         label = RText("[链接]", color=RColor.aqua)
         if url:
@@ -447,6 +455,7 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
         return label
     if seg_type == "image":
         url = _normalize_media_url(data.get("url") or data.get("file"))
+        url = str(data.get("url") or data.get("file") or "")
         label = RText("[图片]", color=RColor.aqua)
         if url:
             label.set_click_event(RAction.open_url, url)
