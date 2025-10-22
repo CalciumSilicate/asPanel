@@ -85,20 +85,12 @@
                             </span>
                             <a v-else-if="seg.kind==='image' && seg.url" class="cq-image-link" :href="seg.url" target="_blank" rel="noopener noreferrer">
                               <img class="cq-image" :src="seg.url" alt="QQ图片" loading="lazy" referrerpolicy="no-referrer" />
+                            </a>
                             <div v-else-if="seg.kind==='record'" class="cq-record-bubble">
                               <span class="cq-tag">{{ seg.label }}</span>
                               <audio v-if="seg.url" class="cq-audio" :src="seg.url" controls preload="none"></audio>
                               <span v-else class="cq-tag is-unsupported">音频缺失</span>
                             </div>
-                            <span v-else-if="seg.kind==='share'" class="cq-share">
-                              <span class="cq-tag">{{ seg.label }}</span>
-                              <a v-if="seg.url" :href="seg.url" target="_blank" rel="noopener">{{ seg.url }}</a>
-                              <span v-else class="cq-tag is-unsupported">链接缺失</span>
-                              <span v-if="seg.title" class="cq-share-title">{{ seg.title }}</span>
-                            </span>
-                            <a v-else-if="seg.kind==='image' && seg.url" class="cq-image-link" :href="seg.url" target="_blank" rel="noopener">
-                              <img class="cq-image" :src="seg.url" alt="QQ图片" loading="lazy" />
-                            </a>
                             <span v-else-if="seg.kind==='image'" class="cq-tag is-unsupported">[图片缺失]</span>
                             <details v-else-if="seg.kind==='data'" class="cq-data" :title="seg.content">
                               <summary>{{ seg.label }}</summary>
