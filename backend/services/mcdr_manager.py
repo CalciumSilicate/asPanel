@@ -171,7 +171,7 @@ class MCDRManager:
         stripped_line = cleaned_line.strip()
         if stripped_line == '>':
             return None
-        return stripped_line if stripped_line else None
+        return cleaned_line if stripped_line else None
 
     async def _read_logs(self, server: models.Server, process: asyncio.subprocess.Process):
         streams = [process.stdout, process.stderr]

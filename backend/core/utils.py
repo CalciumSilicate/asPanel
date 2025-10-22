@@ -93,6 +93,17 @@ def get_file_md5(data: Path | bytes) -> str | None:
     return get_file_hash(data, hashlib.md5())
 
 
+def get_str_md5(text: str) -> str:
+    md5_obj = hashlib.md5()
+    md5_obj.update(text.encode('utf-8'))
+    return md5_obj.hexdigest()
+
+
+def is_valid_mc_name(name: str) -> bool:
+    """判断是否为合法的Minecraft用户名"""
+    return bool(re.fullmatch(r"[A-Za-z0-9_\-]{1,16}", name))
+
+
 def get_version_json_from_vanilla_jar(jar_path: Path) -> Dict | None:
     if not os.path.exists(jar_path):
         return None

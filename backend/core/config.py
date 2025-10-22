@@ -1,5 +1,5 @@
 # core/config.py
-
+import re
 from pathlib import Path
 import os
 import secrets
@@ -36,6 +36,8 @@ MCDR_ROOT_PATH.mkdir(exist_ok=True)
 # --- Directory that stores All users' avatar ---
 AVATAR_STORAGE_PATH = STORAGE_ROOT_PATH / "avatars"
 AVATAR_STORAGE_PATH.mkdir(exist_ok=True)
+AVATAR_MC_PATH = STORAGE_ROOT_PATH / "avatars" / "mc"
+AVATAR_MC_PATH.mkdir(exist_ok=True)
 AVATAR_URL_PREFIX = "/avatars/"
 
 # --- Directory that stores All archives ---
@@ -193,5 +195,8 @@ CPU_PERCENT_INTERVAL = 1
 
 STATS_WHITELIST_ON = False
 STATS_WHITELIST = ["minecraft:custom.minecraft:deaths", "minecraft:custom.minecraft:play_time",
-                   "minecraft:custom.minecraft:play_one_minute", "minecraft:used.minecraft:totem_of_undying", "minecraft:used.minecraft:*_pickaxe"]
+                   "minecraft:custom.minecraft:play_one_minute", "minecraft:used.minecraft:totem_of_undying",
+                   "minecraft:used.minecraft:*_pickaxe"]
 STATS_IGNORE = ["minecraft:killed_by.minecraft:*", "*.minecraft:stone", "*.minecraft:bedrock"]
+
+UUID_HYPHEN_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
