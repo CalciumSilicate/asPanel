@@ -101,16 +101,16 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="450" align="center" fixed="right"  v-if="hasRole('ADMIN')">
+        <el-table-column label="操作" width="450" align="center" fixed="right" v-if="hasRole('HELPER')">
           <template #default="scope">
             <el-button-group>
               <el-button size="small" type="primary" :icon="VideoPlay" @click="startServer(scope.row)"
                          :disabled="scope.row.status === 'running' || scope.row.status === 'pending' || scope.row.status === 'new_setup'"
-                         :loading="scope.row.loading"/>
+                         :loading="scope.row.loading" v-if="hasRole('USER')"/>
               <el-button size="small" type="danger" :icon="SwitchButton" @click="stopServer(scope.row)"
-                         :disabled="scope.row.status !== 'running'" :loading="scope.row.loading"/>
+                         :disabled="scope.row.status !== 'running'" :loading="scope.row.loading" v-if="hasRole('ADMIN')"/>
               <el-button size="small" type="warning" :icon="Refresh" @click="restartServer(scope.row)"
-                         :disabled="scope.row.status !== 'running'" :loading="scope.row.loading"/>
+                         :disabled="scope.row.status !== 'running'" :loading="scope.row.loading" v-if="hasRole('USER')"/>
             </el-button-group>
 
             <el-dropdown trigger="click" style="margin-left: 10px;">
@@ -123,19 +123,19 @@
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item :icon="Monitor" @click="goToConsole(scope.row.id)"
-                                    :disabled="scope.row.status === 'new_setup'">控制台
+                                    :disabled="scope.row.status === 'new_setup'" v-if="hasRole('ADMIN')">控制台
                   </el-dropdown-item>
                   <el-dropdown-item :icon="Setting" @click="openConfigDialog(scope.row)">配置</el-dropdown-item>
-                  <el-dropdown-item :icon="Document" @click="openPluginConfigDialog(scope.row)">插件配置
+                  <el-dropdown-item :icon="Document" @click="openPluginConfigDialog(scope.row)" v-if="hasRole('HELPER')">插件配置
                   </el-dropdown-item>
                   <el-dropdown-item :icon="FolderAdd" @click="handleCreateArchive(scope.row)"
-                                    :disabled="scope.row.server_type === 'velocity'">永久备份
+                                    :disabled="scope.row.server_type === 'velocity'" v-if="hasRole('HELPER')">永久备份
                   </el-dropdown-item>
                   <el-dropdown-item :icon="DocumentCopy" @click="openCopyDialog(scope.row)"
-                                    :disabled="scope.row.status === 'running'">复制服务器
+                                    :disabled="scope.row.status === 'running'" v-if="hasRole('ADMIN')">复制服务器
                   </el-dropdown-item>
                   <el-dropdown-item divided :icon="CircleClose" @click="forceKillServer(scope.row)"
-                                    :disabled="scope.row.status !== 'running' && scope.row.status !== 'pending'">强制关闭
+                                    :disabled="scope.row.status !== 'running' && scope.row.status !== 'pending'" v-if="hasRole('ADMIN')">强制关闭
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
