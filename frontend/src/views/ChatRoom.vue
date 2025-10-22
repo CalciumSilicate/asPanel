@@ -79,7 +79,7 @@
                             <span v-else-if="seg.kind==='reply'" class="cq-reply">{{ seg.label }}</span>
                             <span v-else-if="seg.kind==='share'" class="cq-share">
                               <span class="cq-tag">{{ seg.label }}</span>
-                              <a v-if="seg.url" :href="seg.url" target="_blank" rel="noopener noreferrer">{{ seg.url }}</a>
+                              <a v-if="seg.url" :href="seg.url" target="_blank" rel="noopener noreferrer">{{ seg.displayUrl || seg.url }}</a>
                               <span v-else class="cq-tag is-unsupported">链接缺失</span>
                               <span v-if="seg.title" class="cq-share-title">{{ seg.title }}</span>
                             </span>
@@ -535,18 +535,20 @@ const transformSegments = (segments) => {
       return
     }
     if (type === 'share') {
-      const url = sanitizeCqMediaUrl(data.url ?? data.jumpUrl ?? data.file ?? '')
+      const sanitizedUrl = sanitizeCqMediaUrl(data.url ?? data.jumpUrl ?? data.file ?? '')
       const rawUrl = data.url ?? data.jumpUrl ?? data.file ?? ''
-      const url = rawUrl ? String(rawUrl) : ''
+      const displayUrl = rawUrl ? String(rawUrl) : ''
+      const url = sanitizedUrl || displayUrl
       const rawTitle = data.title ?? data.content ?? ''
       const title = rawTitle ? String(rawTitle) : ''
-      mapped.push({ kind: 'share', label: '[链接]', url, title, raw: seg.raw })
+      mapped.push({ kind: 'share', label: '[链接]', url, title, displayUrl, raw: seg.raw })
       return
     }
     if (type === 'image') {
-      const url = sanitizeCqMediaUrl(data.url ?? data.file ?? '')
+      const sanitizedUrl = sanitizeCqMediaUrl(data.url ?? data.file ?? '')
       const rawUrl = data.url ?? data.file ?? ''
-      const url = rawUrl ? String(rawUrl) : ''
+      const fallbackUrl = rawUrl ? String(rawUrl) : ''
+      const url = sanitizedUrl || fallbackUrl
       mapped.push({ kind: 'image', url, raw: seg.raw })
       return
     }
