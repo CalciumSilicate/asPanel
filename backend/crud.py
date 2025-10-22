@@ -23,7 +23,23 @@ def get_user_by_username(db: Session, username: str) -> Optional[models.User]:
 
 def create_user(db: Session, user: schemas.UserCreate, role: Optional[schemas.Role] = None) -> models.User:
     hashed_password = get_password_hash(user.password)
-    db_user = models.User(username=user.username, hashed_password=hashed_password, role=role)
+    bound_player_id = None
+    # 可选根据玩家名绑定现有玩家
+    try:
+        if getattr(user, 'player_name', None):
+            p = db.query(models.Player).filter(models.Player.player_name == user.player_name).first()
+            if p:
+                bound_player_id = p.id
+    except Exception:
+        bound_player_id = None
+    db_user = models.User(
+        username=user.username,
+        hashed_password=hashed_password,
+        role=role,
+        email=getattr(user, 'email', None),
+        qq=str(getattr(user, 'qq', '') or ''),
+        bound_player_id=bound_player_id,
+    )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)

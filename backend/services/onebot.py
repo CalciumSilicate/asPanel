@@ -242,17 +242,49 @@ async def _send_group_text(qq_group: str, message: str) -> None:
             pass
 
 
-async def _emit_chat_message(group_id: int, nickname: str, message: str) -> None:
+async def _emit_chat_message(group_id: int, nickname: str, message: str, *, sender_qq: Optional[str] = None) -> None:
     if not message:
         return
     with get_db_context() as db:
+        # 解析 QQ 对应的面板用户与头像/绑定玩家
+        panel_user = None
+        ui_name = nickname
+        sender_avatar = None
+        try:
+            if sender_qq:
+                panel_user = db.query(models.User).filter(models.User.qq == str(sender_qq)).first()
+        except Exception:
+            panel_user = None
+        if panel_user:
+            # 绑定玩家名（若有） + 群昵称 作为 Web 展示名
+            mc_name = None
+            try:
+                if getattr(panel_user, 'bound_player_id', None):
+                    p = db.query(models.Player).filter(models.Player.id == panel_user.bound_player_id).first()
+                    if p and p.player_name:
+                        mc_name = p.player_name
+            except Exception:
+                mc_name = None
+            if mc_name:
+                ui_name = f"{mc_name}({nickname})@QQ"
+            else:
+                ui_name = f"{nickname}@QQ"
+            # 头像优先面板头像，否则用绑定玩家的 MC 头像路径（由前端解析相对路径）
+            if getattr(panel_user, 'avatar_url', None):
+                sender_avatar = panel_user.avatar_url
+            elif mc_name:
+                # 留空：前端会 fallback 到 MC 头像接口
+                sender_avatar = None
+        else:
+            ui_name = f"{nickname}@QQ"
         row = models.ChatMessage(
             group_id=group_id,
             level="NORMAL",
             source="qq",
             content=message,
-            sender_user_id=None,
-            sender_username=nickname,
+            sender_user_id=(panel_user.id if panel_user else None),
+            sender_username=ui_name,
+            sender_avatar=sender_avatar,
         )
         row = crud.create_chat_message(db, row)
         out = schemas.ChatMessageOut.model_validate(row)
@@ -262,7 +294,7 @@ async def _emit_chat_message(group_id: int, nickname: str, message: str) -> None
                 created_at = to_local_dt(row.created_at)
         except Exception:
             created_at = getattr(row, "created_at", None)
-        out = out.model_copy(update={"sender_avatar": None, "created_at": created_at})
+        out = out.model_copy(update={"sender_avatar": sender_avatar, "created_at": created_at, "sender_qq": sender_qq})
     await sio.emit("chat_message", out.model_dump(mode="json"))
 
 
@@ -278,13 +310,31 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
     if await _maybe_handle_command(group_id, qq_group, nickname, text):
         return
 
-    await _emit_chat_message(group_id, nickname, text)
+    # QQ 号
+    sender_qq = str(payload.get("user_id") or "") or None
+    await _emit_chat_message(group_id, nickname, text, sender_qq=sender_qq)
 
     if _PLUGIN_BROADCASTER is not None:
+        # 发送到游戏端：若该 QQ 号对应面板用户且绑定了玩家名，则显示为 [QQ] <MCName> message
+        game_user = nickname
+        try:
+            if sender_qq:
+                with get_db_context() as db:
+                    u = db.query(models.User).filter(models.User.qq == str(sender_qq)).first()
+                    if u and getattr(u, 'bound_player_id', None):
+                        p = db.query(models.Player).filter(models.Player.id == u.bound_player_id).first()
+                        if p and p.player_name:
+                            game_user = f"[QQ] <{p.player_name}>"
+                        else:
+                            game_user = f"[QQ] <{nickname}>"
+                    else:
+                        game_user = f"[QQ] <{nickname}>"
+        except Exception:
+            game_user = f"[QQ] <{nickname}>"
         await _PLUGIN_BROADCASTER(
             level="NORMAL",
             group_id=group_id,
-            user=nickname,
+            user=game_user,
             message=text,
             source="qq",
             avatar=None,
@@ -522,4 +572,3 @@ async def _handle_incoming(session: OneBotSession, payload: Dict[str, Any]) -> N
 
 async def startup_sync() -> None:
     await refresh_bindings()
-
