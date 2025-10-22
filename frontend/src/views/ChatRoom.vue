@@ -63,7 +63,7 @@
                 <template v-for="(m, i) in messages" :key="m.id || 'm-'+i">
                   <div class="msg-row" :class="{ compact: isCompact(i), 'is-alert': m.level==='ALERT' }">
                     <div class="avatar-col">
-                      <img v-if="!isCompact(i)" class="avatar" :src="m.avatar || defaultAvatar" :alt="m.display"/>
+                      <el-avatar v-if="!isCompact(i)" class="avatar" :src="m.avatar" :icon="UserFilled"/>
                     </div>
                     <div class="bubble">
                       <div v-if="!isCompact(i)" class="meta">
@@ -133,7 +133,7 @@
               <div class="side-title">在线用户</div>
               <div class="side-list">
                 <div class="side-item" v-for="u in users" :key="u.id || u.username">
-                  <img class="avatar-small" :src="u.avatar_url || defaultAvatar"/>
+                  <img class="avatar-small" :src="u.avatar_url" :icon="UserFilled"/>
                   <span class="uname">{{ u.username }}</span>
                 </div>
               </div>
@@ -148,14 +148,13 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, ArrowDown, Promotion } from '@element-plus/icons-vue'
+import { Search, ArrowDown, Promotion, UserFilled } from '@element-plus/icons-vue'
 import apiClient from '@/api'
 import { io } from 'socket.io-client'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import { settings } from '@/store/settings'
 import { hasRole } from '@/store/user'
 
-const defaultAvatar = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="24" r="14" fill="#bbb"/><rect x="12" y="40" width="40" height="18" rx="9" fill="#bbb"/></svg>'
 
 // 同源连接 WebSocket（开发环境走 Vite 代理 /ws，生产由反代处理）
 const socket = io({ path: '/ws/socket.io' })
@@ -288,10 +287,10 @@ const loadingOlder = ref(false)
 
 const loadHistory = async () => {
   if (!activeGroup.value) return
-  const { data } = await apiClient.get('/api/tools/chat/history', { params: { group_id: activeGroup.value.id, limit: 200, offset: 0 } })
+  const { data } = await apiClient.get('/api/tools/chat/history', { params: { group_id: activeGroup.value.id, limit: 50, offset: 0 } })
   messages.value = (data || []).map(toUIMsg)
   // 初次判断是否还有更多：若正好 200 条，可能还有更多
-  hasMoreOlder.value = (Array.isArray(data) && data.length === 200)
+  hasMoreOlder.value = (Array.isArray(data) && data.length === 50)
   noMoreOlder.value = !hasMoreOlder.value
   scrollToBottom()
 }
@@ -394,7 +393,7 @@ const resolveAvatar = (url) => {
 }
 
 const mcAvatar = (name) => {
-  if (!name) return defaultAvatar;
+  if (!name) return '';
   try { return `/api/users/mc/avatar/${encodeURIComponent(name)}` } catch { return `/api/users/mc/avatar/${name}` }
 }
 const formatTime = (dt) => {
