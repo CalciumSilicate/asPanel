@@ -85,6 +85,10 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str
+    # 新增注册字段：qq 必填，email/player_name 可选
+    qq: str
+    email: Optional[str] = None
+    player_name: Optional[str] = None
 
 
 class UserOut(UserBase):
@@ -669,6 +673,8 @@ class ChatMessageOut(BaseModel):
     sender_user_id: Optional[int] = None
     sender_username: Optional[str] = None
     sender_avatar: Optional[str] = None
+    # 新增：QQ 源的发送者帐号（纯数字字符串）
+    sender_qq: Optional[str] = None
     server_name: Optional[str] = None
     player_name: Optional[str] = None
     created_at: datetime

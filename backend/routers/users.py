@@ -29,6 +29,13 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "禁止注册！")
     if crud.get_user_by_username(db, user.username):
         raise HTTPException(400, "用户名已存在")
+    # QQ 必填且为数字字符串（不强制长度）
+    if not getattr(user, 'qq', None):
+        raise HTTPException(400, "QQ 为必填项")
+    qq_str = str(user.qq).strip()
+    if not qq_str.isdigit():
+        raise HTTPException(400, "QQ 必须为纯数字")
+    # 创建用户；create_user 内部会尝试根据 player_name 绑定玩家
     return crud.create_user(db, user)
 
 
@@ -127,6 +134,77 @@ async def list_users(
         role: str | None = Query(default=None),
 ):
     return crud.list_users_sorted(db, search=search, role=role)
+
+
+@router.get("/users/permissions/check")
+async def check_permissions_config(db: Session = Depends(get_db), actor: models.User = Depends(require_role(Role.ADMIN))):
+    """
+    检查所有服务器的 permission.yml：
+    - 针对角色为 GUEST 或 HELPER/ADMIN/OWNER 的用户，若绑定了玩家且有玩家名，检查对应分组是否包含该玩家名。
+    返回形如：[{ server: 'dir', path: '/abs/.../permission.yml', player: 'Steve', expected: 'helper', actual: 'user' | null | 'ok' }]
+    """
+    import yaml
+    results: list[dict] = []
+    # 角色 -> yml 键映射
+    role_map = {
+        'GUEST': 'guest',
+        'USER': 'user',  # 虽未要求校验 USER，这里保留映射以备扩展
+        'HELPER': 'helper',
+        'ADMIN': 'admin',
+        'OWNER': 'owner',
+    }
+    # 仅校验 GUEST 与 HELPER/ADMIN/OWNER
+    roles_to_check = {'GUEST', 'HELPER', 'ADMIN', 'OWNER'}
+    # 收集玩家映射
+    users = crud.get_all_users(db)
+    bound: list[tuple[str, str]] = []  # (mc_name, expected_bucket)
+    for u in users:
+        try:
+            if u.role not in roles_to_check:
+                continue
+            if not getattr(u, 'bound_player_id', None):
+                continue
+            p = db.query(models.Player).filter(models.Player.id == u.bound_player_id).first()
+            if not p or not p.player_name:
+                continue
+            expected = role_map.get(u.role)
+            if not expected:
+                continue
+            bound.append((p.player_name, expected))
+        except Exception:
+            continue
+    # 遍历服务器
+    servers = crud.get_all_servers(db)
+    for s in servers:
+        try:
+            from pathlib import Path
+            dir_name = Path(s.path).name
+            yml_path = Path(s.path) / 'permission.yml'
+            if not yml_path.exists():
+                results.append({ 'server': dir_name, 'path': str(yml_path), 'error': 'missing_file' })
+                continue
+            try:
+                data = yaml.safe_load(yml_path.read_text(encoding='utf-8')) or {}
+            except Exception:
+                results.append({ 'server': dir_name, 'path': str(yml_path), 'error': 'parse_failed' })
+                continue
+            buckets = { k: set(v or []) for k, v in (data or {}).items() if isinstance(v, list) }
+            # Normalize known buckets
+            for key in ['owner','admin','helper','user','guest']:
+                if key not in buckets:
+                    buckets[key] = set()
+            for mc_name, expected in bound:
+                actual = None
+                for bk in ['owner','admin','helper','user','guest']:
+                    if mc_name in buckets.get(bk, set()):
+                        actual = bk
+                        break
+                if actual == expected:
+                    continue
+                results.append({ 'server': dir_name, 'path': str(yml_path), 'player': mc_name, 'expected': expected, 'actual': actual })
+        except Exception:
+            continue
+    return results
 
 
 async def download_avatar(mc_name_or_uuid: str, file_path: Path) -> bool:

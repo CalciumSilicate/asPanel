@@ -210,17 +210,10 @@ const toUIMsg = (r) => {
     }
   }
   if (r.source === 'qq') {
-    const nickname = r.sender_username || 'QQ'
-    return {
-      id: r.id,
-      content: r.content,
-      display: `${nickname}@QQ`,
-      avatar: mcAvatar(nickname), // 以后实现 QQ头像
-      level: r.level,
-      created_at: r.created_at,
-      key: `qq:${nickname}`,
-      source: 'qq'
-    }
+    const name = r.sender_username || 'QQ'
+    const display = name.includes('@QQ') ? name : `${name}@QQ`
+    const avatar = r.sender_avatar ? resolveAvatar(r.sender_avatar) : mcAvatar(name.replace(/\(.*\)@QQ$/, ''))
+    return { id: r.id, content: r.content, display, avatar, level: r.level, created_at: r.created_at, key: `qq:${display}`, source: 'qq' }
   }
   return {
     id: r.id,

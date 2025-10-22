@@ -18,6 +18,15 @@
         <el-form-item label="确认密码">
           <el-input v-model="form.confirmPassword" type="password" placeholder="请再次输入密码" show-password size="large" :prefix-icon="Lock"></el-input>
         </el-form-item>
+        <el-form-item label="QQ（必填）">
+          <el-input v-model="form.qq" placeholder="请输入 QQ 号（纯数字）" size="large"></el-input>
+        </el-form-item>
+        <el-form-item label="邮箱（可选）">
+          <el-input v-model="form.email" placeholder="请输入邮箱" size="large"></el-input>
+        </el-form-item>
+        <el-form-item label="玩家名（可选，便于绑定 MC 身份）">
+          <el-input v-model="form.player_name" placeholder="绑定已有玩家名（可选）" size="large"></el-input>
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" native-type="submit" style="width: 100%;" :loading="loading" size="large">
             {{ loading ? '注册中...' : '注 册' }}
@@ -47,15 +56,22 @@ const form = reactive({
   username: '',
   password: '',
   confirmPassword: '',
+  qq: '',
+  email: '',
+  player_name: '',
 });
 
 const handleRegister = async () => {
-  if (!form.username || !form.password || !form.confirmPassword) {
-    ElMessage.error('所有字段均为必填项');
+  if (!form.username || !form.password || !form.confirmPassword || !form.qq) {
+    ElMessage.error('请填写用户名、密码与 QQ');
     return;
   }
   if (form.password !== form.confirmPassword) {
     ElMessage.error('两次输入的密码不一致');
+    return;
+  }
+  if (!/^\d+$/.test(form.qq)) {
+    ElMessage.error('QQ 必须为纯数字');
     return;
   }
 
@@ -64,6 +80,9 @@ const handleRegister = async () => {
     await apiClient.post('/api/users/register', {
       username: form.username,
       password: form.password,
+      qq: form.qq,
+      email: form.email || undefined,
+      player_name: form.player_name || undefined,
     });
     ElMessage.success('注册成功！将跳转至登录页。');
     router.push('/login');
