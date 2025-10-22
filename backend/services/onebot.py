@@ -19,8 +19,163 @@ from backend.dependencies import mcdr_manager
 
 router = APIRouter()
 
-# Regex to strip CQ codes such as [CQ:at,...]
+# Regex helpers for CQ codes such as [CQ:at,...]
 _CQ_CODE_RE = re.compile(r"\[CQ:[^\]]*\]")
+
+
+def _cq_unescape(text: str) -> str:
+    if not text:
+        return ""
+    return (
+        text.replace("&amp;", "&")
+        .replace("&#91;", "[")
+        .replace("&#93;", "]")
+        .replace("&#44;", ",")
+    )
+
+
+def _cq_escape_text(text: str) -> str:
+    if not text:
+        return ""
+    return (
+        text.replace("&", "&amp;")
+        .replace("[", "&#91;")
+        .replace("]", "&#93;")
+    )
+
+
+def _cq_escape_value(text: str) -> str:
+    if not text:
+        return ""
+    return (
+        _cq_escape_text(text)
+        .replace(",", "&#44;")
+    )
+
+
+@dataclass
+class _CQSegment:
+    type: str
+    data: Dict[str, str]
+    raw: Optional[str] = None
+
+
+def _parse_cq_code(raw: str) -> _CQSegment:
+    inner = raw[4:-1]
+    type_name, _, rest = inner.partition(",")
+    data: Dict[str, str] = {}
+    if rest:
+        for part in rest.split(","):
+            if not part:
+                continue
+            key, _, value = part.partition("=")
+            data[key] = _cq_unescape(value)
+    return _CQSegment(type=type_name, data=data, raw=raw)
+
+
+def _build_cq_code(segment: _CQSegment) -> str:
+    if segment.type == "text":
+        return segment.data.get("text", "")
+    params = []
+    for key, value in segment.data.items():
+        if value is None:
+            continue
+        params.append(f"{key}={_cq_escape_value(str(value))}")
+    joined = ",".join(params)
+    return f"[CQ:{segment.type}{(',' + joined) if joined else ''}]"
+
+
+def _parse_message_segments(message: Any) -> List[_CQSegment]:
+    if isinstance(message, str):
+        segments: List[_CQSegment] = []
+        last = 0
+        for match in _CQ_CODE_RE.finditer(message):
+            if match.start() > last:
+                text_part = message[last:match.start()]
+                if text_part:
+                    segments.append(
+                        _CQSegment(type="text", data={"text": _cq_unescape(text_part)})
+                    )
+            segments.append(_parse_cq_code(match.group(0)))
+            last = match.end()
+        if last < len(message):
+            tail = message[last:]
+            if tail:
+                segments.append(
+                    _CQSegment(type="text", data={"text": _cq_unescape(tail)})
+                )
+        return segments
+    if isinstance(message, list):
+        segments = []
+        for seg in message:
+            if isinstance(seg, dict):
+                seg_type = str(seg.get("type") or "text")
+                raw_data = seg.get("data") or {}
+                data = {str(k): str(v) for k, v in raw_data.items() if v is not None}
+                if seg_type == "text":
+                    segments.append(_CQSegment(type="text", data={"text": data.get("text", "")}))
+                else:
+                    segments.append(
+                        _CQSegment(
+                            type=seg_type,
+                            data=data,
+                            raw=_build_cq_code(_CQSegment(type=seg_type, data=data)),
+                        )
+                    )
+            elif seg is not None:
+                segments.append(_CQSegment(type="text", data={"text": str(seg)}))
+        return segments
+    if message:
+        return [_CQSegment(type="text", data={"text": str(message)})]
+    return []
+
+
+def _segments_to_cq_string(segments: List[_CQSegment]) -> str:
+    parts: List[str] = []
+    for seg in segments:
+        if seg.type == "text":
+            parts.append(seg.data.get("text", ""))
+        else:
+            parts.append(seg.raw or _build_cq_code(seg))
+    return "".join(parts)
+
+
+def _segments_to_plain_text(segments: List[_CQSegment]) -> str:
+    parts: List[str] = []
+    for seg in segments:
+        if seg.type == "text":
+            parts.append(seg.data.get("text", ""))
+        elif seg.type == "face":
+            parts.append("[表情]")
+        elif seg.type == "record":
+            parts.append("[语音]")
+        elif seg.type == "video":
+            parts.append("[短视频]")
+        elif seg.type == "at":
+            target = seg.data.get("text") or seg.data.get("qq") or ""
+            if str(target).lower() == "all":
+                parts.append("@全体成员")
+            elif target:
+                parts.append(f"@{target}")
+            else:
+                parts.append("@")
+        elif seg.type in {"rps", "dice", "shake", "anonymous", "contact", "location", "music", "redbag", "poke", "gift", "cardimage", "tts"}:
+            parts.append(f"[{seg.type}]")
+        elif seg.type == "share":
+            parts.append("[链接]")
+        elif seg.type == "image":
+            parts.append("[图片]")
+        elif seg.type == "reply":
+            parts.append("[回复]")
+        elif seg.type == "forward":
+            parts.append("[合并转发]")
+        elif seg.type == "xml":
+            parts.append("[XML消息]")
+        elif seg.type == "json":
+            parts.append("[JSON消息]")
+        else:
+            parts.append(f"[{seg.type}]")
+    return "".join(parts).strip()
 
 
 @dataclass(eq=False)
@@ -208,21 +363,6 @@ async def refresh_bindings() -> None:
             pass
 
 
-def _extract_text(message: Any) -> str:
-    if isinstance(message, str):
-        text = message
-    elif isinstance(message, list):
-        parts: List[str] = []
-        for seg in message:
-            if isinstance(seg, dict) and seg.get("type") == "text":
-                parts.append(str(seg.get("data", {}).get("text", "")))
-        text = "".join(parts)
-    else:
-        text = ""
-    text = _CQ_CODE_RE.sub("", text)
-    return text.strip()
-
-
 async def _send_group_text(qq_group: str, message: str) -> None:
     if not message or not qq_group:
         return
@@ -301,17 +441,21 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
     nickname = None
     sender = payload.get("sender") or {}
     nickname = sender.get("card") or sender.get("nickname") or str(payload.get("user_id") or "QQ")
-    text = _extract_text(payload.get("message"))
-    if not text:
+    segments = _parse_message_segments(payload.get("message"))
+    if not segments:
         return
+    raw_message = _segments_to_cq_string(segments)
+    if not raw_message:
+        return
+    plain_text = _segments_to_plain_text(segments)
 
     # 命令检测
-    if await _maybe_handle_command(group_id, qq_group, nickname, text):
+    if await _maybe_handle_command(group_id, qq_group, nickname, plain_text):
         return
 
     # QQ 号
     sender_qq = str(payload.get("user_id") or "") or None
-    await _emit_chat_message(group_id, nickname, text, sender_qq=sender_qq)
+    await _emit_chat_message(group_id, nickname, raw_message, sender_qq=sender_qq)
 
     if _PLUGIN_BROADCASTER is not None:
         # 发送到游戏端：若该 QQ 号对应面板用户且绑定了玩家名，则显示为 [QQ] <MCName> message
@@ -334,7 +478,7 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
             level="NORMAL",
             group_id=group_id,
             user=game_user,
-            message=text,
+            message=raw_message,
             source="qq",
             avatar=None,
         )
