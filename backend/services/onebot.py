@@ -284,7 +284,6 @@ async def _emit_chat_message(group_id: int, nickname: str, message: str, *, send
             content=message,
             sender_user_id=(panel_user.id if panel_user else None),
             sender_username=ui_name,
-            sender_avatar=sender_avatar,
         )
         row = crud.create_chat_message(db, row)
         out = schemas.ChatMessageOut.model_validate(row)
