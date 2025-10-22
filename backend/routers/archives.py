@@ -43,7 +43,7 @@ async def create_archive_from_server(
         server_id: int,
         background_tasks: BackgroundTasks,
         db: Session = Depends(get_db),
-        _user=Depends(require_role(Role.ADMIN)),
+        _user=Depends(require_role(Role.HELPER)),
 ):
     db_server = crud.get_server_by_id(db, server_id)
     if not db_server:

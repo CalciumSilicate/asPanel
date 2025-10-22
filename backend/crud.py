@@ -44,6 +44,114 @@ def get_all_users(db: Session) -> List[models.User]:
     return db.query(models.User).all()
 
 
+def list_users_sorted(db: Session, *, search: Optional[str] = None, role: Optional[str] = None) -> list[dict]:
+    """
+    返回按 id 升序排序的用户列表，并展开绑定玩家的 name/uuid。
+    输出为字典，便于填充 mc_uuid/mc_name。
+    """
+    q = db.query(models.User)
+    if role:
+        q = q.filter(models.User.role == str(role))
+    users = q.order_by(models.User.id.asc()).all()
+    rows: list[dict] = []
+    # 预拉取需要的 Player 映射
+    pid_set = {u.bound_player_id for u in users if getattr(u, 'bound_player_id', None)}
+    pmap: dict[int, models.Player] = {}
+    if pid_set:
+        pmap = {p.id: p for p in db.query(models.Player).filter(models.Player.id.in_(pid_set)).all()}
+
+    for u in users:
+        row = {
+            'id': u.id,
+            'username': u.username,
+            'avatar_url': u.avatar_url,
+            'role': u.role,
+            'email': getattr(u, 'email', None),
+            'qq': getattr(u, 'qq', None),
+            'bound_player_id': getattr(u, 'bound_player_id', None),
+            'mc_uuid': None,
+            'mc_name': None,
+        }
+        bp = pmap.get(getattr(u, 'bound_player_id', None)) if getattr(u, 'bound_player_id', None) else None
+        if bp is not None:
+            row['mc_uuid'] = bp.uuid
+            row['mc_name'] = bp.player_name
+        rows.append(row)
+    # 前端也会做 client-side 搜索，但这里提供基础过滤
+    if search:
+        sq = (search or '').strip().lower()
+        if sq:
+            def _hit(r: dict) -> bool:
+                return any((str(r.get(k) or '').lower().find(sq) >= 0) for k in ['username', 'email', 'qq', 'mc_uuid', 'mc_name'])
+            rows = [r for r in rows if _hit(r)]
+    return rows
+
+
+def update_user_fields(db: Session, user_id: int, payload: schemas.UserUpdate) -> models.User | None:
+    u = get_user_by_id(db, user_id)
+    if not u:
+        return None
+    # 用户名：唯一性校验
+    if payload.username is not None:
+        other = get_user_by_username(db, payload.username)
+        if other and other.id != u.id:
+            raise ValueError('用户名已存在')
+        u.username = payload.username
+    if payload.email is not None:
+        u.email = payload.email
+    if payload.qq is not None:
+        u.qq = payload.qq
+    if payload.bound_player_id is not None:
+        # 允许传入 None 解除绑定；若非 None 则校验是否存在该玩家
+        if payload.bound_player_id == 0:
+            u.bound_player_id = None
+        else:
+            bp = db.query(models.Player).filter(models.Player.id == payload.bound_player_id).first()
+            if not bp:
+                raise ValueError('绑定的玩家不存在')
+            u.bound_player_id = payload.bound_player_id
+    if payload.role is not None:
+        u.role = payload.role
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u
+
+
+def count_owners(db: Session) -> int:
+    return db.query(models.User).filter(models.User.role == schemas.Role.OWNER.value).count()
+
+
+def delete_user_by_id(db: Session, user_id: int) -> Optional[models.User]:
+    u = get_user_by_id(db, user_id)
+    if not u:
+        return None
+    db.delete(u)
+    db.commit()
+    return u
+
+
+def delete_users_by_ids(db: Session, ids: list[int]) -> list[int]:
+    if not ids:
+        return []
+    rows = db.query(models.User).filter(models.User.id.in_(ids)).all()
+    for r in rows:
+        db.delete(r)
+    db.commit()
+    return [r.id for r in rows]
+
+
+def reset_user_password(db: Session, user_id: int, new_password: str) -> Optional[models.User]:
+    u = get_user_by_id(db, user_id)
+    if not u:
+        return None
+    u.hashed_password = get_password_hash(new_password)
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u
+
+
 # --- Chat CRUD ---
 def create_chat_message(db: Session, msg: models.ChatMessage) -> models.ChatMessage:
     db.add(msg)

@@ -123,6 +123,8 @@ import apiClient from '@/api';
 
 const props = defineProps({
   visible: Boolean,
+  // 可选：为指定用户（管理员视角）更换头像；不传则默认修改当前用户
+  targetUserId: { type: [Number, null], default: null },
 });
 const emit = defineEmits(['update:visible', 'success']);
 
@@ -164,7 +166,10 @@ const uploadCroppedImage = () => {
     formData.append('file', data, 'avatar.png');
 
     try {
-      await apiClient.post('/api/users/me/avatar', formData, {
+      const url = (props.targetUserId || props.targetUserId === 0)
+        ? `/api/users/${props.targetUserId}/avatar`
+        : '/api/users/me/avatar'
+      await apiClient.post(url, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },

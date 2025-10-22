@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -11,10 +11,11 @@ import httpx
 from backend import crud, models, schemas, security
 from backend.logger import logger
 from backend.database import get_db
-from backend.auth import get_current_user
+from backend.auth import get_current_user, require_role
 from backend.core.config import AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, ALLOW_REGISTER, AVATAR_MC_PATH, \
     UUID_HYPHEN_PATTERN
 from backend.core.utils import get_str_md5, is_valid_mc_name
+from backend.schemas import Role, UserUpdate
 
 router = APIRouter(
     prefix="/api",
@@ -71,9 +72,61 @@ async def upload_avatar(
     return updated_user
 
 
+def _assert_role_change_allowed(db: Session, actor: models.User, target: models.User, new_role: Role):
+    actor_role = Role(actor.role)
+    target_role = Role(target.role)
+    if actor_role == Role.ADMIN:
+        # 仅可在 GUEST/USER/HELPER 间调整；且不能作用于 ADMIN/OWNER
+        if new_role not in (Role.GUEST, Role.USER, Role.HELPER):
+            raise HTTPException(403, "ADMIN 仅可调整至 GUEST/USER/HELPER")
+        if target_role in (Role.ADMIN, Role.OWNER):
+            raise HTTPException(403, "ADMIN 无法调整 ADMIN/OWNER 的权限")
+    elif actor_role == Role.OWNER:
+        # OWNER 可调整到 ADMIN 及以下；设为 OWNER 需全局唯一
+        if new_role == Role.OWNER:
+            owners = crud.count_owners(db)
+            if owners >= 1 and target_role != Role.OWNER:
+                raise HTTPException(400, "OWNER 最多 1 个")
+    else:
+        raise HTTPException(403, "无权调整权限")
+
+    # 保底：不得将唯一 OWNER 降级
+    if target_role == Role.OWNER and new_role != Role.OWNER:
+        if crud.count_owners(db) <= 1:
+            raise HTTPException(400, "必须至少保留 1 个 OWNER，无法降级唯一 OWNER")
+
+
+@router.patch("/users/{user_id}", response_model=schemas.UserOut)
+async def update_user(
+        user_id: int,
+        payload: UserUpdate,
+        db: Session = Depends(get_db),
+        actor: models.User = Depends(require_role(Role.ADMIN)),
+):
+    u = crud.get_user_by_id(db, user_id)
+    if not u:
+        raise HTTPException(404, "用户不存在")
+    if payload.role is not None:
+        _assert_role_change_allowed(db, actor, u, payload.role)
+    try:
+        u = crud.update_user_fields(db, user_id, payload)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    # 展开 mc 信息
+    for r in crud.list_users_sorted(db):
+        if r['id'] == u.id:
+            return r
+    return u
+
+
 @router.get("/users", response_model=list[schemas.UserOut])
-async def list_users(db: Session = Depends(get_db)):
-    return crud.get_all_users(db)
+async def list_users(
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(require_role(Role.ADMIN)),
+        search: str | None = Query(default=None),
+        role: str | None = Query(default=None),
+):
+    return crud.list_users_sorted(db, search=search, role=role)
 
 
 async def download_avatar(mc_name_or_uuid: str, file_path: Path) -> bool:
@@ -128,3 +181,90 @@ async def mc_avatar(mc_name_or_uuid: str):
         return await mc_avatar("nigger")
 
     return FileResponse(file_path, media_type="image/png")
+
+
+@router.post("/users/{user_id}/avatar", response_model=schemas.UserOut)
+async def upload_avatar_for_user(
+        user_id: int,
+        file: UploadFile = File(...),
+        actor: models.User = Depends(require_role(Role.ADMIN)),
+        db: Session = Depends(get_db)
+):
+    if file.content_type not in ["image/jpeg", "image/png"]:
+        raise HTTPException(status_code=400, detail="仅支持JPG、PNG格式的图片！")
+    file_extension = file.filename.split(".")[-1]
+    filename = f"{uuid.uuid4().hex}.{file_extension}"
+    file_path = AVATAR_STORAGE_PATH / filename
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文件无法保存: {e}")
+    avatar_url = f"{AVATAR_URL_PREFIX}{filename}"
+    target_user = crud.get_user_by_id(db, user_id)
+    if not target_user:
+        raise HTTPException(404, "用户不存在")
+    legacy_avatar = target_user.avatar_url
+    target_user.avatar_url = avatar_url
+    db.add(target_user)
+    db.commit()
+    db.refresh(target_user)
+    try:
+        if legacy_avatar:
+            os.remove(AVATAR_STORAGE_PATH / legacy_avatar.replace(AVATAR_URL_PREFIX, ""))
+    except Exception:
+        pass
+    for r in crud.list_users_sorted(db):
+        if r['id'] == target_user.id:
+            return r
+    return target_user
+
+
+@router.post("/users/{user_id}/reset-password")
+async def reset_password(
+        user_id: int,
+        db: Session = Depends(get_db),
+        actor: models.User = Depends(require_role(Role.ADMIN)),
+):
+    u = crud.get_user_by_id(db, user_id)
+    if not u:
+        raise HTTPException(404, "用户不存在")
+    # 允许重置密码；删除/降级在其它接口限制
+    new_password = uuid.uuid4().hex[:12]
+    crud.reset_user_password(db, user_id, new_password)
+    return {"id": user_id, "new_password": new_password}
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+        user_id: int,
+        db: Session = Depends(get_db),
+        actor: models.User = Depends(require_role(Role.ADMIN)),
+):
+    u = crud.get_user_by_id(db, user_id)
+    if not u:
+        raise HTTPException(404, "用户不存在")
+    if u.role == Role.OWNER.value and crud.count_owners(db) <= 1:
+        raise HTTPException(400, "系统必须至少保留 1 个 OWNER，无法删除唯一的 OWNER")
+    crud.delete_user_by_id(db, user_id)
+    return {"id": user_id, "deleted": True}
+
+
+@router.delete("/users")
+async def batch_delete_users(
+        payload: schemas.BatchActionPayload,
+        db: Session = Depends(get_db),
+        actor: models.User = Depends(require_role(Role.ADMIN)),
+):
+    ids = list(payload.ids or [])
+    # 保护唯一 OWNER
+    if ids:
+        to_keep = []
+        for uid in ids:
+            u = crud.get_user_by_id(db, uid)
+            if u and u.role == Role.OWNER.value and crud.count_owners(db) <= 1:
+                continue
+            to_keep.append(uid)
+        ids = to_keep
+    deleted = crud.delete_users_by_ids(db, ids)
+    return {"deleted": deleted}

@@ -9,7 +9,7 @@
               <span class="text-base font-medium">聊天室</span>
             </div>
             <div class="flex items-center gap-2">
-              <el-button type="danger" size="small" @click="sendAlert">全局通知</el-button>
+              <el-button type="danger" size="small" @click="sendAlert" v-if="hasRole('ADMIN')">全局通知</el-button>
             </div>
           </div>
         </template>
@@ -123,6 +123,7 @@ import apiClient from '@/api'
 import { io } from 'socket.io-client'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import { settings } from '@/store/settings'
+import { hasRole } from '@/store/user'
 
 const defaultAvatar = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="24" r="14" fill="#bbb"/><rect x="12" y="40" width="40" height="18" rx="9" fill="#bbb"/></svg>'
 

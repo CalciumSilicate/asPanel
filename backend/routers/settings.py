@@ -14,7 +14,7 @@ router = APIRouter(
 
 
 @router.get("", response_model=schemas.SystemSettings)
-async def get_settings(db: Session = Depends(get_db), _user: models.User = Depends(require_role(Role.ADMIN))):
+async def get_settings(db: Session = Depends(get_db), _user: models.User = Depends(require_role(Role.GUEST))):
     """获取系统级设置。
 
     说明：

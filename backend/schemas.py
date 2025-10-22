@@ -91,9 +91,23 @@ class UserOut(UserBase):
     id: int
     avatar_url: Optional[str] = None
     role: Role
+    # 新增：联系与绑定信息
+    email: Optional[str] = None
+    qq: Optional[str] = None
+    bound_player_id: Optional[int] = None
+    mc_uuid: Optional[str] = None
+    mc_name: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+    qq: Optional[str] = None
+    role: Optional[Role] = None
+    bound_player_id: Optional[int] = None
 
 
 # --- Token Schemas ---

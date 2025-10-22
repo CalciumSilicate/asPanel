@@ -7,7 +7,7 @@
             <span>服务器列表</span>
           </div>
           <div class="header-right">
-            <el-button-group>
+            <el-button-group v-if="hasRole('ADMIN')">
               <el-button type="primary" :icon="Plus" @click="openCreateDialog">新建服务器</el-button>
               <el-button type="success" :icon="FolderChecked" @click="openImportDialog">导入服务器</el-button>
               <el-dropdown
@@ -16,7 +16,7 @@
                   :disabled="selectedServers.length === 0"
                   class="batch-dropdown"
               >
-                <el-button type="primary" class="batch-action-btn" :disabled="selectedServers.length === 0">
+                <el-button type="primary" class="batch-action-btn" :disabled="selectedServers.length === 0" >
                   批量操作 (已选 {{ selectedServers.length }} 项)
                   <el-icon class="el-icon--right">
                     <arrow-down/>
@@ -84,9 +84,9 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="port" label="端口" width="100" align="center" sortable/>
-        <el-table-column prop="rcon_port" label="RCON端口" width="120" align="center"/>
-        <el-table-column prop="rcon_password" label="RCON密码" min-width="150" align="center">
+        <el-table-column prop="port" label="局域网端口" width="120" align="center" sortable/>
+        <el-table-column prop="rcon_port" label="RCON端口" width="120" align="center" />
+        <el-table-column prop="rcon_password" label="RCON密码" min-width="150" align="center"  v-if="hasRole('ADMIN')">
           <template #default="scope">
             <div
                 v-if="scope.row.rcon_port !== '未启用RCON' && scope.row.rcon_password !== 'N/A' && scope.row.rcon_password !== '不适用' && scope.row.rcon_password !== '未设置'">
@@ -101,7 +101,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="450" align="center" fixed="right">
+        <el-table-column label="操作" width="450" align="center" fixed="right"  v-if="hasRole('ADMIN')">
           <template #default="scope">
             <el-button-group>
               <el-button size="small" type="primary" :icon="VideoPlay" @click="startServer(scope.row)"
@@ -142,7 +142,7 @@
             </el-dropdown>
 
             <el-button style="margin-left: 10px;" size="small" type="danger" @click="handleDeleteServer(scope.row)"
-                       :icon="Delete" plain>删除
+                       :icon="Delete" plain v-if="hasRole('ADMIN')">删除
             </el-button>
           </template>
         </el-table-column>
@@ -1115,6 +1115,7 @@ import {ElMessage, ElMessageBox, ElLoading, ElNotification} from 'element-plus';
 import ConfigEditor from '@/components/ConfigEditor.vue';
 import draggable from 'vuedraggable';
 import { settings } from '@/store/settings'
+import { hasRole } from '@/store/user';
 
 const router = useRouter();
 const serverList = ref([]);

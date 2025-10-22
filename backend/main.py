@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 import socketio
 
 from backend import models
-from backend.database import engine
+from backend.database import engine, ensure_user_columns
 from backend.core.config import (
     ALLOWED_ORIGINS, AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, ARCHIVE_STORAGE_PATH, ARCHIVE_URL_PREFIX
 )
@@ -36,6 +36,11 @@ from backend.logger import logger
 import sys
 
 models.Base.metadata.create_all(bind=engine)
+# 轻量数据库迁移：为 users 表补充新增列
+try:
+    ensure_user_columns()
+except Exception:
+    pass
 app = FastAPI(title="AS Panel API")
 
 

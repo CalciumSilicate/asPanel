@@ -18,6 +18,11 @@ class User(Base):
     hashed_password = Column(String)
     role = Column(String, nullable=False, default=DEFAULT_USER_ROLE)
     avatar_url = Column(String, nullable=True)
+    # 新增：联系与绑定信息（为用户管理视图提供数据）
+    email = Column(String, nullable=True)
+    qq = Column(String, nullable=True)
+    # 绑定的 MC 玩家（存 players.id），为兼容旧库不强制外键约束
+    bound_player_id = Column(Integer, nullable=True)
 
 
 class Server(Base):
