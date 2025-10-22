@@ -71,7 +71,37 @@
                         <span class="time">{{ formatTime(m.created_at) }}</span>
                         <el-tag v-if="m.level==='ALERT'" size="small" type="danger">ALERT</el-tag>
                       </div>
-                      <div class="content" :class="[{ alert: m.level==='ALERT' }]">{{ m.content }}</div>
+                      <div class="content" :class="[{ alert: m.level==='ALERT' }]">
+                        <template v-if="m.segments && m.segments.length">
+                          <template v-for="(seg, idx) in m.segments" :key="idx">
+                            <span v-if="seg.kind==='text'" class="cq-text">{{ seg.text }}</span>
+                            <span v-else-if="seg.kind==='tag'" class="cq-tag" :class="{ 'is-unsupported': seg.unsupported }">{{ seg.label }}</span>
+                            <span v-else-if="seg.kind==='reply'" class="cq-reply">{{ seg.label }}</span>
+                            <div v-else-if="seg.kind==='record'" class="cq-record-bubble">
+                              <span class="cq-tag">{{ seg.label }}</span>
+                              <audio v-if="seg.url" class="cq-audio" :src="seg.url" controls preload="none"></audio>
+                              <span v-else class="cq-tag is-unsupported">音频缺失</span>
+                            </div>
+                            <span v-else-if="seg.kind==='share'" class="cq-share">
+                              <span class="cq-tag">{{ seg.label }}</span>
+                              <a v-if="seg.url" :href="seg.url" target="_blank" rel="noopener">{{ seg.url }}</a>
+                              <span v-else class="cq-tag is-unsupported">链接缺失</span>
+                              <span v-if="seg.title" class="cq-share-title">{{ seg.title }}</span>
+                            </span>
+                            <a v-else-if="seg.kind==='image' && seg.url" class="cq-image-link" :href="seg.url" target="_blank" rel="noopener">
+                              <img class="cq-image" :src="seg.url" alt="QQ图片" loading="lazy" />
+                            </a>
+                            <span v-else-if="seg.kind==='image'" class="cq-tag is-unsupported">[图片缺失]</span>
+                            <details v-else-if="seg.kind==='data'" class="cq-data" :title="seg.content">
+                              <summary>{{ seg.label }}</summary>
+                              <pre>{{ seg.content }}</pre>
+                            </details>
+                          </template>
+                        </template>
+                        <template v-else>
+                          {{ m.content }}
+                        </template>
+                      </div>
                     </div>
                   </div>
                 </template>
@@ -197,33 +227,37 @@ const loadMe = async () => {
 }
 
 const toUIMsg = (r) => {
+  const rawContent = normalizeContent(r.content)
+  const segments = buildMessageSegments(rawContent)
   if (r.source === 'game') {
     return {
       id: r.id,
-      content: r.content,
+      content: rawContent,
       display: `${r.player_name}@${r.server_name}`,
       avatar: mcAvatar(r.player_name),
       level: r.level,
       created_at: r.created_at,
       key: `${r.player_name}@${r.server_name}`,
-      source: 'game'
+      source: 'game',
+      segments
     }
   }
   if (r.source === 'qq') {
     const name = r.sender_username || 'QQ'
     const display = name.includes('@QQ') ? name : `${name}@QQ`
     const avatar = r.sender_avatar ? resolveAvatar(r.sender_avatar) : mcAvatar(name.replace(/\(.*\)@QQ$/, ''))
-    return { id: r.id, content: r.content, display, avatar, level: r.level, created_at: r.created_at, key: `qq:${display}`, source: 'qq' }
+    return { id: r.id, content: rawContent, display, avatar, level: r.level, created_at: r.created_at, key: `qq:${display}`, source: 'qq', segments }
   }
   return {
     id: r.id,
-    content: r.content,
+    content: rawContent,
     display: `${r.sender_username}@AS-Panel` ,
     avatar: resolveAvatar(r.sender_avatar),
     level: r.level,
     created_at: r.created_at,
     key: `web:${r.sender_username}`,
-    source: r.source || 'web'
+    source: r.source || 'web',
+    segments
   }
 }
 
@@ -369,6 +403,162 @@ const formatTime = (dt) => {
     return d.toLocaleString('zh-CN', { timeZone: settings.timezone || 'Asia/Shanghai' })
   } catch { return '' }
 }
+
+const normalizeContent = (value) => {
+  if (value === null || value === undefined) return ''
+  return typeof value === 'string' ? value : String(value)
+}
+
+const CQ_REGEX = /\[CQ:([^\],]+)((?:,[^\]]+)*)\]/g
+
+const cqUnescape = (text) => {
+  if (!text) return ''
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&#91;/g, '[')
+    .replace(/&#93;/g, ']')
+    .replace(/&#44;/g, ',')
+}
+
+const parseCQSegments = (content) => {
+  const text = typeof content === 'string' ? content : (content !== null && content !== undefined ? String(content) : '')
+  if (!text) return []
+  const result = []
+  let lastIndex = 0
+  CQ_REGEX.lastIndex = 0
+  let match
+  while ((match = CQ_REGEX.exec(text)) !== null) {
+    const index = match.index
+    if (index > lastIndex) {
+      const piece = text.slice(lastIndex, index)
+      if (piece) result.push({ type: 'text', text: cqUnescape(piece) })
+    }
+    const type = match[1] || ''
+    const paramsRaw = match[2] || ''
+    const data = {}
+    if (paramsRaw) {
+      const params = paramsRaw.slice(1).split(',')
+      params.forEach(param => {
+        if (!param) return
+        const eq = param.indexOf('=')
+        if (eq === -1) {
+          data[param] = ''
+        } else {
+          const key = param.slice(0, eq)
+          const value = param.slice(eq + 1)
+          data[key] = cqUnescape(value)
+        }
+      })
+    }
+    result.push({ type, data, raw: match[0] })
+    lastIndex = index + match[0].length
+  }
+  if (lastIndex < text.length) {
+    const tail = text.slice(lastIndex)
+    if (tail) result.push({ type: 'text', text: cqUnescape(tail) })
+  }
+  return result
+}
+
+const unsupportedLabels = {
+  rps: '[猜拳]',
+  dice: '[骰子]',
+  shake: '[抖一抖]',
+  anonymous: '[匿名消息]',
+  contact: '[名片]',
+  location: '[位置]',
+  music: '[音乐]',
+  redbag: '[红包]',
+  poke: '[戳一戳]',
+  gift: '[礼物]',
+  cardimage: '[卡片图片]',
+  tts: '[语音合成]'
+}
+
+const transformSegments = (segments) => {
+  const mapped = []
+  segments.forEach(seg => {
+    const type = seg.type
+    if (type === 'text') {
+      const rawText = seg.text ?? ''
+      const text = typeof rawText === 'string' ? rawText : String(rawText)
+      mapped.push({ kind: 'text', text })
+      return
+    }
+    const data = seg.data || {}
+    if (type === 'face') {
+      mapped.push({ kind: 'tag', label: '[QQ表情]', raw: seg.raw })
+      return
+    }
+    if (type === 'record') {
+      const rawUrl = data.url ?? data.file ?? ''
+      const url = rawUrl ? String(rawUrl) : ''
+      mapped.push({ kind: 'record', label: '[语音]', url, raw: seg.raw })
+      return
+    }
+    if (type === 'video') {
+      mapped.push({ kind: 'tag', label: '[短视频]', unsupported: true, raw: seg.raw })
+      return
+    }
+    if (type === 'at') {
+      const targetRaw = data.qq || data.text || ''
+      const target = typeof targetRaw === 'string' ? targetRaw : String(targetRaw)
+      if (target.toLowerCase && target.toLowerCase() === 'all') {
+        mapped.push({ kind: 'text', text: '@全体成员' })
+      } else if (target) {
+        mapped.push({ kind: 'text', text: `@${target}` })
+      } else {
+        mapped.push({ kind: 'text', text: '@' })
+      }
+      return
+    }
+    if (type === 'share') {
+      const rawUrl = data.url ?? data.jumpUrl ?? data.file ?? ''
+      const url = rawUrl ? String(rawUrl) : ''
+      const rawTitle = data.title ?? data.content ?? ''
+      const title = rawTitle ? String(rawTitle) : ''
+      mapped.push({ kind: 'share', label: '[链接]', url, title, raw: seg.raw })
+      return
+    }
+    if (type === 'image') {
+      const rawUrl = data.url ?? data.file ?? ''
+      const url = rawUrl ? String(rawUrl) : ''
+      mapped.push({ kind: 'image', url, raw: seg.raw })
+      return
+    }
+    if (type === 'reply') {
+      mapped.push({ kind: 'reply', label: '(回复)', raw: seg.raw })
+      return
+    }
+    if (type === 'forward') {
+      mapped.push({ kind: 'tag', label: '[合并转发]', raw: seg.raw })
+      return
+    }
+    if (type === 'xml' || type === 'json') {
+      const rawDetail = data.data ?? ''
+      const content = rawDetail ? String(rawDetail) : ''
+      mapped.push({ kind: 'data', label: type === 'json' ? 'JSON消息' : 'XML消息', content, raw: seg.raw })
+      return
+    }
+    const label = unsupportedLabels[type]
+    if (label) {
+      mapped.push({ kind: 'tag', label, unsupported: true, raw: seg.raw })
+      return
+    }
+    mapped.push({ kind: 'tag', label: `[${type}]`, unsupported: true, raw: seg.raw })
+  })
+  return mapped
+}
+
+const buildMessageSegments = (content) => {
+  const parsed = parseCQSegments(content)
+  const mapped = transformSegments(parsed)
+  if (mapped.length === 0) {
+    const text = normalizeContent(content)
+    return text ? [{ kind: 'text', text }] : []
+  }
+  return mapped
+}
 </script>
 
 <style scoped>
@@ -435,6 +625,21 @@ const formatTime = (dt) => {
 .name { font-weight: 600; }
 .content { white-space: pre-wrap; word-break: break-word; padding: 1px 0; font-size: 13px; line-height: 1.35; }
 .content.alert { color: #b71c1c; font-weight: 700; background: #ffe6e6; border: 1px solid #ffb3b3; border-radius: 6px; padding: 6px 8px; display: inline-block; }
+.cq-text { white-space: pre-wrap; }
+.cq-tag { display: inline-flex; align-items: center; padding: 0 4px; background: #f5f7fa; border-radius: 4px; margin: 0 4px 4px 0; font-size: 12px; color: #606266; }
+.cq-tag.is-unsupported { background: #fef0f0; color: #d04a4a; }
+.cq-reply { display: inline-block; margin: 0 6px 4px 0; color: #909399; }
+.cq-record-bubble { display: inline-flex; align-items: center; gap: 6px; background: #f0f2f5; border-radius: 16px; padding: 4px 8px; margin: 4px 8px 4px 0; }
+.cq-audio { width: 160px; height: 28px; }
+.cq-share { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 8px 4px 0; }
+.cq-share a { color: #409eff; text-decoration: none; font-size: 13px; }
+.cq-share a:hover { text-decoration: underline; }
+.cq-share-title { font-size: 12px; color: #909399; }
+.cq-image-link { display: inline-block; margin: 4px 8px 4px 0; }
+.cq-image { max-width: 220px; max-height: 220px; border-radius: 6px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15); object-fit: cover; }
+.cq-data { display: inline-block; margin: 6px 8px 4px 0; background: #f5f7fa; border-radius: 6px; padding: 4px 6px; }
+.cq-data summary { cursor: pointer; color: #409eff; font-size: 13px; }
+.cq-data pre { margin-top: 4px; max-width: 320px; max-height: 200px; overflow: auto; background: #fff; padding: 6px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.05); white-space: pre-wrap; word-break: break-all; font-family: var(--el-font-family-monospace, monospace); }
 .chat-side { border: 1px solid var(--el-border-color); border-radius: 8px; padding: 8px; background: var(--el-fill-color-blank); }
 .side-title { font-weight: 600; margin-bottom: 8px; }
 .side-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
