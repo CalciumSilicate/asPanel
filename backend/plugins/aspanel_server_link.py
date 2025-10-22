@@ -22,6 +22,7 @@ import time
 from datetime import datetime, timezone
 from queue import Queue, Full, Empty
 from typing import Any, Optional, List
+from urllib.parse import urlparse, urlunparse
 
 # 可选依赖：websocket-client（pip 包名：websocket-client）
 try:
@@ -389,6 +390,22 @@ def _cq_parse_message(message: str) -> list[dict[str, Any]]:
     return result
 
 
+def _normalize_media_url(url: Any) -> str:
+    if not url:
+        return ""
+    cleaned = str(url).strip()
+    if not cleaned:
+        return ""
+    try:
+        parsed = urlparse(cleaned)
+    except Exception:
+        return cleaned
+    if parsed.scheme == "http" and parsed.netloc.endswith("qpic.cn"):
+        parsed = parsed._replace(scheme="https")
+        return urlunparse(parsed)
+    return cleaned
+
+
 def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
     seg_type = str(segment.get("type") or "")
     data = segment.get("data") or {}
@@ -402,6 +419,8 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
             label.set_hover_text(f"点击复制 {raw}")
         return label
     if seg_type == "record":
+        label = RText("[语音]", color=RColor.gray)
+        label.set_hover_text("暂不支持播放语音消息")
         url = str(data.get("url") or data.get("file") or "")
         label = RText("[语音]", color=RColor.aqua)
         if url:
@@ -426,6 +445,7 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
         label.set_hover_text(display)
         return label
     if seg_type == "share":
+        url = _normalize_media_url(data.get("url") or data.get("jumpUrl") or data.get("file"))
         url = str(data.get("url") or data.get("jumpUrl") or data.get("file") or "")
         title = str(data.get("title") or data.get("content") or url or "")
         label = RText("[链接]", color=RColor.aqua)
@@ -434,6 +454,7 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
         label.set_hover_text(title or "链接")
         return label
     if seg_type == "image":
+        url = _normalize_media_url(data.get("url") or data.get("file"))
         url = str(data.get("url") or data.get("file") or "")
         label = RText("[图片]", color=RColor.aqua)
         if url:

@@ -77,6 +77,14 @@
                             <span v-if="seg.kind==='text'" class="cq-text">{{ seg.text }}</span>
                             <span v-else-if="seg.kind==='tag'" class="cq-tag" :class="{ 'is-unsupported': seg.unsupported }">{{ seg.label }}</span>
                             <span v-else-if="seg.kind==='reply'" class="cq-reply">{{ seg.label }}</span>
+                            <span v-else-if="seg.kind==='share'" class="cq-share">
+                              <span class="cq-tag">{{ seg.label }}</span>
+                              <a v-if="seg.url" :href="seg.url" target="_blank" rel="noopener noreferrer">{{ seg.url }}</a>
+                              <span v-else class="cq-tag is-unsupported">链接缺失</span>
+                              <span v-if="seg.title" class="cq-share-title">{{ seg.title }}</span>
+                            </span>
+                            <a v-else-if="seg.kind==='image' && seg.url" class="cq-image-link" :href="seg.url" target="_blank" rel="noopener noreferrer">
+                              <img class="cq-image" :src="seg.url" alt="QQ图片" loading="lazy" referrerpolicy="no-referrer" />
                             <div v-else-if="seg.kind==='record'" class="cq-record-bubble">
                               <span class="cq-tag">{{ seg.label }}</span>
                               <audio v-if="seg.url" class="cq-audio" :src="seg.url" controls preload="none"></audio>
@@ -475,6 +483,27 @@ const unsupportedLabels = {
   tts: '[语音合成]'
 }
 
+const defaultOrigin = typeof window !== 'undefined' && window.location ? window.location.origin : 'http://localhost'
+
+const sanitizeCqMediaUrl = (value) => {
+  if (!value) return ''
+  const raw = String(value).trim()
+  if (!raw) return ''
+  try {
+    const url = new URL(raw, defaultOrigin)
+    if (url.hostname.endsWith('qpic.cn') && url.protocol === 'http:') {
+      url.protocol = 'https:'
+      return url.toString()
+    }
+    return url.toString()
+  } catch (e) {
+    if (raw.startsWith('http://') && raw.includes('.qpic.cn')) {
+      return raw.replace(/^http:\/\//i, 'https://')
+    }
+    return raw
+  }
+}
+
 const transformSegments = (segments) => {
   const mapped = []
   segments.forEach(seg => {
@@ -491,6 +520,7 @@ const transformSegments = (segments) => {
       return
     }
     if (type === 'record') {
+      mapped.push({ kind: 'tag', label: '[语音]', unsupported: true, raw: seg.raw })
       const rawUrl = data.url ?? data.file ?? ''
       const url = rawUrl ? String(rawUrl) : ''
       mapped.push({ kind: 'record', label: '[语音]', url, raw: seg.raw })
@@ -513,6 +543,7 @@ const transformSegments = (segments) => {
       return
     }
     if (type === 'share') {
+      const url = sanitizeCqMediaUrl(data.url ?? data.jumpUrl ?? data.file ?? '')
       const rawUrl = data.url ?? data.jumpUrl ?? data.file ?? ''
       const url = rawUrl ? String(rawUrl) : ''
       const rawTitle = data.title ?? data.content ?? ''
@@ -521,6 +552,7 @@ const transformSegments = (segments) => {
       return
     }
     if (type === 'image') {
+      const url = sanitizeCqMediaUrl(data.url ?? data.file ?? '')
       const rawUrl = data.url ?? data.file ?? ''
       const url = rawUrl ? String(rawUrl) : ''
       mapped.push({ kind: 'image', url, raw: seg.raw })
