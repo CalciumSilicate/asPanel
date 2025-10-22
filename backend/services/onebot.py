@@ -323,13 +323,13 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
                     if u and getattr(u, 'bound_player_id', None):
                         p = db.query(models.Player).filter(models.Player.id == u.bound_player_id).first()
                         if p and p.player_name:
-                            game_user = f"[QQ] <{p.player_name}>"
+                            game_user = p.player_name
                         else:
-                            game_user = f"[QQ] <{nickname}>"
+                            game_user = nickname
                     else:
-                        game_user = f"[QQ] <{nickname}>"
+                        game_user = nickname
         except Exception:
-            game_user = f"[QQ] <{nickname}>"
+            game_user = nickname
         await _PLUGIN_BROADCASTER(
             level="NORMAL",
             group_id=group_id,
