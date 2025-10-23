@@ -1,27 +1,32 @@
-import json
+# backend/routers/servers.py
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response, BackgroundTasks
-from sqlalchemy.orm import Session
-import uuid
-import shutil
-from typing import List
-from pathlib import Path
+
+import json
 import ruamel.yaml
 import yaml
 import asyncio
 import psutil
+from fastapi import APIRouter, Depends, HTTPException, status, Response, BackgroundTasks
+from sqlalchemy.orm import Session
+from typing import List
+from pathlib import Path
 
-from backend import crud, schemas, server_parser, models
-from backend.auth import require_role
-from backend.database import get_db
-from backend.dependencies import mcdr_manager, server_service
-from backend.dependencies import task_manager
-from backend.schemas import TaskType, Role, PaperBuild, PaperBuildDownload, ServerCoreConfig
+from backend.tools import server_parser
+from backend.core import crud, models, schemas
+from backend.core.auth import require_role
+from backend.core.database import get_db
+from backend.core.dependencies import mcdr_manager, server_service
+from backend.core.dependencies import task_manager
+from backend.core.schemas import TaskType, Role, PaperBuild, PaperBuildDownload, ServerCoreConfig
 from backend.tasks.background import background_download_jar, background_install_fabric, background_install_forge
 from backend.core.constants import DEFAULT_SERVER_PROPERTIES_CONFIG, PUBLIC_PLUGINS_DIRECTORIES
-from backend.core.utils import get_file_sha1, get_file_sha256, get_fabric_jar_version, get_forge_jar_version, Timer
-from backend.core.api import get_velocity_version_detail, get_minecraft_version_detail_by_version_id, \
-    get_fabric_version_meta, get_forge_installer_meta
+from backend.core.utils import get_file_sha1, get_file_sha256, get_fabric_jar_version, get_forge_jar_version
+from backend.core.api import (
+    get_velocity_version_detail,
+    get_minecraft_version_detail_by_version_id,
+    get_fabric_version_meta,
+    get_forge_installer_meta
+)
 
 router = APIRouter(
     prefix="/api",
@@ -369,7 +374,7 @@ async def save_server_config(
                 task_list = []
                 current_mc_version, current_loader_version = get_forge_jar_version(jar_path)
                 needs_install = not jar_path.exists() or current_mc_version != core_version or \
-                    current_loader_version != core_config.loader_version
+                                current_loader_version != core_config.loader_version
                 if needs_install:
                     forge_task = task_manager.create_task(TaskType.DOWNLOAD)
                     task_list.append(forge_task)

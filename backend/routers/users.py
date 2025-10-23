@@ -1,21 +1,23 @@
-import os
-from pathlib import Path
+# backend/routers/users.py
 
+import os
+import uuid
+import shutil
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-import uuid
-import shutil
-import httpx
-from backend import crud, models, schemas, security
-from backend.logger import logger
-from backend.database import get_db
-from backend.auth import get_current_user, require_role
+from pathlib import Path
+
+from backend.core import security, crud, models, schemas
+from backend.core.logger import logger
+from backend.core.database import get_db
+from backend.core.auth import get_current_user, require_role
 from backend.core.constants import AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, ALLOW_REGISTER, AVATAR_MC_PATH, \
     UUID_HYPHEN_PATTERN
 from backend.core.utils import get_str_md5, is_valid_mc_name
-from backend.schemas import Role, UserUpdate
+from backend.core.schemas import Role, UserUpdate
 
 router = APIRouter(
     prefix="/api",

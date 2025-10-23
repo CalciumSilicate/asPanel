@@ -1,8 +1,14 @@
-# core/constants.py
+# backend/core/constants.py
+
 import re
-from pathlib import Path
 import os
 import secrets
+from pathlib import Path
+
+# --- Uvicorn Configure ---
+UVICORN_HOST = "0.0.0.0"
+UVICORN_LOG_LEVEL = "warning"
+UVICORN_PORT = 8013
 
 # --- API Configure ---
 MINECRAFT_VERSION_MANIFEST_URL = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
@@ -65,84 +71,20 @@ LOG_FILE_LEVEL = "DEBUG"
 LOG_STORAGE = STORAGE_ROOT_PATH / "logs"
 
 # --- Timezone Setting ---
-# 默认使用 UTC+8（Asia/Shanghai）；可通过环境变量 ASPANEL_TIMEZONE 覆盖，如 "UTC", "Asia/Tokyo" 等
 TIMEZONE = os.getenv("ASPANEL_TIMEZONE", "Asia/Shanghai")
 
-# 提供统一的 tzinfo 获取与格式化工具
-from datetime import timezone as _dt_timezone, timedelta as _dt_timedelta
-
-try:
-    from zoneinfo import ZoneInfo as _ZoneInfo  # Python 3.9+
-except Exception:  # pragma: no cover
-    _ZoneInfo = None
-
-
-def get_tzinfo():
-    """返回配置时区对应的 tzinfo；若不可用，回退为 UTC+8 固定偏移。"""
-    if _ZoneInfo:
-        try:
-            return _ZoneInfo(TIMEZONE)
-        except Exception:
-            pass
-    # 简单解析形如 UTC+8 / UTC+08:00
-    try:
-        if TIMEZONE.upper().startswith("UTC"):
-            s = TIMEZONE[3:].strip()
-            sign = 1
-            if s.startswith("+"):
-                s = s[1:]
-            elif s.startswith("-"):
-                s = s[1:]
-                sign = -1
-            if ":" in s:
-                hh, mm = s.split(":", 1)
-                hours, minutes = int(hh), int(mm)
-            else:
-                hours, minutes = int(s), 0
-            return _dt_timezone(sign * _dt_timedelta(hours=hours, minutes=minutes))
-    except Exception:
-        pass
-    # 最终回退 Asia/Shanghai 等价偏移
-    return _dt_timezone(_dt_timedelta(hours=8))
-
-
-def to_local_dt(dt):
-    """将 datetime 转换为配置时区的 aware datetime；None 直接返回 None。
-    若 dt 为 naive，按 UTC 解释后转换；若已带 tz，直接 astimezone。
-    """
-    if dt is None:
-        return None
-    tz = get_tzinfo()
-    try:
-        if getattr(dt, "tzinfo", None) is None:
-            # 假设存储为 UTC 时间（常见后端约定）；再转换到配置时区
-            dt = dt.replace(tzinfo=_dt_timezone.utc)
-        return dt.astimezone(tz)
-    except Exception:
-        return dt
-
-
-def to_local_iso(dt):
-    x = to_local_dt(dt)
-    return x.isoformat() if x else None
-
-
-# --- Security and verification ---
-# 优先从环境变量读取 JWT 密钥；未提供时从 storages/secret.key 读取/生成并持久化（不纳入 git）。
-_SECRET_KEY_ENV = os.getenv("ASPANEL_SECRET_KEY") or os.getenv("SECRET_KEY")
+# --- Secret Key for authorization ---
 _SECRET_KEY_FILE = STORAGE_ROOT_PATH / "secret.key"
+SECRET_KEY = None
 
-if _SECRET_KEY_ENV and _SECRET_KEY_ENV.strip():
-    SECRET_KEY = _SECRET_KEY_ENV.strip()
-else:
-    if _SECRET_KEY_FILE.exists():
-        SECRET_KEY = _SECRET_KEY_FILE.read_text(encoding="utf-8").strip()
-        if not SECRET_KEY:
-            SECRET_KEY = secrets.token_hex(32)
-            _SECRET_KEY_FILE.write_text(SECRET_KEY, encoding="utf-8")
-    else:
+if _SECRET_KEY_FILE.exists():
+    SECRET_KEY = _SECRET_KEY_FILE.read_text(encoding="utf-8").strip()
+    if not SECRET_KEY:
         SECRET_KEY = secrets.token_hex(32)
         _SECRET_KEY_FILE.write_text(SECRET_KEY, encoding="utf-8")
+else:
+    SECRET_KEY = secrets.token_hex(32)
+    _SECRET_KEY_FILE.write_text(SECRET_KEY, encoding="utf-8")
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 10080  # 7 days
@@ -162,6 +104,7 @@ DEFAULT_CORE_CONFIG = {
     "server_jar": "server.jar"
 }
 
+# --- DEFAULT Vanilla Server Properties ---
 DEFAULT_SERVER_PROPERTIES_CONFIG = {
     "online-mode": True, "server-port": 25565,
     "view-distance": 10, "max-players": 20,
@@ -191,8 +134,10 @@ PUBLIC_PLUGINS_DIRECTORIES = [
 # --- Python Executable ---
 PYTHON_EXECUTABLE = "python"
 
+# --- CPU percentage sampler interval ---
 CPU_PERCENT_INTERVAL = 1
 
+# --- Stats metric whitelist/ blacklist setting ---
 STATS_WHITELIST_ON = False
 STATS_WHITELIST = [
     # for example
@@ -202,4 +147,5 @@ STATS_WHITELIST = [
 ]
 STATS_IGNORE = []
 
+# --- UUID string schema ---
 UUID_HYPHEN_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")

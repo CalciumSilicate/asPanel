@@ -1,42 +1,24 @@
-"""
-后端 WS 接口：接收来自 MCDR 插件（aspanel_ws_reporter.py）的事件上报
-
-协议：
-- 单条：{"event": "mcdr.xxx", "ts": "...", "data": {...}}
-- 批量：{"batch": true, "ts": "...", "items": [<单条>, <单条>, ...]}
-
-行为：
-- 校验与解析消息；转发到 Socket.IO（事件名："mcdr_event"，并同时按具体事件名广播）。
-"""
-
-from __future__ import annotations
+# backend/services/ws.py
 
 import json
-from typing import Any, Dict, List, Optional, Tuple, Set
 import asyncio
 import time
-
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-import socketio
+from sqlalchemy.orm import Session
+from typing import Any, Dict, List, Optional, Set
 
-from backend.ws import sio
-from backend.logger import logger
-from backend.database import get_db_context
-from backend import crud
+from backend.core.utils import to_local_dt
+from backend.core.ws import sio
+from backend.core.logger import logger
 from pathlib import Path
-from backend.database import get_db_context
-from backend import crud
-from backend.dependencies import mcdr_manager
+from backend.core.database import get_db_context
+from backend.core import crud, crud as _crud, models as _models, schemas
+from backend.core.dependencies import mcdr_manager
 from backend.services import onebot
 
-# 服务器在线玩家：key=服务器目录名，value=玩家名集合
 PLAYERS_BY_SERVER: Dict[str, Set[str]] = {}
-# 最近一次为玩家累计 1200 ticks 的时间戳：{ server_name: { player_name: last_ts } }
-# 注：不再在循环中写入，仅在早期兼容与离线收尾时可读；后续以 SERVER_LAST_BOUNDARY + JOINED_TIME 为准
 LAST_ADDED_TIME: Dict[str, Dict[str, float]] = {}
-# 玩家加入时间（用于首个满60秒判断）：{ server_name: { player_name: joined_ts } }
 JOINED_TIME: Dict[str, Dict[str, float]] = {}
-# 每个服务器最后一次“分钟边界”时间（对齐 floor(now/60)*60）
 SERVER_LAST_BOUNDARY: Dict[str, float] = {}
 _PLAYTIME_TASK: Optional[asyncio.Task] = None
 
@@ -62,8 +44,7 @@ async def _playtime_tick_loop():
     每分钟遍历在线表，将在线满 60s 的玩家对应服务器的 play_time += 1200（gt）。
     仅当该玩家在数据库中存在记录且其 play_time[server_name] 键存在时才累计。
     """
-    from backend.database import get_db_context as _db_ctx
-    from backend import crud as _crud
+    from backend.core.database import get_db_context as _db_ctx
     while True:
         try:
             await asyncio.sleep(60)
@@ -353,7 +334,7 @@ async def _handle_single(payload: Dict[str, Any]):
             content = str((info or {}).get("content") or (info or {}).get("raw_content") or "")
             src_server = data.get("server")
             if is_user and player and isinstance(src_server, str) and src_server:
-                from backend import models as _models, crud as _crud
+                from backend import crud as _crud
                 with get_db_context() as db:
                     # 将该消息落库到所有该服务器所在分组
                     groups = _get_groups_for_server_name(db, src_server)
@@ -396,9 +377,7 @@ async def _handle_single(payload: Dict[str, Any]):
                         )
                         row = _crud.create_chat_message(db, row)
                         # 使用 Pydantic 模型进行 JSON 序列化，避免 datetime 直接传递导致的序列化问题
-                        from backend import schemas as _schemas
-                        from backend.core.constants import to_local_dt
-                        out_model = _schemas.ChatMessageOut.model_validate(row)
+                        out_model = schemas.ChatMessageOut.model_validate(row)
                         try:
                             if getattr(row, 'created_at', None):
                                 out_model = out_model.model_copy(update={"created_at": to_local_dt(row.created_at)})
@@ -764,7 +743,7 @@ async def _emit_presence_for_server(server_name: str):
                 if g.name in groups:
                     gid_list.append(g.id)
         # 导入 Chat 的在线用户表用于聚合
-        from backend.ws import CHAT_USERS  # type: ignore
+        from backend.core.ws import CHAT_USERS  # type: ignore
         for gid in gid_list:
             web_users = list((CHAT_USERS.get(gid) or {}).values())
             players = get_group_players(gid)

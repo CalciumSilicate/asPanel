@@ -1,16 +1,17 @@
+# backend/core/auth.py
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 from typing import Callable
 
-from backend import crud, schemas, security, models
-from backend.database import get_db
+from backend.core import security, crud, models, schemas
+from backend.core.database import get_db
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
 
 
-# Role base
 def require_role(required_role: schemas.Role) -> Callable:
     def role_checker(current_user: models.User = Depends(get_current_user)) -> models.User:
         user_role_level = schemas.ROLE_HIERARCHY.get(current_user.role, -1)

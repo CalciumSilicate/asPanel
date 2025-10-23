@@ -1,10 +1,9 @@
-from __future__ import annotations
-
-from typing import List
+# backend/tools/server_link.py
 
 from sqlalchemy.orm import Session
+from typing import List
 
-from backend import crud, models, schemas
+from backend.core import crud, schemas
 
 
 def _validate_server_ids(db: Session, server_ids: List[int]) -> List[int]:

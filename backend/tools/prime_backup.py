@@ -1,21 +1,20 @@
-from __future__ import annotations
+# backend/tools/prime_backup.py
 
 import asyncio
 import re
 import uuid
-from pathlib import Path
 import os
 import shutil
-from typing import List, Optional, Tuple
-
-from fastapi import HTTPException, UploadFile, status, BackgroundTasks
+from fastapi import HTTPException, UploadFile, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from pathlib import Path
+from typing import List, Optional, Tuple
 
-from backend import crud, schemas
+from backend.core import crud, schemas
 from backend.core.constants import PYTHON_EXECUTABLE, TEMP_PATH
 from backend.core.utils import get_size_bytes
-from backend.dependencies import plugin_manager, server_service
+from backend.core.dependencies import plugin_manager, server_service
 
 
 PB_PLUGIN_ID = "prime_backup"

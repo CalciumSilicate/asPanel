@@ -1,11 +1,13 @@
-from fastapi import APIRouter, Depends
+# backend/routers/versions.py
 
+from fastapi import APIRouter, Depends
 from cachetools import TTLCache
+
 from backend.core.api import get_minecraft_versions_raw, get_velocity_versions_raw, get_fabric_game_version_list, \
     get_fabric_loader_version_list, get_forge_game_version_list, get_forge_loader_version_list
-from backend import schemas
-from backend.auth import require_role
-from backend.schemas import Role
+from backend.core import schemas
+from backend.core.auth import require_role
+from backend.core.schemas import Role
 
 router = APIRouter(
     prefix="/api",

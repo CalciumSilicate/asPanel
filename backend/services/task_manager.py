@@ -1,8 +1,11 @@
+# backend/services/task_manager.py
+
 import threading
 import uuid
 from typing import Dict, Optional
-from backend.schemas import Task, TaskType, TaskStatus  # 假设你的schemas里有Tasks模型
-from backend.logger import logger
+
+from backend.core.schemas import Task, TaskType, TaskStatus
+from backend.core.logger import logger
 
 
 class TaskManager:

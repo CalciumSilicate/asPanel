@@ -1,24 +1,25 @@
 # backend/routers/plugins.py
+
 import json
 import os
 import shutil
 import uuid
-from pathlib import Path
-from typing import Optional, List
 
 from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from pathlib import Path
+from typing import Optional, List
 
 from backend.core.api import get_mcdr_plugins_catalogue
-from backend import schemas, crud, models
-from backend.auth import require_role
-from backend.schemas import Role
+from backend.core import crud, schemas
+from backend.core.auth import require_role
+from backend.core.schemas import Role
 from backend.core.constants import UPLOADED_PLUGINS_PATH
 from backend.core.utils import get_file_md5, get_file_sha256
-from backend.database import get_db, SessionLocal
-from backend.dependencies import server_service, plugin_manager
-from backend.logger import logger
+from backend.core.database import get_db, SessionLocal
+from backend.core.dependencies import server_service, plugin_manager
+from backend.core.logger import logger
 
 router = APIRouter(
     prefix="/api",

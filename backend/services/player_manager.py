@@ -1,18 +1,14 @@
-from __future__ import annotations
+# backend/services/player_manager.py
 
 import json
-import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from backend.core.api import async_client
-
 from backend.core.constants import MCDR_ROOT_PATH, UUID_HYPHEN_PATTERN
-from backend.database import get_db_context
-from backend.logger import logger
-from backend import crud, models
-
-
+from backend.core.database import get_db_context
+from backend.core.logger import logger
+from backend.core import crud, models
 
 
 def _is_valid_hyphen_uuid(s: str) -> bool:
@@ -24,7 +20,7 @@ def _get_all_server_world_dirs() -> List[Tuple[str, Path]]:
     返回 (server_name, world_dir) 列表；若 world 不存在，world_dir 也返回（不存在由调用方判断）。
     server_name = 服务器目录名（Path(server.path).name）
     """
-    from backend.database import get_db_context
+    from backend.core.database import get_db_context
     from backend import crud
     res: List[Tuple[str, Path]] = []
     with get_db_context() as db:

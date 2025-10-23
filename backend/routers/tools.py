@@ -1,41 +1,29 @@
-from __future__ import annotations
+# backend/routers/tools.py
 
-from typing import List, Optional, Any
-
+import uuid
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.orm import Session
 
-from backend import crud, models
-from backend.auth import require_role
-from backend.database import get_db
-from backend.schemas import Role
+from backend.core import crud, models, models as _models, schemas
+from backend.core.auth import require_role
+from backend.core.utils import to_local_iso, to_local_dt
+from backend.core.database import get_db
+from backend.core.schemas import Role
 from backend.tools.flat_world_generator import generate_flat_level_dat, apply_level_dat_to_server
 from backend.tools import prime_backup as pb
 from backend.tools.litematic_parser import (
     generate_command_list,
-    get_command_list_output_path_for,
     has_command_list_for,
     get_command_list_output_file_name_for,
 )
 from backend.core.constants import (
     UPLOADED_LITEMATIC_PATH,
     LITEMATIC_COMMAND_LIST_PATH,
-    to_local_dt,
-    to_local_iso,
-    get_tzinfo,
 )
-from fastapi.responses import FileResponse
-import uuid
-import os
-from pathlib import Path
-
 
 router = APIRouter(prefix="/api", tags=["Utils"])
-
-
-from backend import schemas
 
 
 @router.post("/tools/superflat/leveldat")
@@ -78,8 +66,8 @@ async def apply_level_dat_endpoint(
 # ===================== Prime Backup =====================
 
 from fastapi import BackgroundTasks, UploadFile, File, Query
-from backend.auth import require_role
-from backend.schemas import Role
+from backend.core.auth import require_role
+from backend.core.schemas import Role
 
 
 @router.get("/tools/pb/{server_id}/usage", response_model=schemas.PBUsage)
@@ -413,9 +401,7 @@ async def litematic_download_cl(litematic_file_name: str, db: Session = Depends(
 from backend.tools import server_link as sl
 from backend.services.ws import broadcast_server_link_update, broadcast_chat_to_plugins
 from pathlib import Path
-from backend.auth import get_current_user
-from backend import models as _models
-from backend.ws import sio
+from backend.core.ws import sio
 from backend.services import onebot
 
 
@@ -434,7 +420,7 @@ async def sl_groups_create(payload: schemas.ServerLinkGroupCreate, db: Session =
             if s:
                 server_name = Path(s.path).name
                 # 计算该服务器当前所有分组名称
-                names = [g.name for g in crud.list_server_link_groups(db) if sid in (g and __import__('json').loads(getattr(g,'server_ids','[]')))]
+                names = [g.name for g in crud.list_server_link_groups(db) if sid in (g and __import__('json').loads(getattr(g, 'server_ids', '[]')))]
                 await broadcast_server_link_update(server_name, names)
         await onebot.refresh_bindings()
         return created

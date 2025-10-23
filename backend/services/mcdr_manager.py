@@ -1,21 +1,19 @@
-# mcdr_manager.py
-import asyncio
-from venv import logger
+# backend/services/mcdr_manager.py
 
+import asyncio
 import socketio
 import re
 import os
 import gzip
+import psutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, TextIO, TYPE_CHECKING, Tuple
-import psutil
 
-from backend.database import SessionLocal
+from backend.core.database import SessionLocal
 from backend.core.constants import LOG_EMIT_INTERVAL_MS
-from backend import schemas, models
-from backend import crud
-from backend.logger import logger
+from backend.core import crud, models, schemas
+from backend.core.logger import logger
 
 if TYPE_CHECKING:
     from backend.services.server_service import ServerService

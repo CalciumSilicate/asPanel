@@ -1,19 +1,21 @@
-# core/utils.py
-import asyncio
+# backend/core/utils.py
+
 import json
 import os
 import re
-import shutil
-from pathlib import Path
-from typing import Tuple, Optional, Dict, Union
 import time
-from backend.logger import logger
-
+import shutil
+import asyncio
 import hashlib
 import zipfile
 import subprocess
-from typing import Iterable
+from pathlib import Path
+from typing import Tuple, Optional, Dict, Union
+from zoneinfo import ZoneInfo
+from datetime import timezone, timedelta
 
+from backend.core.constants import TIMEZONE
+from backend.core.logger import logger
 
 def get_size_bytes(path: Union[str, Path], *, prefer_du: bool = True, timeout: float = 3.0) -> int:
     p = Path(path)
@@ -100,7 +102,6 @@ def get_str_md5(text: str) -> str:
 
 
 def is_valid_mc_name(name: str) -> bool:
-    """判断是否为合法的Minecraft用户名"""
     return bool(re.fullmatch(r"[A-Za-z0-9_\-]{1,16}", name))
 
 
@@ -238,7 +239,6 @@ async def poll_copy_progress(source_path: Path, target_path: Path, task, interva
             progress = round((copied / total_size) * 100, 2)
             task.progress = progress
         except Exception:
-            # 目标目录尚在创建或扫描失败时忽略，继续下一轮
             pass
         await asyncio.sleep(interval)
 
@@ -262,7 +262,6 @@ class Timer:
         self._start_time = None
 
     def print(self, point: int = None):
-        """手动打印当前耗时（不中断计时）"""
         if self._start_time is None:
             logger.warning(f"[{self.name}] 计时尚未开始")
             return
@@ -273,10 +272,8 @@ class Timer:
             logger.info(f"[{self.name}.{point}] 当前已用时 {elapsed:.4f} 秒")
 
 
-# ============ 低占用可断点续传复制 ============
 
 def _bw_sleep(start_ts: float, bytes_written: int, limit_bps: float):
-    """按带宽上限进行自适应 sleep。"""
     if limit_bps <= 0:
         return
     elapsed = time.perf_counter() - start_ts
@@ -286,12 +283,6 @@ def _bw_sleep(start_ts: float, bytes_written: int, limit_bps: float):
 
 
 def copy_file_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 128.0, preserve_stat: bool = True):
-    """
-    将单个文件以限速方式复制，支持从已存在的部分大小处断点续传（通过 size 对齐）。
-    - 若 dst 存在且大小等于 src，跳过
-    - 若 dst 存在且大小小于 src，从该偏移位置继续复制
-    - 若 dst 大于 src，重写 dst
-    """
     src = Path(src)
     dst = Path(dst)
     if not src.is_file():
@@ -311,7 +302,6 @@ def copy_file_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 128
         except OSError:
             existing = 0
         if existing > src_size:
-            # 目标异常，重新写入
             existing = 0
 
     mode = 'ab' if existing > 0 else 'wb'
@@ -320,7 +310,7 @@ def copy_file_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 128
         if existing > 0:
             s.seek(existing)
         written = existing
-        chunk = 1024 * 1024  # 1MB 块
+        chunk = 1024 * 1024
         while True:
             buf = s.read(chunk)
             if not buf:
@@ -337,13 +327,6 @@ def copy_file_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 128
 
 
 def copytree_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 1024.0):
-    """
-    受限速且可断点续传的目录复制：
-    - 逐文件复制，已存在且大小一致的文件跳过
-    - 已存在且更小的文件从大小偏移处续写
-    - 自动创建目标目录结构
-    - 忽略符号链接
-    """
     src = Path(src)
     dst = Path(dst)
     if not src.exists():
@@ -352,16 +335,56 @@ def copytree_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 1024
     for root, dirs, files in os.walk(src):
         root_p = Path(root)
         rel = root_p.relative_to(src)
-        # 创建对应子目录
         (dst / rel).mkdir(parents=True, exist_ok=True)
-        # 文件复制
         for name in files:
             sp = root_p / name
             if sp.is_symlink():
-                # 跳过符号链接
                 continue
             dp = (dst / rel / name)
             try:
                 copy_file_resumable_throttled(sp, dp, max_mbps=max_mbps)
             except Exception as e:
                 logger.error(f"复制文件失败: {sp} -> {dp}：{e}")
+
+
+def get_tz_info():
+    if ZoneInfo:
+        try:
+            return ZoneInfo(TIMEZONE)
+        except Exception:
+            pass
+    try:
+        if TIMEZONE.upper().startswith("UTC"):
+            s = TIMEZONE[3:].strip()
+            sign = 1
+            if s.startswith("+"):
+                s = s[1:]
+            elif s.startswith("-"):
+                s = s[1:]
+                sign = -1
+            if ":" in s:
+                hh, mm = s.split(":", 1)
+                hours, minutes = int(hh), int(mm)
+            else:
+                hours, minutes = int(s), 0
+            return timezone(sign * timedelta(hours=hours, minutes=minutes))
+    except Exception:
+        pass
+    return timezone(timedelta(hours=8))
+
+
+def to_local_dt(dt):
+    if dt is None:
+        return None
+    tz = get_tz_info()
+    try:
+        if getattr(dt, "tzinfo", None) is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(tz)
+    except Exception:
+        return dt
+
+
+def to_local_iso(dt):
+    x = to_local_dt(dt)
+    return x.isoformat() if x else None

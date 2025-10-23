@@ -1,7 +1,4 @@
-# -*- coding: utf-8 -*-
-# MCDReforged 插件：CommandListExecuter
-# 提供命令：!!execute <x> <y> <z> <abs_path>
-# 作用：以 (x,y,z) 为原点，逐条执行清单中的相对坐标命令
+# backend/plugins/cmd_list_executor.py
 
 from mcdreforged.api.all import *
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -10,9 +7,21 @@ from time import perf_counter
 from pathlib import Path
 import uuid
 
-HELP = '!!execute <x|~dx> <y|~dy> <z|~dz> <filename> [threads]  支持相对坐标 ~dx ~dy ~dz；以执行瞬间位置为固定原点（自动生成锚点盔甲架）。流程：add→并发setblock→summon→merge→remove（并发默认4，可自定义)'
+HELP = (
+    '!!execute <x|~dx> <y|~dy> <z|~dz> <filename> [threads]  支持相对坐标 ~dx ~dy ~dz；以执行瞬间位置为固定原点'
+    '（自动生成锚点盔甲架）。流程：add→并发setblock→summon→merge→remove（并发默认4，可自定义)'
+)
 
-PLUGIN_METADATA = {"id": "cmd_list_executer", "version": "0.3.1", "author": "CalciumSilicate", "name": "CommandListExecuterINNER", "description": "批量执行指令清单", "dependencies": {}, "requirements": ["mcdreforged>=2.0.0"]}
+PLUGIN_METADATA = {
+    "id": "cmd_list_executor",
+    "version": "0.3.1",
+    "author": "CalciumSilicate",
+    "name": "CommandListExecutorINNER",
+    "description": "批量执行指令清单",
+    "dependencies": {},
+    "requirements": ["mcdreforged>=2.0.0"]
+}
+
 
 def _read_command_list(path: str) -> list[str]:
     """读取指令清单，每行一条，忽略空行与以#开头的注释行"""
@@ -94,8 +103,6 @@ def _get_player_name_from_source(source: CommandSource) -> str | None:
     return None
 
 
-
-
 def _parse_coord(token: str, base: int) -> int:
     s = str(token).strip()
     if s.startswith('~'):
@@ -129,12 +136,14 @@ def run_execute(server: ServerInterface, source: CommandSource, ctx: dict):
         return
 
     adds, setblocks, summons, merges, removes, others = _classify_commands(cmds)
-    source.reply('[CommandListExecuter] 总 {} 条 | add:{} | setblock:{}(并发) | summon:{} | merge:{} | remove:{} | 其它:{}'.format(
-        len(cmds), len(adds), len(setblocks), len(summons), len(merges), len(removes), len(others)
-    ))
+    source.reply(
+        '[CommandListExecuter] 总 {} 条 | add:{} | setblock:{}(并发) | summon:{} | merge:{} | remove:{} | 其它:{}'.format(
+            len(cmds), len(adds), len(setblocks), len(summons), len(merges), len(removes), len(others)
+        ))
 
     # 通过“锚点盔甲架”冻结原点：
     anchor_tag = f"cmdlist_anchor_{uuid.uuid4().hex}"
+
     def _is_rel(tok: object) -> bool:
         return isinstance(tok, str) and tok.strip().startswith('~')
 
@@ -152,7 +161,9 @@ def run_execute(server: ServerInterface, source: CommandSource, ctx: dict):
     else:
         # 绝对坐标：直接在目标位置生成锚点
         try:
-            ax = int(float(str(x))); ay = int(float(str(y))); az = int(float(str(z)))
+            ax = int(float(str(x)));
+            ay = int(float(str(y)));
+            az = int(float(str(z)))
         except Exception:
             source.reply(RText('[CommandListExecuter] 无法解析绝对坐标').set_color(RColor.red))
             return

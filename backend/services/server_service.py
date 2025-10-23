@@ -1,23 +1,24 @@
-# services/server_service.py
+# backend/services/server_service.py
+
 import json
 import shutil
 import asyncio
 import uuid
-from pathlib import Path
-from typing import List, Optional, Tuple
-from sqlalchemy.orm import Session
 from fastapi import HTTPException
+from sqlalchemy.orm import Session
+from pathlib import Path
+from typing import List, Tuple
 
-from .task_manager import TaskManager
-from .. import crud, models, schemas
-from backend import server_parser
+from backend.services.task_manager import TaskManager
+from backend.core import crud, models, schemas
+from backend.tools import server_parser
 from backend.services.mcdr_manager import MCDRManager
 from backend.services.plugin_manager import PluginManager
-from ..core.constants import MCDR_ROOT_PATH
-from ..core.utils import get_size_mb, poll_copy_progress, copytree_resumable_throttled
-from ..schemas import ServerCoreConfig, Task, TaskStatus
-from ..server_parser import infer_server_type_and_analyze_core_config
-from backend.logger import logger
+from backend.core.constants import MCDR_ROOT_PATH
+from backend.core.utils import get_size_mb, poll_copy_progress, copytree_resumable_throttled
+from backend.core.schemas import ServerCoreConfig, Task, TaskStatus
+from backend.tools.server_parser import infer_server_type_and_analyze_core_config
+from backend.core.logger import logger
 from backend.services import player_manager
 
 

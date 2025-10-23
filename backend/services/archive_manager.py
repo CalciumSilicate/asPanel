@@ -1,13 +1,13 @@
-# archive_manager.py
+# backend/services/archive_manager.py
 
 import os
 import shutil
 import tarfile
-from pathlib import Path
 import uuid
+from pathlib import Path
 
 from backend.core.constants import ARCHIVE_STORAGE_PATH
-from backend import server_parser
+from backend.tools import server_parser
 
 
 class ArchiveManager:

@@ -1,14 +1,13 @@
 # backend/services/dependency_handler.py
+
 import asyncio
 import re
-from pathlib import Path
 from typing import List
-
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version, InvalidVersion
-from backend.logger import logger
 from packaging.requirements import Requirement, InvalidRequirement
 
+from backend.core.logger import logger
 
 # 设置一个简单的日志记录器
 

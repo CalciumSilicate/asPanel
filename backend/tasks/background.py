@@ -1,23 +1,23 @@
-# tasks/background.py
+# backend/tasks/background.py
+
 import uuid
 import zipfile
 import subprocess
-
 import requests
 import shutil
 import os
-
 from sqlalchemy.orm import Session
 from typing import Dict, Optional
 from pathlib import Path
 
-from backend import crud, server_parser, models
+from backend.tools import server_parser
+from backend.core import crud, models
 from backend.core.api import get_velocity_version_detail
 from backend.core.constants import FABRIC_REPO_URL, TEMP_PATH
 from backend.core.utils import get_file_sha1, get_file_sha256
-from backend.database import get_db_context
-from backend.schemas import TaskStatus, ArchiveCreate, ArchiveType, PaperBuild, Task, PaperBuildDownload, Server
-from backend.dependencies import task_manager, archive_manager, mcdr_manager
+from backend.core.database import get_db_context
+from backend.core.schemas import TaskStatus, ArchiveCreate, ArchiveType, PaperBuild, Task, PaperBuildDownload, Server
+from backend.core.dependencies import task_manager, archive_manager, mcdr_manager
 
 
 def download_file(dest_path: Path, download_url: str, task: Task = None, start: float = 0, end: float = 100):

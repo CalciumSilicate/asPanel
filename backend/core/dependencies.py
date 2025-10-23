@@ -1,5 +1,6 @@
-from backend.core.constants import PYTHON_EXECUTABLE
+# backend/core/dependencies.py
 
+from backend.core.constants import PYTHON_EXECUTABLE
 from backend.services.mcdr_manager import MCDRManager
 from backend.services.archive_manager import ArchiveManager
 from backend.services.server_service import ServerService

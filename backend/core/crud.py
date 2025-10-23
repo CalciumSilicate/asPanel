@@ -1,15 +1,13 @@
-# crud.py
-import json
-import os
-from pathlib import Path
+# backend/core/crud.py
 
+import json
 from sqlalchemy.orm import Session
 from typing import Any, List, Optional, Type, Tuple
-from backend import models, schemas
-from backend.models import Server
-from backend.schemas import ServerCoreConfig
-from backend.security import get_password_hash
-from backend.core.constants import TEMP_PATH
+
+from backend.core import models, models as _models, schemas
+from backend.core.models import Server
+from backend.core.schemas import ServerCoreConfig
+from backend.core.security import get_password_hash
 
 
 # --- User CRUD ---
@@ -535,7 +533,6 @@ def cleanup_plugins_for_server(db: Session, server_id: int) -> int:
     """从 plugin 表的 servers_installed JSON 中移除指定 server_id。
     返回更新的记录数。
     """
-    from backend import models as _models
     updated = 0
     candidates = db.query(_models.Plugin).filter(_models.Plugin.servers_installed.like(f"%{server_id}%")).all()
     for rec in candidates:
