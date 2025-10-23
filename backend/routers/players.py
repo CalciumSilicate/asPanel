@@ -1,14 +1,15 @@
-from typing import List, Optional
+# backend/routers/players.py
 
+import json
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
+from typing import List, Optional
 from pathlib import Path
-import json
 
-from backend import crud, models, schemas
-from backend.auth import require_role
-from backend.database import get_db
-from backend.schemas import Role
+from backend.core import crud, models, schemas
+from backend.core.auth import require_role
+from backend.core.database import get_db
+from backend.core.schemas import Role
 from pydantic import BaseModel
 from backend.services import player_manager
 
@@ -37,7 +38,7 @@ async def refresh_uuids(_user: models.User = Depends(require_role(Role.ADMIN))):
 
 @router.post("/refresh-names-official")
 async def refresh_names_official(background_tasks: BackgroundTasks,
-                                _user: models.User = Depends(require_role(Role.ADMIN))):
+                                 _user: models.User = Depends(require_role(Role.ADMIN))):
     """逻辑2（触发）：为 player_name 为空且 is_offline=False 的记录尝试解析正版玩家名；失败则标记 is_off线=True。
     后台异步执行，避免阻塞请求。
     """
@@ -53,7 +54,7 @@ async def refresh_names_offline(_user: models.User = Depends(require_role(Role.A
 
 @router.post("/refresh-playtime")
 async def refresh_playtime(background_tasks: BackgroundTasks,
-                          _user: models.User = Depends(require_role(Role.ADMIN))):
+                           _user: models.User = Depends(require_role(Role.ADMIN))):
     """逻辑4（触发）：为所有玩家重算各服务器的时长（读取 world/stats/<uuid>.json）。
     后台异步执行，避免阻塞请求。
     """
@@ -103,11 +104,11 @@ async def get_data_source_selection(db: Session = Depends(get_db),
 
 @router.patch("/data-source-selection", response_model=List[str])
 async def set_data_source_selection(payload: DataSourceSelectionUpdate,
-                                   db: Session = Depends(get_db),
-                                   _user: models.User = Depends(require_role(Role.USER))):
+                                    db: Session = Depends(get_db),
+                                    _user: models.User = Depends(require_role(Role.USER))):
     """保存玩家管理页面数据来源（服务器名列表）。"""
     # 存入系统设置 JSON 中
-    current = crud.update_system_settings(db, { 'player_manager_selected_servers': payload.servers or [] })
+    current = crud.update_system_settings(db, {'player_manager_selected_servers': payload.servers or []})
     lst = current.get('player_manager_selected_servers') or []
     if isinstance(lst, list):
         return [str(x) for x in lst]

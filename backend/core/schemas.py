@@ -1,10 +1,10 @@
-# schemas.py
+# backend/core/schemas.py
+
+import enum
+import json
 from pydantic import BaseModel, Field, BeforeValidator, field_validator
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-import enum
-import json
-
 from typing import Annotated
 
 

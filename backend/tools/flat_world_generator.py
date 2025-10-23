@@ -1,16 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
-超平坦世界 level.dat 生成与应用
-
-说明：
-- 模板 level.dat 已内嵌为 BASE64（gzip NBT），避免运行期依赖外部文件。
-- 参考了 leveldatgenerator/generate_flat_level_dat.py 的实现思路，使用 nbtlib 修改 NBT 结构。
-- 提供：
-  * generate_flat_level_dat(config) -> bytes：生成符合配置的 level.dat（gzip NBT 字节）
-  * apply_level_dat_to_server(server_root, data_bytes, overwrite=False, world_name=None) -> Path：将 level.dat 写入服务器世界目录
-"""
-
-from __future__ import annotations
+# backend/tools/flat_world_generator.py
 
 import base64
 import io
@@ -18,14 +6,13 @@ import os
 import shutil
 import tempfile
 import uuid
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-
 import nbtlib
 from nbtlib import File
 from nbtlib.tag import Compound, List as NbtList, String, Int, Long
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from backend.server_parser import parse_properties
+from backend.tools.server_parser import parse_properties
 
 
 # 将 leveldatgenerator/level.dat 嵌入为 BASE64

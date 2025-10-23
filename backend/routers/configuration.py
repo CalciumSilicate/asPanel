@@ -1,10 +1,6 @@
-from __future__ import annotations
+# backend/routers/configuration.py
 
 import json
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-
 import yaml
 import tomli
 import tomli_w
@@ -12,12 +8,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from backend.database import get_db
-from backend import crud
-from backend.logger import logger
-from backend.auth import require_role
-from backend.schemas import Role
+from backend.core.database import get_db
+from backend.core import crud
+from backend.core.logger import logger
+from backend.core.auth import require_role
+from backend.core.schemas import Role
 
 router = APIRouter(prefix="/api/configs", tags=["Configurations"])
 

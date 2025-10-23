@@ -1,10 +1,12 @@
+# backend/core/ws.py
+
 import socketio
 from typing import Dict, List
 
-from backend.database import get_db_context
-from backend.dependencies import mcdr_manager
-from backend import crud
-from backend.logger import logger
+from backend.core.database import get_db_context
+from backend.core.dependencies import mcdr_manager
+from backend.core import crud
+from backend.core.logger import logger
 
 # Socket.IO 实例
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')

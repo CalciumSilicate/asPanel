@@ -1,34 +1,21 @@
-# services/stats_service.py
-# 统计入库与查询封装（不依赖 storages 包直接调用）：
-# - 读取各服务器 <server_path>/server/world/stats 目录
-# - 内置稀疏入库（10min 对齐 + 12h 快照）与查询逻辑
-# - 支持通过 config 中的 STATS_WHITELIST_ON / STATS_WHITELIST / STATS_IGNORE 过滤指标
-# - 查询支持 delta/total 两种时间序列
-
-from __future__ import annotations
+# backend/services/stats_service.py
 
 import asyncio
 import fnmatch
 import json
-from pathlib import Path
 from typing import Iterable, List, Optional, Set, Tuple
+from pathlib import Path
 
-from backend.core.constants import STATS_WHITELIST_ON, STATS_WHITELIST, STATS_IGNORE, get_tzinfo
-from backend.database import SessionLocal
-from backend import crud, models
-from backend.logger import logger
-from backend.dependencies import mcdr_manager
-
-# 统计专用 SQLite（独立于 asPanel.db）
+from backend.core.constants import STATS_WHITELIST_ON, STATS_WHITELIST, STATS_IGNORE
+from backend.core.utils import get_tz_info
+from backend.core.database import SessionLocal
+from backend.core import crud, models
+from backend.core.logger import logger
+from backend.core.dependencies import mcdr_manager
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
-# 默认命名空间（Minecraft 官方 stats）
 DEFAULT_NAMESPACE = "minecraft"
-
-
-# 使用主库 asPanel.db 的 ORM（models.py 定义）进行统计存取
-
 
 # ---------- 指标发现与过滤 ----------
 
@@ -646,7 +633,7 @@ def _build_boundaries_for_player(db: Session, *, player_id: int, metric_ids: Lis
     返回 (boundaries, delta_by_ts, start_anchor, end_boundary)
     语义：边界序列表示连续的右端点，窗口均为 (prev, cur]，用于统一 (start, end]。
     """
-    tz = get_tzinfo()
+    tz = get_tz_info()
 
     # 统一对齐结束边界；若 end 缺省，取当前时间并向后对齐
     import time as _t
@@ -834,9 +821,9 @@ def leaderboard_total(*, metrics: List[str], at: Optional[str] = None,
             )
             .select_from(latest)
             .join(models.PlayerMetrics, (models.PlayerMetrics.server_id == latest.c.server_id) &
-                                     (models.PlayerMetrics.player_id == latest.c.player_id) &
-                                     (models.PlayerMetrics.metric_id == latest.c.metric_id) &
-                                     (models.PlayerMetrics.ts == latest.c.ts))
+                  (models.PlayerMetrics.player_id == latest.c.player_id) &
+                  (models.PlayerMetrics.metric_id == latest.c.metric_id) &
+                  (models.PlayerMetrics.ts == latest.c.ts))
             .group_by(latest.c.player_id)
             .order_by(func.sum(models.PlayerMetrics.total).desc())
             .limit(max(1, int(limit)))
@@ -893,7 +880,8 @@ def leaderboard_delta(*, metrics: List[str], start: Optional[str] = None, end: O
             q = q.where(models.PlayerMetrics.ts <= end_ts)
         if server_ids:
             q = q.where(models.PlayerMetrics.server_id.in_(server_ids))
-        q = q.group_by(models.PlayerMetrics.player_id).order_by(func.sum(models.PlayerMetrics.delta).desc()).limit(max(1,int(limit)))
+        q = q.group_by(models.PlayerMetrics.player_id).order_by(func.sum(
+            models.PlayerMetrics.delta).desc()).limit(max(1, int(limit)))
         rows = db.execute(q).all()
         out: List[Dict[str, object]] = []
         for pid, val in rows:

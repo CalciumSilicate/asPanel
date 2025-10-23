@@ -1,21 +1,19 @@
-"""OneBot V11 Reverse WebSocket integration for QQ bridging."""
-from __future__ import annotations
+# backend/services/onebot.py
 
 import asyncio
 import json
 import re
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-
-from backend import crud, models, schemas
-from backend.core.constants import to_local_dt
-from backend.database import get_db_context
-from backend.logger import logger
-from backend.ws import sio
-from backend.dependencies import mcdr_manager
+from backend.core import crud, models, schemas
+from backend.core.utils import to_local_dt
+from backend.core.database import get_db_context
+from backend.core.logger import logger
+from backend.core.ws import sio
+from backend.core.dependencies import mcdr_manager
 
 router = APIRouter()
 

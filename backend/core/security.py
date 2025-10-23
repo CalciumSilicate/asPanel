@@ -1,15 +1,14 @@
-# security.py
+# backend/core/security.py
 
 from datetime import datetime, timedelta, timezone
+from passlib.context import CryptContext
 from typing import Optional
 from jose import jwt
-from passlib.context import CryptContext
+
 from backend.core.constants import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
-# 使用 bcrypt_sha256 以解决 bcrypt 原生 72 字节明文长度限制问题，
-# 同时保留对旧 "bcrypt" 哈希的验证兼容（若数据库中已有旧数据）。
 pwd_context = CryptContext(
-    schemes=["argon2"],  # 使用 argon2 作为默认哈希方案，避免 bcrypt 的 72 字节限制与后端探测冲突
+    schemes=["argon2"],
     deprecated="auto"
 )
 

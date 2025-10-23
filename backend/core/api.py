@@ -1,38 +1,52 @@
-# core/api.py
-from typing import Any, Dict, List, Optional, Set
+# backend/core/api.py
+
+import httpx
+from typing import Any, Dict, List, Optional
 from cache import AsyncTTL
 from fastapi.exceptions import HTTPException
-from backend.core.constants import MINECRAFT_VERSION_MANIFEST_URL, VELOCITY_VERSION_MANIFEST_URL, \
-    VELOCITY_BUILD_MANIFEST_URL, FABRIC_GAME_VERSION_LIST_MANIFEST_URL, FABRIC_LOADER_VERSION_LIST_MANIFEST_URL, \
-    FABRIC_LOADER_VERSION_MANIFEST_URL, MCDR_PLUGINS_CATALOGUE_URL, FORGE_PROMOTIONS_MANIFEST_URL, FORGE_MAVEN_REPO_URL, \
+
+from backend.core.constants import (
+    MINECRAFT_VERSION_MANIFEST_URL,
+    VELOCITY_VERSION_MANIFEST_URL,
+    VELOCITY_BUILD_MANIFEST_URL,
+    FABRIC_GAME_VERSION_LIST_MANIFEST_URL,
+    FABRIC_LOADER_VERSION_LIST_MANIFEST_URL,
+    FABRIC_LOADER_VERSION_MANIFEST_URL,
+    MCDR_PLUGINS_CATALOGUE_URL,
+    FORGE_PROMOTIONS_MANIFEST_URL,
+    FORGE_MAVEN_REPO_URL,
     FORGE_LOADER_VERSION_API_URL
-import httpx
+)
 
 async_client = httpx.AsyncClient(timeout=10)
 
-
-async def async_get(url: str):
+async def async_get(url:str) -> httpx.Response:
     try:
         response = await async_client.get(url)
         response.raise_for_status()
-        return response.json()
+        return response
     except httpx.RequestError as e:
         raise HTTPException(status_code=503, detail=f"Failed to fetch {url}: {e}")
+
+async def async_get_json(url: str) -> Dict | List:
+    response = await async_get(url)
+    response.raise_for_status()
+    return response.json()
 
 
 @AsyncTTL(time_to_live=3600, maxsize=1)
 async def get_minecraft_versions_raw() -> Dict:
-    return await async_get(MINECRAFT_VERSION_MANIFEST_URL)
+    return await async_get_json(MINECRAFT_VERSION_MANIFEST_URL)
 
 
 @AsyncTTL(time_to_live=3600, maxsize=1)
 async def get_velocity_versions_raw() -> Dict:
-    return await async_get(VELOCITY_VERSION_MANIFEST_URL)
+    return await async_get_json(VELOCITY_VERSION_MANIFEST_URL)
 
 
 @AsyncTTL(time_to_live=3600, maxsize=128)
 async def get_minecraft_version_detail(version_url: str) -> Dict[str, Any]:
-    return await async_get(version_url)
+    return await async_get_json(version_url)
 
 
 @AsyncTTL(time_to_live=3600, maxsize=128)
@@ -46,7 +60,7 @@ async def get_minecraft_version_detail_by_version_id(version_id: str) -> Dict[st
 
 @AsyncTTL(time_to_live=3600, maxsize=128)
 async def get_velocity_version_detail(version: str, build: str) -> Dict[str, Any]:
-    _ = await async_get(VELOCITY_BUILD_MANIFEST_URL.format(version))
+    _ = await async_get_json(VELOCITY_BUILD_MANIFEST_URL.format(version))
     _build: Dict | None = None
     build: int = int(build)
     for b in _:
@@ -60,28 +74,28 @@ async def get_velocity_version_detail(version: str, build: str) -> Dict[str, Any
 
 @AsyncTTL(time_to_live=3600, maxsize=1)
 async def get_fabric_game_version_list() -> List:
-    return list(x['version'] for x in (await async_get(FABRIC_GAME_VERSION_LIST_MANIFEST_URL)))
+    return list(x['version'] for x in (await async_get_json(FABRIC_GAME_VERSION_LIST_MANIFEST_URL)))
 
 
 @AsyncTTL(time_to_live=3600, maxsize=128)
 async def get_fabric_loader_version_list(vanilla_core_version: str) -> List:
     return list(x['loader']['version'] for x in
-                (await async_get(FABRIC_LOADER_VERSION_LIST_MANIFEST_URL.format(vanilla_core_version))))
+                (await async_get_json(FABRIC_LOADER_VERSION_LIST_MANIFEST_URL.format(vanilla_core_version))))
 
 
 @AsyncTTL(time_to_live=3600, maxsize=1024)
 async def get_fabric_version_meta(vanilla_core_version: str, fabric_loader_version: str) -> Dict:
-    return await async_get(FABRIC_LOADER_VERSION_MANIFEST_URL.format(vanilla_core_version, fabric_loader_version))
+    return await async_get_json(FABRIC_LOADER_VERSION_MANIFEST_URL.format(vanilla_core_version, fabric_loader_version))
 
 
 @AsyncTTL(time_to_live=3600, maxsize=1)
 async def get_forge_promotions_manifest() -> Dict[str, Any]:
-    return await async_get(FORGE_PROMOTIONS_MANIFEST_URL)
+    return await async_get_json(FORGE_PROMOTIONS_MANIFEST_URL)
 
 
 @AsyncTTL(time_to_live=3600, maxsize=128)
 async def get_forge_loader_version(mc_version: str) -> Dict[str, List]:
-    return await async_get(FORGE_LOADER_VERSION_API_URL.format(mc_version))
+    return await async_get_json(FORGE_LOADER_VERSION_API_URL.format(mc_version))
 
 
 @AsyncTTL(time_to_live=3600, maxsize=1)
@@ -134,4 +148,4 @@ async def get_forge_installer_meta(mc_version: str, forge_version: str) -> Dict[
 
 @AsyncTTL(time_to_live=3600, maxsize=1)
 async def get_mcdr_plugins_catalogue() -> Dict:
-    return await async_get(MCDR_PLUGINS_CATALOGUE_URL)
+    return await async_get_json(MCDR_PLUGINS_CATALOGUE_URL)

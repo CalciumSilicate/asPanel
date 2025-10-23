@@ -1,6 +1,6 @@
 # backend/core/logger.py
-import sys
 
+import sys
 from loguru import logger
 
 from backend.core.constants import LOG_STORAGE, LOG_LEVEL, LOG_FILE_LEVEL

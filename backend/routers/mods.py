@@ -1,25 +1,24 @@
-from __future__ import annotations
+# backend/routers/mods.py
 
 import json
 import os
 import shutil
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status, BackgroundTasks, Query
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status, BackgroundTasks, Query
-from pydantic import BaseModel
-from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
-
-from backend import crud, models
-from backend.auth import require_role
+from backend.core import crud, models, schemas as _schemas
+from backend.core.auth import require_role
 from backend.core.constants import TEMP_PATH
 from backend.core.utils import get_file_md5, get_file_sha256, get_size_bytes, get_file_sha1
-from backend.database import get_db, SessionLocal
-from backend.logger import logger
-from backend.schemas import Role
+from backend.core.database import get_db, SessionLocal
+from backend.core.logger import logger
+from backend.core.schemas import Role
 
 router = APIRouter(prefix="/api", tags=["Mods"])
 
@@ -37,7 +36,7 @@ def _mods_dir_for_server(server: Any) -> Path:
     - Velocity：<server-path>/server/plugins
     """
     try:
-        from backend.schemas import ServerCoreConfig
+        from backend.core.schemas import ServerCoreConfig
         import json as _json
         core = ServerCoreConfig.model_validate(_json.loads(server.core_config))
         if core.server_type == 'velocity':
@@ -192,7 +191,6 @@ async def list_server_mods(
                     logger.warning(f"Modrinth hash lookup failed for {fp.name}: {e}")
                     meta = None
                 # 将结果写入 DB：若 meta 为空，则以 unknown 占位，避免后续重复补全
-                from backend import schemas as _schemas
                 rec = _schemas.ModDBCreate(
                     file_name=fp.name,
                     path=str(fp),
@@ -220,7 +218,7 @@ async def mods_overview(server_id: int, db: Session = Depends(get_db), _user=Dep
 
     # 读取 core_config
     import json as _json
-    from backend.schemas import ServerCoreConfig
+    from backend.core.schemas import ServerCoreConfig
     core = ServerCoreConfig.model_validate(_json.loads(server.core_config))
 
     mods_count = len([f for f in os.listdir(mods_dir) if (mods_dir / f).is_file() and not f.startswith('.')])
@@ -415,7 +413,7 @@ async def copy_mods(
     # 类型匹配校验：不同类型（vanilla/fabric/forge/velocity）禁止互相复制
     try:
         import json as _json
-        from backend.schemas import ServerCoreConfig
+        from backend.core.schemas import ServerCoreConfig
         sc = ServerCoreConfig.model_validate(_json.loads(src.core_config))
         dc = ServerCoreConfig.model_validate(_json.loads(dst.core_config))
         def _norm(core: ServerCoreConfig) -> str:
@@ -561,7 +559,7 @@ async def change_version(
                 raise HTTPException(status_code=vr.status_code, detail=vr.text)
             ver = vr.json()
             # 校验兼容性
-            from backend.schemas import ServerCoreConfig
+            from backend.core.schemas import ServerCoreConfig
             import json as _json
             core = ServerCoreConfig.model_validate(_json.loads(server.core_config))
             preferred_loader = (
@@ -720,7 +718,7 @@ async def install_from_modrinth(
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
     import json as _json
-    from backend.schemas import ServerCoreConfig
+    from backend.core.schemas import ServerCoreConfig
     core = ServerCoreConfig.model_validate(_json.loads(server.core_config))
 
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
@@ -862,7 +860,7 @@ async def install_from_modrinth(
 
 
 async def _job_check_updates(server_id: int):
-    from backend.schemas import ServerCoreConfig
+    from backend.core.schemas import ServerCoreConfig
     import json as _json
     async with httpx.AsyncClient(timeout=30) as client:
         with SessionLocal() as db:

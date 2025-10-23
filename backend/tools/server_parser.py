@@ -1,19 +1,19 @@
-# server_parser.py
+# backend/tools/server_parser.py
 
 import os
-from typing import Dict, Any, Tuple, Optional
-from pathlib import Path
-from backend import schemas, models
 import re
-from ruamel.yaml import YAML
-from ruamel.yaml.comments import CommentedMap
 import yaml
 import tomli
 import tomli_w
+from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap
+from typing import Dict, Any, Tuple, Optional
+from pathlib import Path
 
 from backend.core.utils import get_fabric_jar_version, get_forge_jar_version, get_vanilla_jar_version, get_velocity_jar_version
-from backend.logger import logger
-from backend.schemas import ServerType
+from backend.core.logger import logger
+from backend.core.schemas import ServerType
+from backend.core import models, schemas
 
 
 def parse_velocity_toml(file_path: Path) -> Dict[str, Any]:

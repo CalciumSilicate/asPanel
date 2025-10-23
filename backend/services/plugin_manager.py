@@ -1,21 +1,21 @@
 # backend/services/plugin_manager.py
+
 import ast
 import json
 import os
 import shutil
 import zipfile
-from pathlib import Path
-from typing import Dict, Tuple, Any, Optional, Coroutine, Set
 import httpx
 from fastapi import UploadFile, HTTPException, status
+from typing import Dict, Tuple, Any, Optional, Set
+from pathlib import Path
 
+from backend.core import schemas
+from backend.core.constants import UPLOADED_PLUGINS_PATH, TEMP_PATH
+from backend.core.utils import get_file_md5, get_file_sha256, get_size_bytes
+from backend.core.schemas import ServerPluginType
+from backend.core.logger import logger
 from backend.services.dependency_handler import DependencyHandler
-from .. import schemas, crud
-from ..core.constants import UPLOADED_PLUGINS_PATH, TEMP_PATH  # 注意：需要在 constants.py 中新增 UPLOADED_PLUGINS_PATH
-from ..core.utils import get_file_md5, get_file_sha256, get_size_bytes
-from ..schemas import ServerPluginType
-
-from backend.logger import logger
 
 
 class PluginManager:

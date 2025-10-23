@@ -1,18 +1,18 @@
-from typing import Optional, List
+# backend/routers/system.py
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
 import asyncio
 import psutil
 import socket
 import errno
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
-from backend import schemas, models
+from backend.core import models, schemas
 from backend.core.constants import CPU_PERCENT_INTERVAL
-from backend.database import get_db
-from backend.dependencies import mcdr_manager, task_manager
-from backend.schemas import TaskStatus, TaskType, Role
-from backend.auth import require_role
+from backend.core.database import get_db
+from backend.core.dependencies import mcdr_manager, task_manager
+from backend.core.schemas import TaskStatus, TaskType, Role
+from backend.core.auth import require_role
 
 router = APIRouter(
     prefix="/api",

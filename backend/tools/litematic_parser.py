@@ -1,42 +1,11 @@
-from __future__ import annotations
+# backend/tools/litematic_parser.py
 
-"""
-backend/tools/litematic_parser.py
-
-功能：
-- 解析 .litematic 文件，生成相对坐标的命令清单（command list，.mccl.txt）。
-- 参考 reference/litematic_to_command_list.py 的实现，做轻量封装供路由调用。
-
-依赖：litemapy, nbtlib
-"""
-
+import nbtlib
 from pathlib import Path
-from typing import List, Sequence, Tuple
-from datetime import datetime
+from typing import List, Tuple
+from litemapy import Schematic
+
 from backend.core.constants import LITEMATIC_COMMAND_LIST_PATH
-
-try:
-    from litemapy import Schematic
-except Exception as e:  # 延迟导入异常，便于上层捕获并返回合理错误
-    Schematic = None  # type: ignore
-    _litemapy_import_error = e
-else:
-    _litemapy_import_error = None
-
-try:
-    import nbtlib
-except Exception as e:  # 同上
-    nbtlib = None  # type: ignore
-    _nbtlib_import_error = e
-else:
-    _nbtlib_import_error = None
-
-
-def _ensure_imports():
-    if _litemapy_import_error is not None:
-        raise RuntimeError(f"litemapy 未安装或导入失败: {_litemapy_import_error}")
-    if _nbtlib_import_error is not None:
-        raise RuntimeError(f"nbtlib 未安装或导入失败: {_nbtlib_import_error}")
 
 
 def _ensure_dir(p: Path) -> None:
@@ -123,7 +92,6 @@ def _patch_missing_pending_ticks(root: "nbtlib.tag.Compound") -> None:  # type: 
 
 
 def _load_schematic_robust(file_path: str | Path) -> "Schematic":  # type: ignore[name-defined]
-    _ensure_imports()
     try:
         return Schematic.load(str(file_path))  # type: ignore
     except Exception as e:
@@ -137,9 +105,9 @@ def _load_schematic_robust(file_path: str | Path) -> "Schematic":  # type: ignor
 
 
 def _gather_commands_relative(
-    schem: "Schematic",  # type: ignore[name-defined]
-    offset: Tuple[int, int, int] = (0, 0, 0),
-    place_air: bool = False,
+        schem: "Schematic",  # type: ignore[name-defined]
+        offset: Tuple[int, int, int] = (0, 0, 0),
+        place_air: bool = False,
 ) -> Tuple[List[str], List[str], List[str], List[Tuple[int, int]]]:
     """
     生成相对坐标的命令序列：setblock / summon / data merge 及 forceload 区块偏移列表。
@@ -244,17 +212,16 @@ def _gather_commands_relative(
 
 
 def generate_command_list(
-    input_litematic: Path,
-    output_txt: Path,
-    offset: Tuple[int, int, int] = (0, 0, 0),
-    place_air: bool = False,
+        input_litematic: Path,
+        output_txt: Path,
+        offset: Tuple[int, int, int] = (0, 0, 0),
+        place_air: bool = False,
 ) -> Path:
     """
     从 .litematic 生成命令清单，写入 output_txt 并返回路径。
     - 生成顺序：forceload add -> setblock -> summon -> data merge -> forceload remove
     - 坐标采用相对坐标（~dx ~dy ~dz）
     """
-    _ensure_imports()
 
     input_litematic = input_litematic.resolve()
     output_txt = output_txt.resolve()

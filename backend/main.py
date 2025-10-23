@@ -1,6 +1,9 @@
-# main.py
-import asyncio
+# backend/main.py
 
+import time
+import sys
+import asyncio
+import socketio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -11,14 +14,13 @@ from fastapi.exception_handlers import (
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-import socketio
 
-from backend import models
-from backend.database import engine, ensure_user_columns
+from backend.core import models
+from backend.core.database import engine
 from backend.core.constants import (
-    ALLOWED_ORIGINS, AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, ARCHIVE_STORAGE_PATH, ARCHIVE_URL_PREFIX
+    ALLOWED_ORIGINS, AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, ARCHIVE_STORAGE_PATH, ARCHIVE_URL_PREFIX,
+    UVICORN_HOST, UVICORN_PORT, UVICORN_LOG_LEVEL
 )
-
 from backend.routers import users, system, archives, servers, versions, plugins, tools
 from backend.routers import players as players_router
 from backend.routers import stats as stats_router
@@ -30,17 +32,11 @@ from backend.services import onebot
 from backend.routers.system import cpu_sampler
 from backend.services import stats_service
 from backend.core.api import *
-from backend.ws import sio
-import time
-from backend.logger import logger
-import sys
+from backend.core.ws import sio
+from backend.core.logger import logger
 
 models.Base.metadata.create_all(bind=engine)
-# 轻量数据库迁移：为 users 表补充新增列
-try:
-    ensure_user_columns()
-except Exception:
-    pass
+
 app = FastAPI(title="AS Panel API")
 
 
@@ -198,9 +194,19 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"启动统计入库任务失败：{e}")
 
+
 main_asgi_app = socketio.ASGIApp(sio, other_asgi_app=app, socketio_path='/ws/socket.io')
 
 
 @app.get("/api/health")
 def read_root():
     return {"status": "ok"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "backend.main:main_asgi_app",
+        host=UVICORN_HOST,
+        port=UVICORN_PORT,
+        log_level=UVICORN_LOG_LEVEL
+    )

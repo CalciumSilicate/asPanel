@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+# backend/routers/settings.py
+
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from backend import crud, models, schemas
-from backend.auth import require_role
-from backend.database import get_db
-from backend.schemas import Role
+from backend.core import crud, models, schemas
+from backend.core.auth import require_role
+from backend.core.database import get_db
+from backend.core.schemas import Role
 
 
 router = APIRouter(
