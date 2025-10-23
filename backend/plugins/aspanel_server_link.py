@@ -28,7 +28,7 @@ _SERVER_NAME = Path(".").resolve().name
 _SERVER_GROUPS: List[str] = []
 _LOCAL_PLAYERS: set[str] = set()
 _CQ_PATTERN = re.compile(r"\[CQ:[^\]]*\]")
-_JOINED_LOCAL_PATTERN = re.compile(r'^\w+\[local\] logged in with entity id\b')
+_JOINED_LOCAL_PATTERN = re.compile(r"\[local\]\s+logged in with entity id\b")
 
 # ----------------------------- 工具函数与配置 -----------------------------
 
@@ -39,16 +39,20 @@ PLUGIN_METADATA = {
     "name": "asPanel Server Link",
     "description": "将 MCDR 事件通过 WS 上报到 aspanel，并携带服务器分组信息",
     "requirements": ["mcdreforged>=2.0.0"],
-    "dependencies": {"websocket-client": "*"}
 }
 
 
 def _is_bot_joined(info: Info):
-    joined_player = _JOINED_LOCAL_PATTERN.match(info.content)
-    if joined_player:
-        if joined_player.group(2) == "local":
-            return True
-    return False
+    """检测是否为本地(local)登录的机器人/控制台伪玩家加入日志。
+
+    旧实现错误地访问了不存在的捕获组，导致在匹配时抛出异常，
+    进一步影响后续事件处理。这里改为安全的 search 检测。
+    """
+    try:
+        content = str(getattr(info, "content", "") or "")
+    except Exception:
+        return False
+    return bool(_JOINED_LOCAL_PATTERN.search(content))
 
 
 def _utc_iso() -> str:
@@ -403,8 +407,6 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
             label.set_hover_text(f"点击复制 {raw}")
         return label
     if seg_type == "record":
-        label = RText("[语音]", color=RColor.gray)
-        label.set_hover_text("暂不支持播放语音消息")
         url = str(data.get("url") or data.get("file") or "")
         label = RText("[语音]", color=RColor.aqua)
         if url:
@@ -430,7 +432,6 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
         return label
     if seg_type == "share":
         url = _normalize_media_url(data.get("url") or data.get("jumpUrl") or data.get("file"))
-        url = str(data.get("url") or data.get("jumpUrl") or data.get("file") or "")
         title = str(data.get("title") or data.get("content") or url or "")
         label = RText("[链接]", color=RColor.aqua)
         if url:
@@ -439,7 +440,6 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
         return label
     if seg_type == "image":
         url = _normalize_media_url(data.get("url") or data.get("file"))
-        url = str(data.get("url") or data.get("file") or "")
         label = RText("[图片]", color=RColor.aqua)
         if url:
             label.set_click_event(RAction.open_url, url)
