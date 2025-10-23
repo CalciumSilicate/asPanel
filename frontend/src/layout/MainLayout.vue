@@ -10,21 +10,57 @@
         <span class="brand" v-show="!isCollapse">AS Panel</span>
       </div>
       <div class="header-right">
-        <!-- 主题切换按钮：放在头像左边 -->
-        <el-tooltip :content="isDark ? '切换为日间模式' : '切换为夜间模式'" placement="bottom">
-          <el-button
-            class="theme-toggle"
-            :aria-label="isDark ? '切换为日间模式' : '切换为夜间模式'"
-            circle
-            text
-            @click="toggleTheme"
+        <!-- 后台任务下拉（示例数据，后端接入后替换） -->
+        <el-dropdown
+          trigger="click"
+          class="tasks-dropdown"
+          placement="bottom-end"
+          :popper-options="dropdownPopperOptions"
+        >
+          <el-badge
+            :value="activeTasksCount"
+            :max="99"
+            type="danger"
+            :hidden="activeTasksCount === 0"
+            class="tasks-badge"
           >
-            <el-icon :size="18">
-              <Moon v-if="isDark"/>
-              <Sunny v-else/>
-            </el-icon>
-          </el-button>
-        </el-tooltip>
+            <el-button
+              class="tasks-toggle"
+              aria-label="后台任务"
+              title="后台任务"
+              circle
+              text
+            >
+              <el-icon :size="18">
+                <Operation/>
+              </el-icon>
+            </el-button>
+          </el-badge>
+          <template #dropdown>
+            <el-dropdown-menu class="tasks-menu">
+              <el-dropdown-item v-for="t in tasks" :key="t.id" disabled>
+                <div class="task-row">
+                  <div class="task-row-header">
+                    <span class="task-name">{{ t.name }}</span>
+                    <span class="task-state">{{ statusLabel(t.status) }}</span>
+                    <span class="task-percent">{{ displayPercent(t) }}%</span>
+                  </div>
+                  <div class="task-row-desc" :title="t.desc">{{ t.desc }}</div>
+                  <el-progress
+                    v-if="t.status !== 'pending'"
+                    class="task-progress"
+                    :class="t.status"
+                    :percentage="progressPercent(t)"
+                    :stroke-width="4"
+                    :show-text="false"
+                    :color="progressColor(t.status)"
+                  />
+                </div>
+              </el-dropdown-item>
+              <el-dropdown-item v-if="tasks.length === 0" disabled>暂无任务</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
 
         <el-dropdown @command="handleCommand">
           <span class="user-info">
@@ -302,7 +338,7 @@
 </template>
 
 <script setup>
-import {ref, computed, onMounted, watchEffect} from 'vue';
+import {ref, computed, onMounted} from 'vue';
 import {useRoute, useRouter} from 'vue-router';
 import { asideCollapsed as isCollapse, asideCollapsing as isCollapsing, toggleAside as toggleCollapse } from '@/store/ui';
 import {
@@ -313,9 +349,7 @@ import {
   Cpu, Grid, Umbrella, Tools, Promotion, MapLocation, Connection, User, Printer,
   // Icons for Server Configuration
   SetUp, Link, Refresh, VideoPlay, Key,
-  LocationInformation, Place, List, RefreshRight, Comment, DocumentCopy, Operation,
-  // Theme toggle icons
-  Sunny, Moon
+  LocationInformation, Place, List, RefreshRight, Comment, DocumentCopy, Operation
 } from '@element-plus/icons-vue';
 import {user, fullAvatarUrl, fetchUser, clearUser, refreshAvatar, hasRole} from '@/store/user';
 import AvatarUploader from '@/components/AvatarUploader.vue';
@@ -328,24 +362,40 @@ const route = useRoute();
 const router = useRouter();
 const avatarDialogVisible = ref(false);
 
-// 主题状态
-const isDark = ref(false);
-const THEME_KEY = 'theme';
-
-const applyTheme = (dark) => {
-  const root = document.documentElement;
-  if (dark) {
-    root.classList.add('dark');
-    localStorage.setItem(THEME_KEY, 'dark');
-  } else {
-    root.classList.remove('dark');
-    localStorage.setItem(THEME_KEY, 'light');
-  }
+// 后台任务（示例数据，后端接入后替换）
+const tasks = ref([
+  { id: 1, name: '备份世界存档', progress: 42, status: 'running', desc: '世界A 2.1GB，目标：NAS/Backups' },
+  { id: 2, name: '日志归档', progress: 100, status: 'success', desc: '2024-10-23 ~ 2024-10-24' },
+  { id: 3, name: '插件更新检查', progress: 0, status: 'pending', desc: '检查 23 个插件版本' }
+]);
+// 仅统计 pending / running 两类任务
+const activeTasksCount = computed(() => tasks.value.filter(t => t.status === 'pending' || t.status === 'running').length);
+// 进度条颜色：running 蓝色、failed 红色、success 绿色、其他信息色
+const progressColor = (status) => {
+  if (status === 'running') return 'var(--el-color-primary)';
+  if (status === 'failed') return 'var(--el-color-danger)';
+  if (status === 'success') return 'var(--el-color-success)';
+  return 'var(--el-color-info)';
 };
-
-const toggleTheme = () => {
-  isDark.value = !isDark.value;
+// Dropdown 的 Popper 配置，防止溢出并靠右展开
+const dropdownPopperOptions = {
+  modifiers: [
+    { name: 'offset', options: { offset: [0, 8] } },
+    { name: 'preventOverflow', options: { padding: 8, boundary: 'viewport' } },
+    { name: 'flip', options: { fallbackPlacements: ['bottom-end', 'bottom-start', 'top-end', 'top-start'] } },
+  ],
 };
+// 状态中文文案
+const statusLabel = (status) => ({
+  pending: '排队',
+  running: '进行中',
+  success: '成功',
+  failed: '失败'
+}[status] || status);
+// 展示用百分比文案（success/failed 都显示 100）
+const displayPercent = (t) => (t.status === 'success' || t.status === 'failed') ? 100 : t.progress;
+// 实际进度条渲染百分比
+const progressPercent = (t) => (t.status === 'success' || t.status === 'failed') ? 100 : t.progress;
 
 const activeMenu = computed(() => {
   const {meta, path} = route;
@@ -355,8 +405,6 @@ const activeMenu = computed(() => {
   }
   return path;
 });
-
-watchEffect(() => applyTheme(isDark.value));
 
 // 折叠/展开逻辑改为使用全局 ui store 的 toggleAside（此处不再定义同名函数）
 
@@ -378,13 +426,6 @@ const handleAvatarSuccess = async () => {
 onMounted(() => {
   fetchUser();
   // fetchPlayers();
-  // 初始化主题：优先使用本地设置，其次跟随系统
-  const saved = localStorage.getItem(THEME_KEY);
-  if (saved === 'dark' || saved === 'light') {
-    isDark.value = saved === 'dark';
-  } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-    isDark.value = true;
-  }
 });
 </script>
 
@@ -551,7 +592,44 @@ onMounted(() => {
 }
 .collapse-icon :deep(svg) { display: block; }
 
-.theme-toggle { margin-right: 8px; }
+/* 任务按钮样式（小圆按钮） */
+.tasks-dropdown { margin-right: 8px; }
+
+/* 任务下拉菜单内容样式 */
+.tasks-menu { width: 460px; max-width: min(560px, 92vw); padding: 6px 0; overflow-x: hidden; box-sizing: border-box; }
+/* 允许下拉项内多行布局，并改为块级容器以包裹自定义结构 */
+.tasks-menu :deep(.el-dropdown-menu__item) {
+  white-space: normal;
+  height: auto;
+  line-height: 1.4;
+  padding: 0 !important;
+  display: block !important;
+  align-items: initial !important;
+}
+.tasks-menu .tasks-menu-header { font-weight: 600; color: var(--color-text); }
+.task-row { padding: 10px 14px; display: block; width: 100%; box-sizing: border-box; }
+.task-row-header { display: grid; grid-template-columns: 1fr auto auto; column-gap: 12px; align-items: baseline; margin-bottom: 4px; }
+.task-name { font-size: 13px; color: var(--color-text); font-weight: 600; text-align: left; }
+.task-state { font-size: 12px; color: var(--el-text-color-secondary); text-align: right; }
+.task-percent { font-size: 12px; color: var(--el-text-color-secondary); text-align: right; }
+.task-row-desc {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  margin: 2px 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.task-progress { display: block; width: 96%; margin: 0 auto; }
+.task-progress.running :deep(.el-progress-bar__outer) {
+  background-color: #4c4d4f; /* 深灰未完成部分 */
+}
+.task-progress.failed :deep(.el-progress-bar__outer),
+.task-progress.failed :deep(.el-progress-bar__inner) {
+  background-color: var(--el-color-danger);
+}
+.tasks-badge :deep(.el-badge__content) { transform: translate(4px, -6px); }
+
 .header-right .user-info {
   display: flex;
   align-items: center;
