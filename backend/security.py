@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import jwt
 from passlib.context import CryptContext
-from backend.core.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from backend.core.constants import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 # 使用 bcrypt_sha256 以解决 bcrypt 原生 72 字节明文长度限制问题，
 # 同时保留对旧 "bcrypt" 哈希的验证兼容（若数据库中已有旧数据）。

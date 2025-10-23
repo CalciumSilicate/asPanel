@@ -397,7 +397,7 @@ async def _handle_single(payload: Dict[str, Any]):
                         row = _crud.create_chat_message(db, row)
                         # 使用 Pydantic 模型进行 JSON 序列化，避免 datetime 直接传递导致的序列化问题
                         from backend import schemas as _schemas
-                        from backend.core.config import to_local_dt
+                        from backend.core.constants import to_local_dt
                         out_model = _schemas.ChatMessageOut.model_validate(row)
                         try:
                             if getattr(row, 'created_at', None):

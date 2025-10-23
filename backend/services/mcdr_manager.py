@@ -1,5 +1,4 @@
 # mcdr_manager.py
-
 import asyncio
 from venv import logger
 
@@ -13,7 +12,7 @@ from typing import Optional, List, TextIO, TYPE_CHECKING, Tuple
 import psutil
 
 from backend.database import SessionLocal
-from backend.core.config import LOG_EMIT_INTERVAL_MS
+from backend.core.constants import LOG_EMIT_INTERVAL_MS
 from backend import schemas, models
 from backend import crud
 from backend.logger import logger
@@ -171,7 +170,7 @@ class MCDRManager:
         stripped_line = cleaned_line.strip()
         if stripped_line == '>':
             return None
-        return cleaned_line if stripped_line else None
+        return stripped_line if stripped_line else None
 
     async def _read_logs(self, server: models.Server, process: asyncio.subprocess.Process):
         streams = [process.stdout, process.stderr]
@@ -182,7 +181,8 @@ class MCDRManager:
             for future in done:
                 try:
                     line_bytes = future.result()
-                    if not line_bytes: continue
+                    if not line_bytes:
+                        continue
                     raw_line = line_bytes.decode('utf-8', errors='ignore')
                     cleaned_line = self._clean_log_line(raw_line)
                     if cleaned_line:
@@ -200,6 +200,10 @@ class MCDRManager:
                         if server.id not in self.java_pid and "Server is running at PID" in cleaned_line:
                             self.return_code.pop(server.id, None)
                             self.java_pid[server.id] = int(cleaned_line.split()[-1])
+
+                        if server.id not in self.java_pid and "服务端正在以 PID" in cleaned_line:
+                            self.return_code.pop(server.id, None)
+                            self.java_pid[server.id] = int(cleaned_line.split()[-2])
 
                         if server.id in self.processes and "Server process stopped with code" in cleaned_line:
                             self.return_code[server.id] = int(cleaned_line.split()[-1])
@@ -369,7 +373,6 @@ class MCDRManager:
                 return schemas.ServerStatus.RUNNING, 0
         if server_id not in self.processes and return_code not in [None, 0]:
             return schemas.ServerStatus.ERROR, return_code
-            
 
         return schemas.ServerStatus.STOPPED, 0
 

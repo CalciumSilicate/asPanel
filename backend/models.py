@@ -6,7 +6,7 @@ import json
 import enum
 
 from backend import schemas
-from backend.core.config import DEFAULT_CORE_CONFIG, DEFAULT_USER_ROLE
+from backend.core.constants import DEFAULT_CORE_CONFIG, DEFAULT_USER_ROLE
 
 Base = declarative_base()
 

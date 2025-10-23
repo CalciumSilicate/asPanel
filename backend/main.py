@@ -15,7 +15,7 @@ import socketio
 
 from backend import models
 from backend.database import engine, ensure_user_columns
-from backend.core.config import (
+from backend.core.constants import (
     ALLOWED_ORIGINS, AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, ARCHIVE_STORAGE_PATH, ARCHIVE_URL_PREFIX
 )
 

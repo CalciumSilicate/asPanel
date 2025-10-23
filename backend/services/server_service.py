@@ -13,7 +13,7 @@ from .. import crud, models, schemas
 from backend import server_parser
 from backend.services.mcdr_manager import MCDRManager
 from backend.services.plugin_manager import PluginManager
-from ..core.config import MCDR_ROOT_PATH
+from ..core.constants import MCDR_ROOT_PATH
 from ..core.utils import get_size_mb, poll_copy_progress, copytree_resumable_throttled
 from ..schemas import ServerCoreConfig, Task, TaskStatus
 from ..server_parser import infer_server_type_and_analyze_core_config

@@ -1,4 +1,4 @@
-# core/config.py
+# core/constants.py
 import re
 from pathlib import Path
 import os

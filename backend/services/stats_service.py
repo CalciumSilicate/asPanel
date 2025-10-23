@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Iterable, List, Optional, Set, Tuple
 
-from backend.core.config import STATS_WHITELIST_ON, STATS_WHITELIST, STATS_IGNORE, get_tzinfo
+from backend.core.constants import STATS_WHITELIST_ON, STATS_WHITELIST, STATS_IGNORE, get_tzinfo
 from backend.database import SessionLocal
 from backend import crud, models
 from backend.logger import logger

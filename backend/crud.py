@@ -9,7 +9,7 @@ from backend import models, schemas
 from backend.models import Server
 from backend.schemas import ServerCoreConfig
 from backend.security import get_password_hash
-from backend.core.config import TEMP_PATH
+from backend.core.constants import TEMP_PATH
 
 
 # --- User CRUD ---

@@ -18,7 +18,7 @@ from backend.dependencies import mcdr_manager, server_service
 from backend.dependencies import task_manager
 from backend.schemas import TaskType, Role, PaperBuild, PaperBuildDownload, ServerCoreConfig
 from backend.tasks.background import background_download_jar, background_install_fabric, background_install_forge
-from backend.core.config import DEFAULT_SERVER_PROPERTIES_CONFIG, PUBLIC_PLUGINS_DIRECTORIES
+from backend.core.constants import DEFAULT_SERVER_PROPERTIES_CONFIG, PUBLIC_PLUGINS_DIRECTORIES
 from backend.core.utils import get_file_sha1, get_file_sha256, get_fabric_jar_version, get_forge_jar_version, Timer
 from backend.core.api import get_velocity_version_detail, get_minecraft_version_detail_by_version_id, \
     get_fabric_version_meta, get_forge_installer_meta

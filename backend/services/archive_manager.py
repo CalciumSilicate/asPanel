@@ -6,7 +6,7 @@ import tarfile
 from pathlib import Path
 import uuid
 
-from backend.core.config import ARCHIVE_STORAGE_PATH
+from backend.core.constants import ARCHIVE_STORAGE_PATH
 from backend import server_parser
 
 

@@ -19,7 +19,7 @@ from backend.tools.litematic_parser import (
     has_command_list_for,
     get_command_list_output_file_name_for,
 )
-from backend.core.config import (
+from backend.core.constants import (
     UPLOADED_LITEMATIC_PATH,
     LITEMATIC_COMMAND_LIST_PATH,
     to_local_dt,
@@ -170,7 +170,7 @@ async def litematic_upload(
 ):
     """上传 .litematic 文件：以 UUID 作为本地文件名，数据库记录原始文件名。
 
-    - 物理路径：backend/core/config.py → UPLOADED_LITEMATIC_PATH
+    - 物理路径：backend/core/constants.py → UPLOADED_LITEMATIC_PATH
     - DB 表：models.Download（url 字段固定为 'litematic-upload'）
     """
     if not file.filename or not file.filename.lower().endswith(".litematic"):
