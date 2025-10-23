@@ -12,7 +12,7 @@ from backend.core.ws import sio
 from backend.core.logger import logger
 from pathlib import Path
 from backend.core.database import get_db_context
-from backend.core import crud, crud as _crud, models as _models, schemas
+from backend.core import crud, models as _models, schemas
 from backend.core.dependencies import mcdr_manager
 from backend.services import onebot
 
@@ -59,9 +59,9 @@ async def _playtime_tick_loop():
                         # world 不存在则清理键
                         try:
                             for p in players:
-                                rec = _crud.get_player_by_name(db, p)
+                                rec = crud.get_player_by_name(db, p)
                                 if rec:
-                                    _crud.remove_server_from_player_play_time(db, rec, server_name)
+                                    crud.remove_server_from_player_play_time(db, rec, server_name)
                         except Exception:
                             pass
                         # 边界对齐也推进，避免后续离开时过大尾差
@@ -73,7 +73,7 @@ async def _playtime_tick_loop():
                     # 对上一完整周期 [boundary_prev, boundary_now) 进行累加：仅对整分钟内全程在线的玩家
                     for p in list(players):
                         try:
-                            rec = _crud.get_player_by_name(db, p)
+                            rec = crud.get_player_by_name(db, p)
                             if not rec or rec.player_name is None:
                                 continue
                             try:
@@ -87,7 +87,7 @@ async def _playtime_tick_loop():
                                 # 未记录加入时间，跳过
                                 continue
                             if float(joined) <= boundary_prev:
-                                _crud.add_player_play_time_ticks(db, rec, server_name, 1200)
+                                crud.add_player_play_time_ticks(db, rec, server_name, 1200)
                                 logger.debug(f"[MCDR-WS] 为玩家 {p} 在服务器 {server_name} 累计了 1200 ticks（完整分钟）")
                                 increments_total += 1
                                 per_server[server_name] = per_server.get(server_name, 0) + 1
@@ -334,7 +334,6 @@ async def _handle_single(payload: Dict[str, Any]):
             content = str((info or {}).get("content") or (info or {}).get("raw_content") or "")
             src_server = data.get("server")
             if is_user and player and isinstance(src_server, str) and src_server:
-                from backend import crud as _crud
                 with get_db_context() as db:
                     # 将该消息落库到所有该服务器所在分组
                     groups = _get_groups_for_server_name(db, src_server)
@@ -364,7 +363,7 @@ async def _handle_single(payload: Dict[str, Any]):
                             ids = []
                         # 将该 server 属于的组写入
                         target = None
-                        for s in _crud.get_all_servers(db):
+                        for s in crud.get_all_servers(db):
                             try:
                                 if Path(s.path).name == src_server and s.id in ids:
                                     target = g
@@ -381,7 +380,7 @@ async def _handle_single(payload: Dict[str, Any]):
                             server_name=src_server,
                             player_name=str(player),
                         )
-                        row = _crud.create_chat_message(db, row)
+                        row = crud.create_chat_message(db, row)
                         saved += 1
                         # 使用 Pydantic 模型进行 JSON 序列化，避免 datetime 直接传递导致的序列化问题
                         out_model = schemas.ChatMessageOut.model_validate(row)
