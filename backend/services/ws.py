@@ -338,6 +338,10 @@ async def _handle_single(payload: Dict[str, Any]):
                 with get_db_context() as db:
                     # 将该消息落库到所有该服务器所在分组
                     groups = _get_groups_for_server_name(db, src_server)
+                    try:
+                        logger.debug(f"[MCDR-WS] 收到用户消息 | server={src_server} player={player} len={len(content)} 目标组={groups}")
+                    except Exception:
+                        pass
                     # 为 Web 前端构建统一输出结构
                     base = {
                         "group_id": None,
@@ -350,6 +354,8 @@ async def _handle_single(payload: Dict[str, Any]):
                         "server_name": src_server,
                         "player_name": str(player),
                     }
+                    saved = 0
+                    emitted = 0
                     for g in crud.list_server_link_groups(db):
                         import json as _json
                         try:
@@ -376,6 +382,7 @@ async def _handle_single(payload: Dict[str, Any]):
                             player_name=str(player),
                         )
                         row = _crud.create_chat_message(db, row)
+                        saved += 1
                         # 使用 Pydantic 模型进行 JSON 序列化，避免 datetime 直接传递导致的序列化问题
                         out_model = schemas.ChatMessageOut.model_validate(row)
                         try:
@@ -385,6 +392,11 @@ async def _handle_single(payload: Dict[str, Any]):
                             pass
                         out = out_model.model_dump(mode='json')
                         await sio.emit("chat_message", out)
+                        emitted += 1
+                    try:
+                        logger.debug(f"[MCDR-WS] 用户消息已处理 | server={src_server} save={saved} emit={emitted}")
+                    except Exception:
+                        pass
                 await onebot.handle_prefixed_game_chat(str(src_server), str(player), content)
         except Exception:
             pass

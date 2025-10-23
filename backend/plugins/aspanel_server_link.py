@@ -264,11 +264,8 @@ class WsSender:
                             except Exception:
                                 _log_warn(self.server, "[asPanel] 无法解析服务端消息（JSON 解析失败）")
                     except Exception:
-                        # 超时或接收失败，忽略
-                        # 仅在 debug 级别记录超时噪声，不影响主循环
-                        # _log_debug(self.server, "[asPanel] WS 收取超时/无新消息")
+                        pass
 
-                    # 取发送队列
                     try:
                         item = self.queue.get(timeout=timeout)
                     except Empty:
@@ -628,7 +625,7 @@ def on_load(server: ServerInterface, prev_module: Any):
         pass
     cfg = _read_env_config()
     try:
-        server.logger.info(f"[asPanel] 插件加载 | WS={cfg.get('ws_url')}")
+        server.logger.info(f"[asPanel] 插件加载 | WS={cfg.get('ws_url')} server_name={_SERVER_NAME}")
     except Exception:
         pass
     _get_sender(server)
