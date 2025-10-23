@@ -12,6 +12,8 @@ from queue import Queue, Full, Empty
 from typing import Any, Optional, List
 from urllib.parse import urlparse, urlunparse
 
+from ..core.constants import UVICORN_PORT
+
 from mcdreforged.api.all import *
 
 # Dependency：websocket-client（pip 包名：websocket-client）
@@ -81,7 +83,7 @@ def _read_env_config() -> dict[str, Any]:
         return int(v) if v is not None and v != "" else default
 
     cfg = {
-        "ws_url": os.getenv("ASPANEL_WS_URL", "ws://127.0.0.1:8000/aspanel/mcdr"),
+        "ws_url": os.getenv("ASPANEL_WS_URL", f"ws://127.0.0.1:{UVICORN_PORT}/aspanel/mcdr"),
         "connect_timeout": _int_env("ASPANEL_WS_CONNECT_TIMEOUT", 5),
         "reconnect_interval": _int_env("ASPANEL_WS_RECONNECT_INTERVAL", 3),
         "max_queue": _int_env("ASPANEL_WS_MAX_QUEUE", 2000),
