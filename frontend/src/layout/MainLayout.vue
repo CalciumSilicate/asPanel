@@ -47,7 +47,7 @@
                   </div>
                   <div class="task-row-desc" :title="t.desc">{{ t.desc }}</div>
                   <el-progress
-                    v-if="t.status !== 'pending'"
+                    v-if="t.status !== 'PENDING'"
                     class="task-progress"
                     :class="t.status"
                     :percentage="progressPercent(t)"
@@ -364,17 +364,18 @@ const avatarDialogVisible = ref(false);
 
 // 后台任务（示例数据，后端接入后替换）
 const tasks = ref([
-  { id: 1, name: '备份世界存档', progress: 42, status: 'running', desc: '世界A 2.1GB，目标：NAS/Backups' },
-  { id: 2, name: '日志归档', progress: 100, status: 'success', desc: '2024-10-23 ~ 2024-10-24' },
-  { id: 3, name: '插件更新检查', progress: 0, status: 'pending', desc: '检查 23 个插件版本' }
+  { id: 1, name: '备份世界存档', progress: 42, status: 'RUNNING', desc: '世界A 2.1GB，目标：NAS/Backups' },
+  { id: 2, name: '日志归档', progress: 100, status: 'SUCCESS', desc: '2024-10-23 ~ 2024-10-24' },
+  { id: 3, name: '插件更新检查', progress: 0, status: 'PENDING', desc: '检查 23 个插件版本' },
+  { id: 4, name: '插件更新检查', progress: 0, status: 'FAILED', desc: '检查 23 个插件版本' }
 ]);
-// 仅统计 pending / running 两类任务
-const activeTasksCount = computed(() => tasks.value.filter(t => t.status === 'pending' || t.status === 'running').length);
-// 进度条颜色：running 蓝色、failed 红色、success 绿色、其他信息色
+// 仅统计 PENDING / RUNNING 两类任务
+const activeTasksCount = computed(() => tasks.value.filter(t => t.status === 'PENDING' || t.status === 'RUNNING').length);
+// 进度条颜色：RUNNING 蓝色、FAILED 红色、SUCCESS 绿色、其他信息色
 const progressColor = (status) => {
-  if (status === 'running') return 'var(--el-color-primary)';
-  if (status === 'failed') return 'var(--el-color-danger)';
-  if (status === 'success') return 'var(--el-color-success)';
+  if (status === 'RUNNING') return 'var(--el-color-primary)';
+  if (status === 'FAILED') return 'var(--el-color-danger)';
+  if (status === 'SUCCESS') return 'var(--el-color-success)';
   return 'var(--el-color-info)';
 };
 // Dropdown 的 Popper 配置，防止溢出并靠右展开
@@ -387,15 +388,15 @@ const dropdownPopperOptions = {
 };
 // 状态中文文案
 const statusLabel = (status) => ({
-  pending: '排队',
-  running: '进行中',
-  success: '成功',
-  failed: '失败'
+  PENDING: '排队',
+  RUNNING: '进行中',
+  SUCCESS: '成功',
+  FAILED: '失败'
 }[status] || status);
-// 展示用百分比文案（success/failed 都显示 100）
-const displayPercent = (t) => (t.status === 'success' || t.status === 'failed') ? 100 : t.progress;
+// 展示用百分比文案（SUCCESS/FAILED 都显示 100）
+const displayPercent = (t) => (t.status === 'SUCCESS' || t.status === 'FAILED') ? 100 : t.progress;
 // 实际进度条渲染百分比
-const progressPercent = (t) => (t.status === 'success' || t.status === 'failed') ? 100 : t.progress;
+const progressPercent = (t) => (t.status === 'SUCCESS' || t.status === 'FAILED') ? 100 : t.progress;
 
 const activeMenu = computed(() => {
   const {meta, path} = route;
