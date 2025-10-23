@@ -618,11 +618,19 @@ async def handle_prefixed_game_chat(server_name: str, player: str, content: str)
     if not message:
         return
     groups = _SERVER_TO_GROUPS.get(server_name, [])
+    try:
+        logger.debug(f"[OneBot] 前缀消息检查 | server={server_name} player={player} len={len(message)} 目标组={groups}")
+    except Exception:
+        pass
     for gid in groups:
         qq_group = _GROUP_TO_QQ.get(gid)
         if not qq_group:
             continue
         await _send_group_text(qq_group, f"<{player}> {message}")
+        try:
+            logger.debug(f"[OneBot] 向 QQ 群发送前缀消息 | gid={gid} qq_group={qq_group}")
+        except Exception:
+            pass
 
 
 async def handle_player_join(server_name: str, player: str) -> None:
