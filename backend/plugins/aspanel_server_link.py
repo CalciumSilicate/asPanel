@@ -39,6 +39,38 @@ PLUGIN_METADATA = {
 }
 
 
+# 统一日志辅助（有 logger 用 logger；否则退化为 print）
+def _log_debug(server: ServerInterface, msg: str):
+    try:
+        if hasattr(server, "logger") and server.logger:
+            server.logger.debug(msg)
+        else:
+            print(msg)
+    except Exception:
+        pass
+
+
+def _log_info(server: ServerInterface, msg: str):
+    try:
+        if hasattr(server, "logger") and server.logger:
+            server.logger.info(msg)
+        else:
+            print(msg)
+    except Exception:
+        pass
+
+
+def _log_warn(server: ServerInterface, msg: str):
+    try:
+        if hasattr(server, "logger") and server.logger:
+            server.logger.warning(msg)
+        else:
+            print(msg)
+    except Exception:
+        pass
+
+
+
 def _is_bot_joined(info: Info):
     """检测是否为本地(local)登录的机器人/控制台伪玩家加入日志。
 
@@ -113,6 +145,7 @@ class WsSender:
             return
         self._t = threading.Thread(target=self._run, name="aspanel-ws-sender", daemon=True)
         self._t.start()
+        _log_info(self.server, f"[asPanel] WS 发送线程已启动 | url={self.ws_url}")
 
     def stop(self, wait_seconds: float = 0.5) -> None:
         self._stop.set()
@@ -127,6 +160,7 @@ class WsSender:
                 self._ws.close()
         except Exception:
             pass
+        _log_info(self.server, "[asPanel] WS 发送线程已停止")
 
     def enqueue(self, event: str, data: dict[str, Any]) -> None:
         # 统一追加 server 与 server_groups 字段
@@ -146,6 +180,10 @@ class WsSender:
             pass
         try:
             self.queue.put_nowait(payload)
+            try:
+                _log_debug(self.server, f"[asPanel] 事件入队成功 | event={event} 队列长度={self.queue.qsize()}")
+            except Exception:
+                pass
         except Full:
             try:
                 _ = self.queue.get_nowait()
@@ -153,8 +191,9 @@ class WsSender:
                 pass
             try:
                 self.queue.put_nowait(payload)
+                _log_warn(self.server, f"[asPanel] 事件队列已满，丢弃最早一条后入队 | event={event}")
             except Exception:
-                pass
+                _log_warn(self.server, f"[asPanel] 事件入队失败（队列满且替换失败）| event={event}")
 
     def _run(self) -> None:
         logger = getattr(self.server, "logger", None)
@@ -207,21 +246,27 @@ class WsSender:
                                                     pass
                                     # 转发的 mcdr 事件（来自其他同组服务器）
                                     elif isinstance(ev, str) and ev.startswith("mcdr."):
+                                        _log_debug(self.server, f"[asPanel] 收到远端 MCDR 事件 | event={ev} src={data.get('server')}")
                                         try:
                                             _handle_forward_event(self.server, ev, data)
                                         except Exception:
-                                            pass
+                                            _log_warn(self.server, f"[asPanel] 处理远端 MCDR 事件异常 | event={ev}")
                                     # 来自 Web 的聊天消息
                                     elif ev == "chat.message":
                                         try:
-                                            _handle_chat_message(self.server, data)
+                                            _log_info(self.server, f"[asPanel] 收到 Web 聊天消息 | level={str(data.get('level')).upper()} gid={data.get('group_id')} user={data.get('user')} src={data.get('source')}")
                                         except Exception:
                                             pass
+                                        try:
+                                            _handle_chat_message(self.server, data)
+                                        except Exception:
+                                            _log_warn(self.server, "[asPanel] 处理 Web 聊天消息异常")
                             except Exception:
-                                pass
+                                _log_warn(self.server, "[asPanel] 无法解析服务端消息（JSON 解析失败）")
                     except Exception:
                         # 超时或接收失败，忽略
-                        pass
+                        # 仅在 debug 级别记录超时噪声，不影响主循环
+                        # _log_debug(self.server, "[asPanel] WS 收取超时/无新消息")
 
                     # 取发送队列
                     try:
@@ -243,6 +288,10 @@ class WsSender:
                         try:
                             pkt = {"batch": True, "ts": _utc_iso(), "items": batch}
                             self._ws.send(_safe_json_dumps(pkt))
+                            try:
+                                _log_debug(self.server, f"[asPanel] 已发送批次 | 条数={len(batch)} 队列余量≈{self.queue.qsize()}")
+                            except Exception:
+                                pass
                             batch = []
                             last_flush = now
                         except Exception:
@@ -250,11 +299,7 @@ class WsSender:
 
             except Exception:
                 try:
-                    if logger:
-                        logger.warning(
-                            f"[asPanel] WS 连接失败或中断，{self.reconnect_interval}s 后重试 | url={self.ws_url}")
-                    else:
-                        print(f"[asPanel] WS 连接失败或中断，{self.reconnect_interval}s 后重试 | url={self.ws_url}")
+                    _log_warn(self.server, f"[asPanel] WS 连接失败或中断，{self.reconnect_interval}s 后重试 | url={self.ws_url}")
                 except Exception:
                     pass
                 time.sleep(self.reconnect_interval)
@@ -265,6 +310,7 @@ class WsSender:
                 except Exception:
                     pass
                 self._ws = None
+                _log_warn(self.server, "[asPanel] WS 连接已关闭，等待重连")
 
 
 # ----------------------------- 插件事件回调实现 -----------------------------
@@ -277,6 +323,7 @@ def _get_sender(server: ServerInterface) -> WsSender:
     if _SENDER is None:
         cfg = _read_env_config()
         _SENDER = WsSender(server, cfg)
+        _log_debug(server, f"[asPanel] 初始化 WsSender | ws_url={_SENDER.ws_url} queue_max={cfg.get('max_queue')} flush_interval_ms={cfg.get('flush_interval_ms')}")
         _SENDER.start()
     return _SENDER
 
@@ -312,7 +359,8 @@ def _send_event(server: ServerInterface, event: str, data: dict[str, Any]) -> No
 def _same_group(data_groups: Any) -> bool:
     try:
         groups = [str(x) for x in (data_groups or [])]
-        return any(g in _SERVER_GROUPS for g in groups)
+        ok = any(g in _SERVER_GROUPS for g in groups)
+        return ok
     except Exception:
         return False
 
@@ -477,10 +525,12 @@ def _cq_message_to_rtext(message: str) -> RText:
 def _handle_forward_event(server: ServerInterface, event: str, data: dict[str, Any]):
     # 仅处理与自己同组的事件
     if not _same_group(data.get("server_groups")):
+        _log_debug(server, f"[asPanel] 忽略不同组的远端事件 | event={event} src={data.get('server')} groups={data.get('server_groups')} 本服组={_SERVER_GROUPS}")
         return
     src = str(data.get("server") or "?")
     # 不重复显示本服自己的上报
     if src == _SERVER_NAME:
+        _log_debug(server, f"[asPanel] 忽略本服事件重复显示 | event={event} src={src}")
         return
 
     # 构建可点击的服务器标签 [server]
@@ -509,6 +559,7 @@ def _handle_forward_event(server: ServerInterface, event: str, data: dict[str, A
                     for name in notified:
                         server.execute(
                             f"execute at {name} run playsound minecraft:entity.arrow.hit_player player {name}")
+                    _log_debug(server, f"[asPanel] 远端消息触发 @ 提示 | 目标数={len(notified)} 内容长度={len(content)}")
             except Exception:
                 pass
 
@@ -545,6 +596,7 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
         try:
             # gid 为空或不在本服组则忽略
             if not gid:
+                _log_debug(server, f"[asPanel] 丢弃消息：缺少 group_id | user={user} source={source} level={level}")
                 return
         except Exception:
             return
@@ -556,6 +608,7 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
                                                                                                         color=RColor.red,
                                                                                                         styles=RStyle.bold)
         server.say(t)
+        _log_debug(server, f"[asPanel] 显示消息到游戏端 | source={source} gid={gid} user={user} len={len(message)}")
     else:
         if source == "qq":
             prefix = "[QQ] "
@@ -594,6 +647,10 @@ def on_unload(server: ServerInterface):
 
 # ---- General / User Info ----
 def on_user_info(server: ServerInterface, info: Info):
+    try:
+        _log_debug(server, f"[asPanel] on_user_info | is_user={getattr(info, 'is_user', None)} player={getattr(info, 'player', None)} len={len(str(getattr(info, 'content', '') or '') )}")
+    except Exception:
+        pass
     _send_event(server, "mcdr.user_info", {"info": _info_to_dict(info)})
 
 
@@ -645,6 +702,7 @@ def on_mcdr_stop(server: ServerInterface):
 
 def on_player_joined(server: ServerInterface, player: str, info: Info):
     if _is_bot_joined(info):
+        _log_debug(server, f"[asPanel] 忽略本地/机器人加入日志 | player={player}")
         return
     _send_event(server, "mcdr.player_joined", {"player": str(player), "info": _info_to_dict(info)})
     try:
@@ -655,6 +713,7 @@ def on_player_joined(server: ServerInterface, player: str, info: Info):
 
 def on_player_left(server: ServerInterface, player: str):
     if str(player) not in _LOCAL_PLAYERS:
+        _log_debug(server, f"[asPanel] 忽略离开事件（不在在线表）| player={player}")
         return
     _send_event(server, "mcdr.player_left", {"player": str(player)})
     try:
