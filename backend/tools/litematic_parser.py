@@ -13,7 +13,7 @@ backend/tools/litematic_parser.py
 from pathlib import Path
 from typing import List, Sequence, Tuple
 from datetime import datetime
-from backend.core.config import LITEMATIC_COMMAND_LIST_PATH
+from backend.core.constants import LITEMATIC_COMMAND_LIST_PATH
 
 try:
     from litemapy import Schematic

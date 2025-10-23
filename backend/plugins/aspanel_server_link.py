@@ -1,19 +1,8 @@
-# -*- coding: utf-8 -*-
-"""
-MCDReforged 插件：aspanel_server_link
-
-在原 aspanel_ws_reporter 基础上增强：
-- 事件 data 中新增 server_groups（该服务器所在的所有组名列表）
-- 首次不再通过 HTTP 拉取分组；当服务端收到插件的 on_load（mcdr.plugin_loaded）后，会通过 WS 下发 sl.group_update 更新
-- 在 WS 连接上被动接收服务端事件 sl.group_update，动态更新本地 server_groups
-"""
-
+# plugins/aspanel_server_link.py
 from __future__ import annotations
 
 import re
 from pathlib import Path
-
-from mcdreforged.api.all import *  # 采用与仓库现有插件一致的导入风格
 
 import json
 import os
@@ -24,20 +13,21 @@ from queue import Queue, Full, Empty
 from typing import Any, Optional, List
 from urllib.parse import urlparse, urlunparse
 
-# 可选依赖：websocket-client（pip 包名：websocket-client）
-try:
-    import websocket  # type: ignore
+from mcdreforged.api.all import *
 
+# Dependency：websocket-client（pip 包名：websocket-client）
+try:
+    import websocket
     _HAS_WS = True
-except Exception:
-    websocket = None  # type: ignore
+except (ModuleNotFoundError, ImportError):
+    websocket = None
     _HAS_WS = False
 
-server_name = Path(".").resolve().name
-_SERVER_GROUPS: List[str] = []  # 当前服务器所在的组名列表
-# 本服在线玩家集（用于 @mention 播放音效与存在性判断）
+_SERVER_NAME = Path(".").resolve().name
+_SERVER_GROUPS: List[str] = []
 _LOCAL_PLAYERS: set[str] = set()
 _CQ_PATTERN = re.compile(r"\[CQ:[^\]]*\]")
+_JOINED_LOCAL_PATTERN = re.compile(r'^\w+\[local\] logged in with entity id\b')
 
 # ----------------------------- 工具函数与配置 -----------------------------
 
@@ -48,13 +38,12 @@ PLUGIN_METADATA = {
     "name": "asPanel Server Link",
     "description": "将 MCDR 事件通过 WS 上报到 aspanel，并携带服务器分组信息",
     "requirements": ["mcdreforged>=2.0.0"],
+    "dependencies": {"websocket-client": "*"}
 }
 
 
 def _is_bot_joined(info: Info):
-    joined_player = re.match(
-        r"(\w+)\[([0-9\.\:\/]+|local)\] logged in with entity id", info.content
-    )
+    joined_player = _JOINED_LOCAL_PATTERN.match(info.content)
     if joined_player:
         if joined_player.group(2) == "local":
             return True
@@ -67,13 +56,10 @@ def _utc_iso() -> str:
 
 def _info_to_dict(info: Info) -> dict[str, Any]:
     def g(obj: Any, name: str, default: Any = None) -> Any:
-        try:
-            return getattr(obj, name)
-        except Exception:
-            return default
+        return getattr(obj, name, default)
 
     return {
-        "server": server_name,
+        "server": _SERVER_NAME,
         "content": g(info, "content"),
         "raw_content": g(info, "raw_content"),
         "is_user": g(info, "is_user"),
@@ -86,17 +72,14 @@ def _info_to_dict(info: Info) -> dict[str, Any]:
 def _safe_json_dumps(obj: Any) -> str:
     try:
         return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
-    except Exception:
+    except json.JSONDecodeError:
         return json.dumps(str(obj), ensure_ascii=False)
 
 
 def _read_env_config() -> dict[str, Any]:
     def _int_env(name: str, default: int) -> int:
-        try:
-            v = os.getenv(name)
-            return int(v) if v is not None and v != "" else default
-        except Exception:
-            return default
+        v = os.getenv(name)
+        return int(v) if v is not None and v != "" else default
 
     cfg = {
         "ws_url": os.getenv("ASPANEL_WS_URL", "ws://127.0.0.1:8000/aspanel/mcdr"),
@@ -147,7 +130,7 @@ class WsSender:
         # 统一追加 server 与 server_groups 字段
         try:
             merged = dict(data)
-            merged.setdefault("server", server_name)
+            merged.setdefault("server", _SERVER_NAME)
             merged.setdefault("server_groups", list(_SERVER_GROUPS))
         except Exception:
             merged = data
@@ -210,7 +193,7 @@ class WsSender:
                                     ev = obj.get("event")
                                     data = obj.get("data") or {}
                                     if ev == "sl.group_update":
-                                        if isinstance(data, dict) and str(data.get("server")) == server_name:
+                                        if isinstance(data, dict) and str(data.get("server")) == _SERVER_NAME:
                                             groups = data.get("server_groups") or []
                                             if isinstance(groups, list):
                                                 global _SERVER_GROUPS
@@ -301,7 +284,7 @@ def _send_event(server: ServerInterface, event: str, data: dict[str, Any]) -> No
         # 附带 server 与当前 server_groups 字段
         try:
             data = dict(data)
-            data.setdefault("server", server_name)
+            data.setdefault("server", _SERVER_NAME)
             data.setdefault("server_groups", list(_SERVER_GROUPS))
         except Exception:
             pass
@@ -499,7 +482,7 @@ def _handle_forward_event(server: ServerInterface, event: str, data: dict[str, A
         return
     src = str(data.get("server") or "?")
     # 不重复显示本服自己的上报
-    if src == server_name:
+    if src == _SERVER_NAME:
         return
 
     # 构建可点击的服务器标签 [server]
@@ -619,15 +602,15 @@ def on_user_info(server: ServerInterface, info: Info):
 # ---- Server lifecycle ----
 
 def on_server_start_pre(server: ServerInterface):
-    _send_event(server, "mcdr.server_start_pre", {"server": server_name})
+    _send_event(server, "mcdr.server_start_pre", {"server": _SERVER_NAME})
 
 
 def on_server_start(server: ServerInterface):
-    _send_event(server, "mcdr.server_start", {"server": server_name})
+    _send_event(server, "mcdr.server_start", {"server": _SERVER_NAME})
 
 
 def on_server_startup(server: ServerInterface):
-    _send_event(server, "mcdr.server_startup", {"server": server_name})
+    _send_event(server, "mcdr.server_startup", {"server": _SERVER_NAME})
     # 本服玩家列表：启动时清空
     try:
         _LOCAL_PLAYERS.clear()
@@ -636,7 +619,7 @@ def on_server_startup(server: ServerInterface):
 
 
 def on_server_stop(server: ServerInterface, server_return_code: int):
-    _send_event(server, "mcdr.server_stop", {"server": server_name, "return_code": int(server_return_code)})
+    _send_event(server, "mcdr.server_stop", {"server": _SERVER_NAME, "return_code": int(server_return_code)})
     # 本服玩家列表：停止时清空
     try:
         _LOCAL_PLAYERS.clear()
@@ -647,11 +630,11 @@ def on_server_stop(server: ServerInterface, server_return_code: int):
 # ---- MCDR lifecycle ----
 
 def on_mcdr_start(server: ServerInterface):
-    _send_event(server, "mcdr.mcdr_start", {"server": server_name})
+    _send_event(server, "mcdr.mcdr_start", {"server": _SERVER_NAME})
 
 
 def on_mcdr_stop(server: ServerInterface):
-    _send_event(server, "mcdr.mcdr_stop", {"server": server_name})
+    _send_event(server, "mcdr.mcdr_stop", {"server": _SERVER_NAME})
     try:
         global _SENDER
         if _SENDER is not None:

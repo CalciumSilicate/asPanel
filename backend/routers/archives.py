@@ -9,7 +9,7 @@ import os
 
 from backend import crud, schemas
 from backend.database import get_db
-from backend.core.config import ARCHIVE_STORAGE_PATH, to_local_dt
+from backend.core.constants import ARCHIVE_STORAGE_PATH, to_local_dt
 from backend.dependencies import task_manager
 from backend.schemas import TaskType, TaskStatus, Role
 from backend.tasks.background import \

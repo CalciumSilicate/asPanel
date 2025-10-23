@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from backend import crud, models
 from backend.auth import require_role
-from backend.core.config import TEMP_PATH
+from backend.core.constants import TEMP_PATH
 from backend.core.utils import get_file_md5, get_file_sha256, get_size_bytes, get_file_sha1
 from backend.database import get_db, SessionLocal
 from backend.logger import logger

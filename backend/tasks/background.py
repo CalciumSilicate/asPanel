@@ -1,11 +1,7 @@
 # tasks/background.py
-import asyncio
-import textwrap
-import time
 import uuid
 import zipfile
 import subprocess
-from http.client import HTTPException
 
 import requests
 import shutil
@@ -16,8 +12,8 @@ from typing import Dict, Optional
 from pathlib import Path
 
 from backend import crud, server_parser, models
-from backend.core.api import get_velocity_version_detail, get_fabric_version_meta
-from backend.core.config import FABRIC_REPO_URL, TEMP_PATH
+from backend.core.api import get_velocity_version_detail
+from backend.core.constants import FABRIC_REPO_URL, TEMP_PATH
 from backend.core.utils import get_file_sha1, get_file_sha256
 from backend.database import get_db_context
 from backend.schemas import TaskStatus, ArchiveCreate, ArchiveType, PaperBuild, Task, PaperBuildDownload, Server

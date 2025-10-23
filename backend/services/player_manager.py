@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 
 from backend.core.api import async_client
 
-from backend.core.config import MCDR_ROOT_PATH, UUID_HYPHEN_PATTERN
+from backend.core.constants import MCDR_ROOT_PATH, UUID_HYPHEN_PATTERN
 from backend.database import get_db_context
 from backend.logger import logger
 from backend import crud, models

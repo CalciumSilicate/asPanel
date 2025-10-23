@@ -1,4 +1,4 @@
-from backend.core.config import PYTHON_EXECUTABLE
+from backend.core.constants import PYTHON_EXECUTABLE
 
 from backend.services.mcdr_manager import MCDRManager
 from backend.services.archive_manager import ArchiveManager

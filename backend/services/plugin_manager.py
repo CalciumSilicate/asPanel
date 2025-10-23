@@ -11,7 +11,7 @@ from fastapi import UploadFile, HTTPException, status
 
 from backend.services.dependency_handler import DependencyHandler
 from .. import schemas, crud
-from ..core.config import UPLOADED_PLUGINS_PATH, TEMP_PATH  # 注意：需要在 config.py 中新增 UPLOADED_PLUGINS_PATH
+from ..core.constants import UPLOADED_PLUGINS_PATH, TEMP_PATH  # 注意：需要在 constants.py 中新增 UPLOADED_PLUGINS_PATH
 from ..core.utils import get_file_md5, get_file_sha256, get_size_bytes
 from ..schemas import ServerPluginType
 

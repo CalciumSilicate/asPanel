@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from backend import crud, schemas
-from backend.core.config import PYTHON_EXECUTABLE, TEMP_PATH
+from backend.core.constants import PYTHON_EXECUTABLE, TEMP_PATH
 from backend.core.utils import get_size_bytes
 from backend.dependencies import plugin_manager, server_service
 

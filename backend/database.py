@@ -2,7 +2,7 @@
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from backend.core.config import SQLALCHEMY_DATABASE_URL, DATABASE_CONNECT_ARGS
+from backend.core.constants import SQLALCHEMY_DATABASE_URL, DATABASE_CONNECT_ARGS
 from contextlib import contextmanager
 from sqlalchemy import text
 

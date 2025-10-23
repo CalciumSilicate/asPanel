@@ -12,7 +12,7 @@ from backend import crud, models, schemas, security
 from backend.logger import logger
 from backend.database import get_db
 from backend.auth import get_current_user, require_role
-from backend.core.config import AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, ALLOW_REGISTER, AVATAR_MC_PATH, \
+from backend.core.constants import AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, ALLOW_REGISTER, AVATAR_MC_PATH, \
     UUID_HYPHEN_PATTERN
 from backend.core.utils import get_str_md5, is_valid_mc_name
 from backend.schemas import Role, UserUpdate

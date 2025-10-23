@@ -8,7 +8,7 @@ import socket
 import errno
 
 from backend import schemas, models
-from backend.core.config import CPU_PERCENT_INTERVAL
+from backend.core.constants import CPU_PERCENT_INTERVAL
 from backend.database import get_db
 from backend.dependencies import mcdr_manager, task_manager
 from backend.schemas import TaskStatus, TaskType, Role

@@ -14,7 +14,7 @@ from backend.core.api import get_mcdr_plugins_catalogue
 from backend import schemas, crud, models
 from backend.auth import require_role
 from backend.schemas import Role
-from backend.core.config import UPLOADED_PLUGINS_PATH
+from backend.core.constants import UPLOADED_PLUGINS_PATH
 from backend.core.utils import get_file_md5, get_file_sha256
 from backend.database import get_db, SessionLocal
 from backend.dependencies import server_service, plugin_manager

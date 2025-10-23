@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backend import crud, models, schemas
-from backend.core.config import to_local_dt
+from backend.core.constants import to_local_dt
 from backend.database import get_db_context
 from backend.logger import logger
 from backend.ws import sio

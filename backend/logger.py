@@ -3,7 +3,7 @@ import sys
 
 from loguru import logger
 
-from backend.core.config import LOG_STORAGE, LOG_LEVEL, LOG_FILE_LEVEL
+from backend.core.constants import LOG_STORAGE, LOG_LEVEL, LOG_FILE_LEVEL
 
 logger.remove()
 
