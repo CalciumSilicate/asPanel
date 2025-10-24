@@ -197,12 +197,12 @@ async def _cache_cq_image_and_get_path(seg: _CQSegment) -> Optional[str]:
             except Exception:
                 data = base64.b64decode(b64 + "==")
             fname = _save_image_bytes(data, prefer_ext=".png")
-            return f"/api/aspanel/onebot/img/{fname}"
+            return f"/api/img/{fname}"
         if isinstance(url, str) and (url.startswith("http://") or url.startswith("https://")):
             data, ct = await _download_bytes(url)
             prefer_ext = _pick_ext_from_url(url) or _safe_ext_from_ct(ct)
             fname = _save_image_bytes(data, prefer_ext=prefer_ext, content_type=ct)
-            return f"/api/aspanel/onebot/img/{fname}"
+            return f"/api/img/{fname}"
         # 其他情况暂不支持（例如 go-cqhttp 本地文件路径），保持原样
         return None
     except Exception:
@@ -221,7 +221,7 @@ async def _rewrite_image_segments_to_local(segments: List[_CQSegment]) -> List[_
         changed.append(seg)
     return changed
 
-@router.get("/api/aspanel/onebot/img/{filename}")
+@router.get("/api/img/{filename}")
 async def get_cached_qq_image(filename: str):
     # 基本安全检查，禁止路径穿越
     if "/" in filename or ".." in filename:
