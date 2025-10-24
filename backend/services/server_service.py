@@ -3,12 +3,14 @@
 import json
 import shutil
 import asyncio
+import time
 import uuid
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
+from backend.core.crud import delete_mod_by_path
 from backend.services.task_manager import TaskManager
 from backend.core import crud, models, schemas
 from backend.tools import server_parser
@@ -43,15 +45,23 @@ class ServerService:
         servers_from_db = crud.get_all_servers(db)
 
         tasks = []
+        status_result = []
         for server in servers_from_db:
-            status_task = self.get_status(server)
-            size_task = asyncio.to_thread(get_size_mb, server.path)
-            tasks.append(asyncio.gather(status_task, size_task))
-        results = await asyncio.gather(*tasks)
+            status = await self.get_status(server)
+            status_result.append(status)
+            if status in ["stopped", "error"]:
+                r_ = None
+            else:
+                r_ = time.time()
+            size_task = asyncio.to_thread(get_size_mb, server.path, r_)
+            plugins_count_task = asyncio.to_thread(self.get_server_plugin_count, server)
+            tasks.append(asyncio.gather(size_task, plugins_count_task))
+        result = await asyncio.gather(*tasks)
         server_details_list = []
         for i, server in enumerate(servers_from_db):
-            status_res = results[i][0]  # status_task 的结果
-            size_mb = results[i][1]  # size_task 的结果
+            status_res = status_result[i]  # status_task 的结果
+            size_mb = result[i][0]  # size_task 的结果
+            plugins_count = result[i][1]  # plugins_count_task 的结果
 
             core_config = ServerCoreConfig.model_validate(json.loads(server.core_config))
             fs_details = server_parser.get_server_details(server.path, server_type=core_config.server_type)
@@ -64,6 +74,7 @@ class ServerService:
                 status=status_res[0],
                 return_code=status_res[1],
                 size_mb=size_mb,
+                plugins_count=plugins_count,
                 **fs_details,
             )
             server_details_list.append(server_detail)
@@ -92,6 +103,7 @@ class ServerService:
             status=status_res[0],
             return_code=status_res[1],
             size_mb=size_mb,
+            plugins_count=(await self.get_server_plugin_count(db_server)),
             **fs_details,
         )
 
@@ -221,7 +233,12 @@ class ServerService:
                     pass
 
     async def get_server_plugins_info_by_id(self, server_id: int, db: Session) -> schemas.ServerPlugins:
-        server = crud.get_server_by_id(db, server_id)
-        if server is None:
+        db_server = crud.get_server_by_id(db, server_id)
+        if db_server is None:
             raise HTTPException(status_code=404, detail=f'未找到服务器')
-        return self.plugin_manager.get_plugins_info(Path(server.path) / 'plugins')
+        return self.plugin_manager.get_plugins_info(Path(db_server.path) / 'plugins')
+
+    async def get_server_plugin_count(self, db_server: models.Server) -> Optional[int]:
+        if db_server is None:
+            raise HTTPException(status_code=404, detail=f'未找到服务器')
+        return self.plugin_manager.get_plugins_count(Path(db_server.path) / 'plugins')
