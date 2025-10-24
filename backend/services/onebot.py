@@ -3,13 +3,19 @@
 import asyncio
 import json
 import re
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+import httpx
+import base64
+import hashlib
+import mimetypes
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import FileResponse
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from backend.core import crud, models, schemas
 from backend.core.utils import to_local_dt
+from backend.core.constants import TEMP_PATH
 from backend.core.database import get_db_context
 from backend.core.logger import logger
 from backend.core.ws import sio
@@ -126,6 +132,115 @@ def _parse_message_segments(message: Any) -> List[_CQSegment]:
     if message:
         return [_CQSegment(type="text", data={"text": str(message)})]
     return []
+
+# ------------------------
+# QQ 图片缓存与本地链接提供
+# ------------------------
+
+_QQ_IMG_CACHE_DIR = TEMP_PATH / "qq_img"
+_QQ_IMG_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+_ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+
+def _safe_ext_from_ct(ct: Optional[str]) -> str:
+    if not ct:
+        return ".jpg"
+    ct = ct.lower().strip()
+    mapping = {
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/png": ".png",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+    }
+    return mapping.get(ct, ".jpg")
+
+def _pick_ext_from_url(url: str) -> Optional[str]:
+    try:
+        p = Path(url.split("?", 1)[0])
+        ext = p.suffix.lower()
+        if ext in _ALLOWED_EXT:
+            return ext
+        return None
+    except Exception:
+        return None
+
+async def _download_bytes(url: str) -> tuple[bytes, Optional[str]]:
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        r = await client.get(url)
+        r.raise_for_status()
+        ct = r.headers.get("content-type")
+        return (r.content, ct)
+
+def _save_image_bytes(data: bytes, *, prefer_ext: Optional[str] = None, content_type: Optional[str] = None) -> str:
+    # 基于内容生成稳定文件名
+    h = hashlib.sha256(data).hexdigest()[:32]
+    ext = prefer_ext or _safe_ext_from_ct(content_type)
+    if ext not in _ALLOWED_EXT:
+        ext = _safe_ext_from_ct(content_type)
+    fname = f"{h}{ext}"
+    path = _QQ_IMG_CACHE_DIR / fname
+    if not path.exists():
+        path.write_bytes(data)
+    return fname
+
+async def _cache_cq_image_and_get_path(seg: _CQSegment) -> Optional[str]:
+    # 解析 CQ:image 的数据源，支持 url / http file / base64://
+    url = seg.data.get("url") or seg.data.get("file") or ""
+    if not url:
+        return None
+    try:
+        if isinstance(url, str) and url.startswith("base64://"):
+            b64 = url[len("base64://"):]
+            try:
+                data = base64.b64decode(b64, validate=True)
+            except Exception:
+                data = base64.b64decode(b64 + "==")
+            fname = _save_image_bytes(data, prefer_ext=".png")
+            return f"/aspanel/onebot/img/{fname}"
+        if isinstance(url, str) and (url.startswith("http://") or url.startswith("https://")):
+            data, ct = await _download_bytes(url)
+            prefer_ext = _pick_ext_from_url(url) or _safe_ext_from_ct(ct)
+            fname = _save_image_bytes(data, prefer_ext=prefer_ext, content_type=ct)
+            return f"/aspanel/onebot/img/{fname}"
+        # 其他情况暂不支持（例如 go-cqhttp 本地文件路径），保持原样
+        return None
+    except Exception:
+        return None
+
+async def _rewrite_image_segments_to_local(segments: List[_CQSegment]) -> List[_CQSegment]:
+    changed: List[_CQSegment] = []
+    for seg in segments:
+        if seg.type == "image":
+            local = await _cache_cq_image_and_get_path(seg)
+            if local:
+                # 将 CQ 内的链接替换为本地 API 链接（同时写入 file 与 url 以兼容前端解析器）
+                seg.data["url"] = local
+                seg.data["file"] = local
+                seg.raw = None
+        changed.append(seg)
+    return changed
+
+@router.get("/aspanel/onebot/img/{filename}")
+async def get_cached_qq_image(filename: str):
+    # 基本安全检查，禁止路径穿越
+    if "/" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="invalid filename")
+    path = (_QQ_IMG_CACHE_DIR / filename).resolve()
+    base = _QQ_IMG_CACHE_DIR.resolve()
+    try:
+        if not path.is_relative_to(base):
+            raise HTTPException(status_code=403, detail="forbidden")
+    except AttributeError:
+        # Python <3.9 兼容
+        if str(base) not in str(path):
+            raise HTTPException(status_code=403, detail="forbidden")
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    # 简单根据扩展名返回类型
+    mime, _ = mimetypes.guess_type(str(path))
+    media_type = mime or "image/jpeg"
+    return FileResponse(str(path), media_type=media_type)
 
 
 def _segments_to_cq_string(segments: List[_CQSegment]) -> str:
@@ -442,6 +557,11 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
     segments = _parse_message_segments(payload.get("message"))
     if not segments:
         return
+    # 将图片段落的链接改写为本地缓存API，便于前端安全读取
+    try:
+        segments = await _rewrite_image_segments_to_local(segments)
+    except Exception:
+        pass
     raw_message = _segments_to_cq_string(segments)
     if not raw_message:
         return
