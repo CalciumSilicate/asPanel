@@ -10,13 +10,17 @@ import hashlib
 import zipfile
 import subprocess
 from pathlib import Path
+from threading import RLock
 from typing import Tuple, Optional, Dict, Union
 from zoneinfo import ZoneInfo
 from datetime import timezone, timedelta
-from cache import AsyncTTL
+from cachetools import TTLCache, cached
 
 from backend.core.constants import TIMEZONE
 from backend.core.logger import logger
+
+_size_cache = TTLCache(ttl=60, maxsize=1024)
+_size_cache_lock = RLock()
 
 def get_size_bytes(path: Union[str, Path], *, prefer_du: bool = True, timeout: float = 3.0) -> int:
     p = Path(path)
@@ -65,7 +69,7 @@ def get_size_bytes(path: Union[str, Path], *, prefer_du: bool = True, timeout: f
 
     return _dir_size(p)
 
-@AsyncTTL(time_to_live=60, maxsize=1024)
+@cached(_size_cache, lock=_size_cache_lock)
 def get_size_mb(path: str | Path, _r=None) -> float:
     return round(get_size_bytes(path) / (1024 ** 2), 3)
 
