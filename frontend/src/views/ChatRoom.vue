@@ -173,6 +173,8 @@ const chatMainRef = ref(null)
 const messages = ref([])
 const draft = ref('')
 const showJumpBottom = ref(false)
+// 是否保持“粘底”状态：当位于底部时，图片等资源加载后继续自动滚到底
+const shouldStickBottom = ref(true)
 
 const filteredGroups = computed(() => {
   const q = groupQuery.value.trim().toLowerCase()
@@ -272,7 +274,11 @@ const scrollToBottom = () => {
     showJumpBottom.value = false
   })
 }
-const onScroll = () => { showJumpBottom.value = !isAtBottom() }
+const onScroll = () => {
+  const atBottom = isAtBottom()
+  showJumpBottom.value = !atBottom
+  shouldStickBottom.value = atBottom
+}
 
 const isCompact = (i) => {
   if (i===0) return false
@@ -323,12 +329,17 @@ const loadMoreHistory = async () => {
   }
 }
 
-const onChatMessage = (msg) => {
+const onChatMessage = async (msg) => {
   // ALERT 全部显示；NORMAL 仅当前组
   if (!activeGroup.value) return
   if (msg.level === 'ALERT' || msg.group_id === activeGroup.value.id) {
+    const stick = isAtBottom()
     messages.value.push(toUIMsg(msg))
-    if (isAtBottom()) scrollToBottom()
+    await nextTick()
+    if (stick) {
+      // 首次渲染后滚到底，后续如有图片加载导致高度变化，由图片 load 事件再次触发
+      scrollToBottom()
+    }
     // 新消息到达不改变“更多历史”按钮状态
   }
 }
@@ -373,6 +384,11 @@ socket.on('chat_presence', onPresence)
 onMounted(async () => {
   await loadMe()
   await Promise.all([loadGroups(), loadServers()])
+  // 捕获聊天区域内图片等资源的加载事件，若当前处于粘底状态则再次滚动到底
+  const el = chatMainRef.value
+  if (el) {
+    el.addEventListener('load', onContentMediaLoad, true)
+  }
 })
 
 onUnmounted(() => {
@@ -382,6 +398,10 @@ onUnmounted(() => {
   }
   socket.off('chat_message', onChatMessage)
   socket.off('chat_presence', onPresence)
+  const el = chatMainRef.value
+  if (el) {
+    el.removeEventListener('load', onContentMediaLoad, true)
+  }
 })
 
 // helpers
@@ -475,6 +495,16 @@ const unsupportedLabels = {
 }
 
 const defaultOrigin = typeof window !== 'undefined' && window.location ? window.location.origin : 'http://localhost'
+
+// 处理图片/媒体加载完成后的滚动修正
+const onContentMediaLoad = (e) => {
+  const target = e?.target
+  if (!target) return
+  // 只在粘底状态下自动滚动，避免用户在历史位置阅读时跳动
+  if (shouldStickBottom.value) {
+    requestAnimationFrame(() => scrollToBottom())
+  }
+}
 
 const sanitizeCqMediaUrl = (value) => {
   if (!value) return ''
