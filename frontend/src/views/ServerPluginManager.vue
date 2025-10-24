@@ -32,7 +32,7 @@
           </el-table-column>
           <el-table-column label="插件数" width="100" align="center">
             <template #default="{ row }">
-              <span>{{ Number(row.pluginCount) || 0 }}</span>
+              <span>{{ Number(row.plugins_count) || 0 }}</span>
             </template>
           </el-table-column>
         </el-table>
@@ -352,7 +352,7 @@ const filteredServers = computed(() => {
   if (!q) return servers.value;
   return servers.value.filter(s => s.name?.toLowerCase().includes(q) || String(s.id).includes(q));
 });
-const totalPluginCount = computed(() => servers.value.reduce((sum, s) => sum + (Number(s.pluginCount) || 0), 0));
+const totalPluginCount = computed(() => servers.value.reduce((sum, s) => sum + (Number(s.plugins_count) || 0), 0));
 
 // --- Filtering & Pagination State ---
 const query = ref('');
@@ -422,24 +422,19 @@ const filteredDbPlugins = computed(() => {
 const initialLoad = async (forceOnlineRefresh = false) => {
   serversLoading.value = true;
   try {
-    const [{data: serverData}] = await Promise.all([
+    const [{ data: serverData }] = await Promise.all([
       apiClient.get('/api/servers'),
       fetchOnlinePlugins(forceOnlineRefresh)
     ]);
 
-    const pluginPromises = serverData.map(async (server) => {
-      try {
-        const {data: pluginData} = await apiClient.get(`/api/plugins/server/${server.id}`);
-        const plugins = (pluginData.data || []).map(p => ({...p, loading: false}));
-        serverPluginsMap.set(server.id, plugins);
-        return {...server, pluginCount: plugins.length};
-      } catch (e) {
-        serverPluginsMap.set(server.id, []);
-        return {...server, pluginCount: 'N/A'};
-      }
-    });
-    servers.value = await Promise.all(pluginPromises);
+    // 直接使用后端返回的 servers（已包含 plugins_count），尽快展示列表
+    servers.value = serverData || [];
 
+    // 后台预取每个服务器的插件列表，填充缓存，避免后续重复拉取
+    // 不阻塞 UI 加载
+    prefetchAllServerPlugins(servers.value);
+
+    // 如果已选择过服务器，优先从缓存展示，否则等待预取完成或按需获取
     if (selectedServerId.value) {
       await fetchCurrentServerPlugins();
     }
@@ -461,11 +456,16 @@ const selectServer = async (serverId) => {
 
 const fetchCurrentServerPlugins = async () => {
   if (!selectedServerId.value) return;
+  const cached = serverPluginsMap.get(selectedServerId.value);
+  if (cached) {
+    currentPlugins.value = cached;
+    return;
+  }
+
   pluginsLoading.value = true;
   try {
-    // Force refresh from API to ensure data is up-to-date
-    const {data} = await apiClient.get(`/api/plugins/server/${selectedServerId.value}`);
-    const plugins = (data.data || []).map(p => ({...p, loading: false}));
+    const { data } = await apiClient.get(`/api/plugins/server/${selectedServerId.value}`);
+    const plugins = (data.data || []).map(p => ({ ...p, loading: false }));
     serverPluginsMap.set(selectedServerId.value, plugins);
     currentPlugins.value = plugins;
   } catch (error) {
@@ -474,6 +474,35 @@ const fetchCurrentServerPlugins = async () => {
   } finally {
     pluginsLoading.value = false;
   }
+};
+
+// 预取所有服务器的插件列表到本地缓存（不阻塞 UI）
+const prefetchAllServerPlugins = async (serverList = []) => {
+  if (!Array.isArray(serverList) || serverList.length === 0) return;
+  // 控制并发以避免瞬时压力过大
+  const concurrency = 5;
+  const queue = [...serverList];
+  const workers = Array.from({ length: Math.min(concurrency, queue.length) }, () => (async () => {
+    while (queue.length > 0) {
+      const srv = queue.shift();
+      if (!srv) break;
+      const id = srv.id;
+      if (serverPluginsMap.has(id)) continue;
+      try {
+        const { data } = await apiClient.get(`/api/plugins/server/${id}`);
+        const plugins = (data.data || []).map(p => ({ ...p, loading: false }));
+        serverPluginsMap.set(id, plugins);
+        // 若当前正查看该服务器且尚未有列表，则立即展示
+        if (selectedServerId.value === id && currentPlugins.value.length === 0) {
+          currentPlugins.value = plugins;
+        }
+      } catch {
+        serverPluginsMap.set(id, []);
+      }
+    }
+  })());
+
+  await Promise.allSettled(workers);
 };
 
 const pluginRowClassName = ({row}) => row.enabled ? '' : 'disabled-plugin-row';
