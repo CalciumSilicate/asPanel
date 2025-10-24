@@ -49,19 +49,19 @@ class ServerService:
         for server in servers_from_db:
             status = await self.get_status(server)
             status_result.append(status)
-            if status in ["stopped", "error"]:
+            if status[0] in ["stopped", "error"]:
                 r_ = None
             else:
                 r_ = time.time()
             size_task = asyncio.to_thread(get_size_mb, server.path, r_)
-            plugins_count_task = asyncio.to_thread(self.get_server_plugin_count, server)
+            plugins_count_task = self.get_server_plugin_count(server)
             tasks.append(asyncio.gather(size_task, plugins_count_task))
-        result = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
         server_details_list = []
         for i, server in enumerate(servers_from_db):
             status_res = status_result[i]  # status_task 的结果
-            size_mb = result[i][0]  # size_task 的结果
-            plugins_count = result[i][1]  # plugins_count_task 的结果
+            size_mb = results[i][0]  # size_task 的结果
+            plugins_count = results[i][1]  # plugins_count_task 的结果
 
             core_config = ServerCoreConfig.model_validate(json.loads(server.core_config))
             fs_details = server_parser.get_server_details(server.path, server_type=core_config.server_type)
