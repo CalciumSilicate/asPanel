@@ -211,10 +211,10 @@ async def check_permissions_config(db: Session = Depends(get_db), actor: models.
 
 async def download_avatar(mc_name_or_uuid: str, file_path: Path) -> bool:
     urls = [
-        f"https://mc-heads.net/avatar/{mc_name_or_uuid}",
         f"https://api.mcheads.org/avatar/{mc_name_or_uuid}",
         f"https://mineskin.eu/helm/{mc_name_or_uuid}",
-        f"https://crafatar.com/avatars/{mc_name_or_uuid}"
+        f"https://crafatar.com/avatars/{mc_name_or_uuid}",
+        f"https://mc-heads.net/avatar/{mc_name_or_uuid}"
     ]
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
