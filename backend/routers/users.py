@@ -229,7 +229,7 @@ async def download_avatar(mc_name_or_uuid: str, file_path: Path) -> bool:
                     tmp_path.write_bytes(resp.content)
                     tmp_path.replace(file_path)
                     return True
-                logger.error(f"Download Failed | status_code={resp.status_code} content={resp.content}")
+                logger.error(f"Download Failed | mc_name_or_uuid={mc_name_or_uuid} status_code={resp.status_code} content={resp.content}")
                 continue
             except httpx.HTTPError:
                 continue
