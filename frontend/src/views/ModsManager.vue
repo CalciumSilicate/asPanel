@@ -34,7 +34,7 @@
           </el-table-column>
           <el-table-column label="mods数" width="80" align="center">
             <template #default="{ row }">
-              <span>{{ Number(row.modsCount) || 0 }}</span>
+              <span>{{ Number(row.mods_count) || 0 }}</span>
             </template>
           </el-table-column>
         </el-table>
@@ -328,11 +328,14 @@ import router from '@/router'
 const servers = ref([])
 const serverQuery = ref('')
 const serversLoading = ref(false)
-const totalModsCount = ref(0)
+// 使用 /api/servers 返回的 mods_count 汇总
+const totalModsCount = computed(() => servers.value.reduce((sum, s) => sum + (Number(s.mods_count) || 0), 0))
 
 // 右侧数据
 const selectedServer = ref(null)
 const mods = ref([])
+// 后台预取的模组列表缓存
+const serverModsMap = new Map()
 const modsLoading = ref(false)
 const overview = ref(null)
 
@@ -370,21 +373,12 @@ const formatBytes = (bytes) => {
 const initialLoad = async () => {
   serversLoading.value = true
   try {
+    // 快速获取服务器列表（已包含 mods_count）
     const { data: serverData } = await apiClient.get('/api/servers')
-    // 仅拉取 overview 以获取数量，避免耗时的 mods 列表
-    const overviewTasks = serverData.map(async (server) => {
-      try {
-        const { data } = await apiClient.get(`/api/mods/overview/${server.id}`)
-        return { srv: server, count: Number(data?.mods_amount || 0) }
-      } catch (e) {
-        return { srv: server, count: 0 }
-      }
-    })
-    const results = await Promise.all(overviewTasks)
-    let total = 0
-    servers.value = results.map(r => { total += r.count; return { ...r.srv, modsCount: r.count } })
-    totalModsCount.value = total
-    // 不默认选中服务器，保持初始空白区（参考 PrimeBackup 初始）
+    servers.value = serverData || []
+    // 后台预取各服务器的模组列表，填充缓存，避免后续重复拉取
+    prefetchAllServerMods(servers.value)
+    // 初始不选中服务器，保持右侧空白
   } catch (e) {
     ElMessage.error('加载服务器失败: ' + (e.response?.data?.detail || e.message))
   } finally {
@@ -405,10 +399,16 @@ const selectServer = async (server) => {
 
 const fetchMods = async () => {
   if (!selectedServer.value) return
+  const cached = serverModsMap.get(selectedServer.value.id)
+  if (cached) {
+    mods.value = cached
+    return
+  }
   modsLoading.value = true
   try {
     const { data } = await apiClient.get(`/api/mods/server/${selectedServer.value.id}`)
     mods.value = (data?.data || []).map(x => ({ ...x, loading: false }))
+    serverModsMap.set(selectedServer.value.id, mods.value)
     // 从 DB 元数据中恢复更新提示
     updatesMap.clear()
     mods.value.forEach(m => {
@@ -423,6 +423,33 @@ const fetchMods = async () => {
   } finally {
     modsLoading.value = false
   }
+}
+
+// 后台预取所有服务器的模组列表到缓存，控制并发
+const prefetchAllServerMods = async (serverList = []) => {
+  if (!Array.isArray(serverList) || serverList.length === 0) return
+  const concurrency = 5
+  const queue = [...serverList]
+  const workers = Array.from({ length: Math.min(concurrency, queue.length) }, () => (async () => {
+    while (queue.length > 0) {
+      const srv = queue.shift()
+      if (!srv) break
+      const id = srv.id
+      if (serverModsMap.has(id)) continue
+      try {
+        const { data } = await apiClient.get(`/api/mods/server/${id}`)
+        const list = (data?.data || []).map(x => ({ ...x, loading: false }))
+        serverModsMap.set(id, list)
+        // 如果当前正在查看该服务器且尚未有列表，则立刻显示
+        if (selectedServer.value && selectedServer.value.id === id && mods.value.length === 0) {
+          mods.value = list
+        }
+      } catch {
+        serverModsMap.set(id, [])
+      }
+    }
+  })())
+  await Promise.allSettled(workers)
 }
 
 const fetchOverview = async () => {
@@ -773,4 +800,3 @@ onMounted(initialLoad)
 .dialog-footer-flex { display: flex; align-items: center; justify-content: space-between; width: 100%; }
 .plugin-toolbar.compact { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; }
 </style>
-
