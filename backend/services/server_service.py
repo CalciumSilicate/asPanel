@@ -10,12 +10,12 @@ from sqlalchemy.orm import Session
 from pathlib import Path
 from typing import List, Tuple, Optional
 
-from backend.core.crud import delete_mod_by_path
 from backend.services.task_manager import TaskManager
 from backend.core import crud, models, schemas
 from backend.tools import server_parser
 from backend.services.mcdr_manager import MCDRManager
 from backend.services.plugin_manager import PluginManager
+from backend.services.mod_manager import ModManager
 from backend.core.constants import MCDR_ROOT_PATH
 from backend.core.utils import get_size_mb, poll_copy_progress, copytree_resumable_throttled
 from backend.core.schemas import ServerCoreConfig, Task, TaskStatus
@@ -25,9 +25,10 @@ from backend.services import player_manager
 
 
 class ServerService:
-    def __init__(self, mcdr_manager: MCDRManager, plugin_manager: PluginManager):
+    def __init__(self, mcdr_manager: MCDRManager, plugin_manager: PluginManager, mod_manager: ModManager):
         self.mcdr_manager = mcdr_manager
         self.plugin_manager = plugin_manager
+        self.mod_manager = mod_manager
 
     @staticmethod
     def _generate_server_path(server_name: str) -> Path:
@@ -55,13 +56,15 @@ class ServerService:
                 r_ = time.time()
             size_task = asyncio.to_thread(get_size_mb, server.path, r_)
             plugins_count_task = self.get_server_plugin_count(server)
-            tasks.append(asyncio.gather(size_task, plugins_count_task))
+            mod_overview_task = asyncio.to_thread(self.mod_manager.overview, server)
+            tasks.append(asyncio.gather(size_task, plugins_count_task, mod_overview_task))
         results = await asyncio.gather(*tasks)
         server_details_list = []
         for i, server in enumerate(servers_from_db):
             status_res = status_result[i]  # status_task 的结果
             size_mb = results[i][0]  # size_task 的结果
             plugins_count = results[i][1]  # plugins_count_task 的结果
+            mod_amount = results[i][2].get("mods_amount")  # mod_overview_task 的结果
 
             core_config = ServerCoreConfig.model_validate(json.loads(server.core_config))
             fs_details = server_parser.get_server_details(server.path, server_type=core_config.server_type)
@@ -75,6 +78,7 @@ class ServerService:
                 return_code=status_res[1],
                 size_mb=size_mb,
                 plugins_count=plugins_count,
+                mods_count=mod_amount,
                 **fs_details,
             )
             server_details_list.append(server_detail)
@@ -104,6 +108,7 @@ class ServerService:
             return_code=status_res[1],
             size_mb=size_mb,
             plugins_count=(await self.get_server_plugin_count(db_server)),
+            mods_count=self.mod_manager.overview(db_server).get("mods_amount"),
             **fs_details,
         )
 
