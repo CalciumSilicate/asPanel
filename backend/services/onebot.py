@@ -221,7 +221,7 @@ async def _rewrite_image_segments_to_local(segments: List[_CQSegment]) -> List[_
         changed.append(seg)
     return changed
 
-@router.get("/aspanel/onebot/img/{filename}")
+@router.get("/api/aspanel/onebot/img/{filename}")
 async def get_cached_qq_image(filename: str):
     # 基本安全检查，禁止路径穿越
     if "/" in filename or ".." in filename:
@@ -795,7 +795,7 @@ async def handle_server_reset(server_name: str) -> None:
         _GROUP_PLAYERS[gid] = await _compute_group_players(gid)
 
 
-@router.websocket("/aspanel/onebot/ws")
+@router.websocket("/api/aspanel/onebot/ws")
 async def onebot_endpoint(websocket: WebSocket):
     await websocket.accept()
     session = OneBotSession(websocket=websocket)
