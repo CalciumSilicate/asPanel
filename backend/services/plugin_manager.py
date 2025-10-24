@@ -6,6 +6,9 @@ import os
 import shutil
 import zipfile
 import httpx
+from cachetools import TTLCache, cached
+from threading import RLock
+from cachetools.keys import hashkey
 from fastapi import UploadFile, HTTPException, status
 from typing import Dict, Tuple, Any, Optional, Set
 from pathlib import Path
@@ -16,6 +19,16 @@ from backend.core.utils import get_file_md5, get_file_sha256, get_size_bytes
 from backend.core.schemas import ServerPluginType
 from backend.core.logger import logger
 from backend.services.dependency_handler import DependencyHandler
+
+_plugin_cache = TTLCache(maxsize=512, ttl=60)
+_plugin_cache_lock = RLock()
+
+
+def _plugin_cache_key(fp: Path):
+    if fp.is_dir():
+        return hashkey(fp.resolve())
+    md5 = get_file_md5(fp)
+    return hashkey(md5)
 
 
 class PluginManager:
@@ -43,6 +56,7 @@ class PluginManager:
             return False, {}
 
     @staticmethod
+    @cached(_plugin_cache, key=_plugin_cache_key, lock=_plugin_cache_lock)
     def get_plugin_info(fp: Path) -> schemas.ServerPlugin:
         # ... (此部分代码保持不变，已经很完善)
         is_dir = fp.is_dir()

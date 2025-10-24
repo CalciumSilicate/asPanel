@@ -8,17 +8,17 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, status, Backg
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from json import JSONDecodeError
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from backend.core import crud, models, schemas as _schemas
+from backend.core import crud
 from backend.core.auth import require_role
 from backend.core.constants import TEMP_PATH
 from backend.core.utils import get_file_md5, get_file_sha256, get_size_bytes, get_file_sha1
 from backend.core.database import get_db, SessionLocal
 from backend.core.logger import logger
-from backend.core.schemas import Role
+from backend.core.schemas import Role, ServerCoreConfig, ModDBCreate
+from backend.core.dependencies import mod_manager
 
 router = APIRouter(prefix="/api", tags=["Mods"])
 
@@ -36,9 +36,7 @@ def _mods_dir_for_server(server: Any) -> Path:
     - Velocity：<server-path>/server/plugins
     """
     try:
-        from backend.core.schemas import ServerCoreConfig
-        import json as _json
-        core = ServerCoreConfig.model_validate(_json.loads(server.core_config))
+        core = ServerCoreConfig.model_validate(json.loads(server.core_config))
         if core.server_type == 'velocity':
             p = Path(server.path) / 'server' / 'plugins'
         else:
@@ -116,96 +114,7 @@ async def list_server_mods(
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
-
-    mods_dir = _mods_dir_for_server(server)
-    items: List[Dict[str, Any]] = []
-    # 使用 scandir 提升大目录性能
-    entries = []
-    with os.scandir(mods_dir) as it:
-        for entry in it:
-            if entry.name.startswith('.'):
-                continue
-            if not entry.is_file():
-                continue
-            entries.append(entry.name)
-    for name in sorted(entries):
-        fp = mods_dir / name
-        enabled = not name.endswith('.disabled')
-
-        # 先尝试根据 path 从 DB 中匹配（避免昂贵的哈希计算）
-        db_mod = db.query(models.Mod).filter(models.Mod.path == str(fp.resolve())).first()
-        md5 = None
-
-        meta = None
-        if db_mod:
-            try:
-                meta = json.loads(db_mod.meta) if db_mod.meta else {}
-            except JSONDecodeError:
-                meta = {}
-            # 命中 unknown 标记时，快速返回空 meta，并不再尝试补全
-            if isinstance(meta, dict) and meta.get('unknown') is True:
-                try:
-                    crud.add_server_to_mod(db, db_mod.id, server_id)
-                except Exception:
-                    pass
-                items.append(_build_mod_item(fp, enabled, {}))
-                continue
-            # 若为 modrinth 且缺少 slug，尝试用 project_id/id 查询项目补全 slug
-            if (not skip_enrich) and isinstance(meta, dict) and meta.get('source') == 'modrinth' and (not meta.get('slug')):
-                pid = meta.get('modrinth_project_id') or meta.get('id')
-                if pid:
-                    try:
-                        async with httpx.AsyncClient(timeout=20) as client:
-                            pr = await client.get(f"https://api.modrinth.com/v2/project/{pid}")
-                            if pr.status_code == 200:
-                                meta['slug'] = (pr.json() or {}).get('slug')
-                                db_mod.meta = json.dumps(meta)
-                                db.add(db_mod)
-                                db.commit()
-                    except Exception:
-                        pass
-            # 记录服务器安装关系
-            try:
-                crud.add_server_to_mod(db, db_mod.id, server_id)
-            except Exception:
-                pass
-            # 如果 DB 中没有有用的 meta，尝试通过 Modrinth 填充并更新 DB
-            if not skip_enrich and ((not meta) or (isinstance(meta, dict) and not meta.get('id'))):
-                try:
-                    m2 = await _try_fill_meta_from_modrinth_by_hash(fp)
-                    if m2:
-                        meta = m2
-                        db_mod.meta = json.dumps(meta)
-                        db.add(db_mod)
-                        db.commit()
-                except Exception:
-                    pass
-        else:
-            # 尝试 Modrinth 通过哈希补全一次
-            if not skip_enrich:
-                try:
-                    # 仅在没有 DB 记录时才计算哈希并外网查询
-                    md5 = get_file_md5(fp)
-                    meta = await _try_fill_meta_from_modrinth_by_hash(fp)
-                except Exception as e:
-                    logger.warning(f"Modrinth hash lookup failed for {fp.name}: {e}")
-                    meta = None
-                # 将结果写入 DB：若 meta 为空，则以 unknown 占位，避免后续重复补全
-                rec = _schemas.ModDBCreate(
-                    file_name=fp.name,
-                    path=str(fp),
-                    size=fp.stat().st_size,
-                    hash_md5=get_file_md5(fp) if meta is None else get_file_md5(fp),
-                    hash_sha256=get_file_sha256(fp) if meta is None else get_file_sha256(fp),
-                    meta=meta if meta is not None else {'unknown': True},
-                    url=None,
-                )
-                db_rec = crud.create_mod_record(db, rec)
-                crud.add_server_to_mod(db, db_rec.id, server_id)
-
-        items.append(_build_mod_item(fp, enabled, meta))
-
-    return {'data': items}
+    return await mod_manager.list_server_mods(server, db=db, skip_enrich=skip_enrich)
 
 
 @router.get('/mods/overview/{server_id}')
@@ -214,48 +123,13 @@ async def mods_overview(server_id: int, db: Session = Depends(get_db), _user=Dep
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
-    mods_dir = _mods_dir_for_server(server)
-
-    # 读取 core_config
-    import json as _json
-    from backend.core.schemas import ServerCoreConfig
-    core = ServerCoreConfig.model_validate(_json.loads(server.core_config))
-
-    mods_count = len([f for f in os.listdir(mods_dir) if (mods_dir / f).is_file() and not f.startswith('.')])
-    total_size = sum([(mods_dir / f).stat().st_size for f in os.listdir(mods_dir) if (mods_dir / f).is_file()], 0)
-
-    # 计算加载器显示
-    if core.server_type == 'forge':
-        loader = 'forge'
-    elif core.server_type == 'vanilla' and core.is_fabric:
-        loader = 'fabric'
-    elif core.server_type == 'vanilla' and not core.is_fabric:
-        loader = '未安装'
-    else:
-        loader = core.server_type
-
-    return {
-        'storage_root': str(mods_dir),
-        'mods_amount': mods_count,
-        'total_size': total_size,
-        'mc_version': core.core_version,
-        'loader': loader,
-        'loader_version': core.loader_version,
-    }
+    return mod_manager.overview(server)
 
 
 @router.get('/mods/usage/total')
 async def mods_usage_total(db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
     """汇总所有服务器 mods 目录的总占用。"""
-    servers = crud.get_all_servers(db)
-    total = 0
-    for s in servers:
-        mods_dir = _mods_dir_for_server(s)
-        try:
-            total += sum((mods_dir / f).stat().st_size for f in os.listdir(mods_dir) if (mods_dir / f).is_file())
-        except Exception:
-            pass
-    return {'bytes': int(total)}
+    return mod_manager.usage_total(db)
 
 
 @router.post('/mods/server/{server_id}/switch/{file_name}')
@@ -264,29 +138,7 @@ async def switch_mod(server_id: int, file_name: str, enable: Optional[bool] = No
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
-    mods_dir = _mods_dir_for_server(server)
-    path = mods_dir / file_name
-    if not path.exists():
-        # 尝试规范化
-        path = mods_dir / file_name.replace('.disabled', '')
-        if not path.exists():
-            path = mods_dir / (file_name + '.disabled')
-            if not path.exists():
-                raise HTTPException(status_code=404, detail=f"Mod file '{file_name}' not found.")
-
-    is_enabled = not path.name.endswith('.disabled')
-    if enable is None:
-        enable = not is_enabled
-
-    if enable and not is_enabled:
-        target = path.with_name(path.name.removesuffix('.disabled'))
-        path.rename(target)
-        return {'file_name': target.name, 'enabled': True}
-    elif not enable and is_enabled:
-        target = path.with_name(path.name + '.disabled')
-        path.rename(target)
-        return {'file_name': target.name, 'enabled': False}
-    return {'file_name': path.name, 'enabled': is_enabled}
+    return mod_manager.switch_mod(server, file_name, enable)
 
 
 @router.delete('/mods/server/{server_id}/{file_name}', status_code=status.HTTP_204_NO_CONTENT)
@@ -295,27 +147,7 @@ async def delete_mod(server_id: int, file_name: str, db: Session = Depends(get_d
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
-    mods_dir = _mods_dir_for_server(server)
-    path = mods_dir / file_name
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=f"Mod file '{file_name}' not found")
-    # 从 DB 关系中移除安装记录（如果存在）
-    try:
-        file_hash = get_file_md5(path)
-        db_mod = crud.get_mod_by_hash(db, hash_md5=file_hash)
-        if db_mod:
-            crud.remove_server_from_mod(db, mod_id=db_mod.id, server_id=server.id)
-    except Exception:
-        pass
-
-    try:
-        os.remove(path)
-        try:
-            crud.delete_mod_by_path(db, str(path))
-        except Exception:
-            pass
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete mod file: {e}")
+    mod_manager.delete_mod(server, file_name, db)
     return None
 
 
@@ -325,12 +157,7 @@ async def download_mod(server_id: int, file_name: str, db: Session = Depends(get
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
-    mods_dir = _mods_dir_for_server(server)
-    requested_path = (mods_dir / file_name).resolve()
-    if not requested_path.exists():
-        raise HTTPException(status_code=404, detail='模组文件不存在')
-    if not requested_path.is_file():
-        raise HTTPException(status_code=400, detail='仅支持下载文件')
+    requested_path = mod_manager.get_download_path(server, file_name)
     return FileResponse(path=str(requested_path), filename=requested_path.name, media_type='application/octet-stream')
 
 
@@ -341,55 +168,7 @@ async def upload_mod(server_id: int, file: UploadFile, db: Session = Depends(get
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
-    mods_dir = _mods_dir_for_server(server)
-
-    # 安全化文件名
-    filename = ''.join(c for c in file.filename or '' if c.isalnum() or c in '._-').strip() or 'mod.jar'
-    temp_path = TEMP_PATH / f"upload_{os.urandom(6).hex()}_{filename}"
-    target_path = mods_dir / filename
-
-    try:
-        content = await file.read()
-        with open(temp_path, 'wb') as f:
-            f.write(content)
-        shutil.move(temp_path, target_path)
-
-        # 尝试Modrinth识别，记录到DB（若 path 存在则更新记录）
-        meta = await _try_fill_meta_from_modrinth_by_hash(target_path)
-        existing = crud.get_mod_by_path(db, str(target_path))
-        md5 = get_file_md5(target_path)
-        sha256 = get_file_sha256(target_path)
-        if existing:
-            crud.update_mod_record(db, existing,
-                                   file_name=target_path.name,
-                                   url=None,
-                                   hash_md5=md5,
-                                   hash_sha256=sha256,
-                                   size=target_path.stat().st_size,
-                                   meta=meta or {})
-            crud.add_server_to_mod(db, existing.id, server_id)
-        else:
-            from backend import schemas as _schemas
-            rec = _schemas.ModDBCreate(
-                file_name=target_path.name,
-                path=str(target_path),
-                size=target_path.stat().st_size,
-                hash_md5=md5,
-                hash_sha256=sha256,
-                meta=meta or {},
-                url=None,
-            )
-            db_rec = crud.create_mod_record(db, rec)
-            crud.add_server_to_mod(db, db_rec.id, server_id)
-        return {'message': '上传成功', 'file_name': target_path.name}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'上传失败: {e}')
-    finally:
-        if temp_path.exists():
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
+    return await mod_manager.upload_mod(server, file, db)
 
 
 class ModsCopyPayload(BaseModel):
@@ -412,10 +191,8 @@ async def copy_mods(
 
     # 类型匹配校验：不同类型（vanilla/fabric/forge/velocity）禁止互相复制
     try:
-        import json as _json
-        from backend.core.schemas import ServerCoreConfig
-        sc = ServerCoreConfig.model_validate(_json.loads(src.core_config))
-        dc = ServerCoreConfig.model_validate(_json.loads(dst.core_config))
+        sc = ServerCoreConfig.model_validate(json.loads(src.core_config))
+        dc = ServerCoreConfig.model_validate(json.loads(dst.core_config))
         def _norm(core: ServerCoreConfig) -> str:
             if core.server_type == 'velocity':
                 return 'velocity'
@@ -432,8 +209,8 @@ async def copy_mods(
         # 解析失败时为安全起见也禁止
         raise HTTPException(status_code=400, detail='无法解析服务器类型，禁止复制')
 
-    src_dir = _mods_dir_for_server(src)
-    dst_dir = _mods_dir_for_server(dst)
+    src_dir = mod_manager.mods_dir_for_server(src)
+    dst_dir = mod_manager.mods_dir_for_server(dst)
 
     if payload.delete_target_before:
         for f in os.listdir(dst_dir):
@@ -474,28 +251,8 @@ async def search_modrinth(
         _user=Depends(require_role(Role.ADMIN))
 ):
     """代理 Modrinth 搜索接口。简化版，仅支持 query + 可选版本/加载器过滤。"""
-    base = 'https://api.modrinth.com/v2/search'
-    # 根据参数/loader 推断项目类型：Velocity 走 plugin，其它默认 mod
-    pt = (project_type or '').lower().strip() if project_type is not None else ''
-    if not pt:
-        pt = 'plugin' if (loader or '').lower().strip() == 'velocity' else 'mod'
-    facets: List[List[str]] = [[f"project_type:{pt}"]]
-    if loader and (loader or '').lower().strip() != 'velocity' and game_version:
-        facets.append([f"versions:{game_version}"])
-    if loader:
-        # 在 modrinth 中，fabric/forge/velocity 等作为 categories 使用
-        facets.append([f"categories:{loader}"])
-    params = {
-        'query': q,
-        'limit': limit,
-        'offset': offset,
-        'facets': json.dumps(facets)
-    }
-    async with httpx.AsyncClient(timeout=20) as client:
-        r = await client.get(base, params=params)
-        if r.status_code != 200:
-            raise HTTPException(status_code=r.status_code, detail=r.text)
-        return r.json()
+    return await mod_manager.search_modrinth(q, limit=limit, offset=offset, game_version=game_version,
+                                             loader=loader, project_type=project_type)
 
 
 @router.get('/mods/modrinth/versions')
@@ -506,23 +263,7 @@ async def modrinth_versions(
         _user=Depends(require_role(Role.ADMIN))
 ):
     """代理 Modrinth 项目的版本列表，并可选过滤。"""
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(f'https://api.modrinth.com/v2/project/{project_id}/version')
-        if r.status_code != 200:
-            raise HTTPException(status_code=r.status_code, detail=r.text)
-        versions = r.json()
-        # 可选过滤
-        if game_version or loader:
-            filtered = []
-            for v in versions:
-                gv_ok = True if not game_version else (game_version in (v.get('game_versions') or []))
-                ld_ok = True
-                if loader:
-                    ld_ok = loader in (v.get('loaders') or [])
-                if gv_ok and ld_ok:
-                    filtered.append(v)
-            return filtered
-        return versions
+    return await mod_manager.modrinth_versions(project_id, game_version=game_version, loader=loader)
 
 
 class ChangeVersionPayload(BaseModel):
@@ -542,154 +283,14 @@ async def change_version(
     server = crud.get_server_by_id(db, payload.server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
-    mods_dir = _mods_dir_for_server(server)
-    old_path = mods_dir / payload.file_name
-    if not old_path.exists():
-        raise HTTPException(status_code=404, detail='Old mod file not found')
-
-    # 保留启用/禁用状态
-    is_disabled = old_path.name.endswith('.disabled')
-
-    if payload.source == 'modrinth':
-        if not payload.project_id or not payload.version_id:
-            raise HTTPException(status_code=400, detail='project_id 和 version_id 为必填')
-        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-            vr = await client.get(f'https://api.modrinth.com/v2/version/{payload.version_id}')
-            if vr.status_code != 200:
-                raise HTTPException(status_code=vr.status_code, detail=vr.text)
-            ver = vr.json()
-            # 校验兼容性
-            from backend.core.schemas import ServerCoreConfig
-            import json as _json
-            core = ServerCoreConfig.model_validate(_json.loads(server.core_config))
-            preferred_loader = (
-            'forge' if core.server_type == 'forge' else (
-                'fabric' if core.is_fabric else (
-                    'velocity' if core.server_type == 'velocity' else None
-                )
-            )
-        )
-            gv = ver.get('game_versions') or []
-            ld = ver.get('loaders') or []
-            # Velocity 不校验 game_versions（核心版本是 Velocity 版本号，与 MC 版本不同）
-            is_velocity = core.server_type == 'velocity'
-            if ((not is_velocity) and core.core_version and core.core_version not in gv) or (preferred_loader and preferred_loader not in ld):
-                raise HTTPException(status_code=409, detail='所选版本不兼容当前 MC 版本或加载器')
-            files = ver.get('files') or []
-            file_info = None
-            for f in files:
-                if (f.get('filename') or '').endswith('.jar'):
-                    file_info = f
-                    break
-            if not file_info and files:
-                file_info = files[0]
-            if not file_info:
-                raise HTTPException(status_code=400, detail='该版本没有可用的文件')
-
-            download_url = file_info.get('url')
-            new_filename = file_info.get('filename') or f"{payload.project_id}-{ver.get('version_number')}.jar"
-            # 保留 .disabled 状态
-            if is_disabled and not new_filename.endswith('.disabled'):
-                new_filename = new_filename + '.disabled'
-            tmp = TEMP_PATH / f"mod_{os.urandom(6).hex()}_{new_filename}"
-            try:
-                async with client.stream('GET', download_url) as resp:
-                    resp.raise_for_status()
-                    with open(tmp, 'wb') as out:
-                        async for chunk in resp.aiter_bytes():
-                            out.write(chunk)
-                target = mods_dir / new_filename
-                # 若目标存在则先删除，确保覆盖
-                if target.exists():
-                    try:
-                        os.remove(target)
-                        try:
-                            crud.delete_mod_by_path(db, str(target))
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-                # 先保存新版本
-                shutil.move(tmp, target)
-
-                # 再删除老版本
-                try:
-                    if old_path.exists():
-                        os.remove(old_path)
-                        try:
-                            crud.delete_mod_by_path(db, str(old_path))
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-
-                # DB 记录迁移：旧记录移除安装，新文件入库并添加安装
-                try:
-                    old_md5 = get_file_md5(old_path) if old_path.exists() else None
-                except Exception:
-                    old_md5 = None
-                if old_md5:
-                    db_old = crud.get_mod_by_hash(db, hash_md5=old_md5)
-                    if db_old:
-                        crud.remove_server_from_mod(db, db_old.id, server.id)
-
-                # 获取项目信息以补全 slug
-                project_slug = None
-                try:
-                    pr = await client.get(f'https://api.modrinth.com/v2/project/{payload.project_id}')
-                    if pr.status_code == 200:
-                        project_slug = (pr.json() or {}).get('slug')
-                except Exception:
-                    project_slug = None
-
-                meta = {
-                    'source': 'modrinth',
-                    'modrinth_project_id': payload.project_id,
-                    'modrinth_version_id': payload.version_id,
-                    'id': payload.project_id,
-                    'slug': project_slug,
-                    'name': ver.get('name') or ver.get('version_number'),
-                    'version': ver.get('version_number'),
-                    'game_versions': ver.get('game_versions', []),
-                    'loaders': ver.get('loaders', []),
-                }
-                existing = crud.get_mod_by_path(db, str(target))
-                md5 = get_file_md5(target)
-                sha256 = get_file_sha256(target)
-                if existing:
-                    crud.update_mod_record(db, existing,
-                                           file_name=target.name,
-                                           url=download_url,
-                                           hash_md5=md5,
-                                           hash_sha256=sha256,
-                                           size=target.stat().st_size,
-                                           meta=meta)
-                    crud.add_server_to_mod(db, existing.id, server.id)
-                else:
-                    from backend import schemas as _schemas
-                    rec = _schemas.ModDBCreate(
-                        file_name=target.name,
-                        path=str(target),
-                        size=target.stat().st_size,
-                        hash_md5=md5,
-                        hash_sha256=sha256,
-                        meta=meta,
-                        url=download_url,
-                    )
-                    db_new = crud.create_mod_record(db, rec)
-                    crud.add_server_to_mod(db, db_new.id, server.id)
-
-                return {'message': 'ok', 'file_name': target.name}
-            finally:
-                if tmp.exists():
-                    try:
-                        os.remove(tmp)
-                    except Exception:
-                        pass
-    elif payload.source == 'curseforge':
-        raise HTTPException(status_code=501, detail='Curseforge 更改版本暂未实现')
-    else:
-        raise HTTPException(status_code=400, detail='未知的来源')
+    return await mod_manager.change_version(
+        server,
+        file_name=payload.file_name,
+        source=payload.source,
+        project_id=payload.project_id,
+        version_id=payload.version_id,
+        db=db,
+    )
 
 
 class ModrinthInstallPayload(BaseModel):
@@ -717,9 +318,7 @@ async def install_from_modrinth(
     server = crud.get_server_by_id(db, payload.server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
-    import json as _json
-    from backend.core.schemas import ServerCoreConfig
-    core = ServerCoreConfig.model_validate(_json.loads(server.core_config))
+    core = ServerCoreConfig.model_validate(json.loads(server.core_config))
 
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
         version_id = payload.version_id
@@ -837,8 +436,7 @@ async def install_from_modrinth(
                                        meta=meta)
                 crud.add_server_to_mod(db, existing.id, payload.server_id)
             else:
-                from backend import schemas as _schemas
-                rec = _schemas.ModDBCreate(
+                rec = ModDBCreate(
                     file_name=target.name,
                     path=str(target),
                     size=target.stat().st_size,
@@ -860,123 +458,12 @@ async def install_from_modrinth(
 
 
 async def _job_check_updates(server_id: int):
-    from backend.core.schemas import ServerCoreConfig
-    import json as _json
-    async with httpx.AsyncClient(timeout=30) as client:
-        with SessionLocal() as db:
-            server = crud.get_server_by_id(db, server_id)
-            if not server:
-                return
-            core = ServerCoreConfig.model_validate(_json.loads(server.core_config))
-            preferred_loader = (
-            'forge' if core.server_type == 'forge' else (
-                'fabric' if core.is_fabric else (
-                    'velocity' if core.server_type == 'velocity' else None
-                )
-            )
-        )
-
-            # 仅快速列举（跳过补全），减少开销
-            mods = await list_server_mods(server_id, skip_enrich=True, db=db)  # type: ignore
-            data = mods.get('data', [])
-
-            for m in data:
-                meta = m.get('meta') or {}
-                if meta.get('source') != 'modrinth':
-                    continue
-                project_id = meta.get('modrinth_project_id') or meta.get('id')
-                if not project_id:
-                    continue
-                r = await client.get(f'https://api.modrinth.com/v2/project/{project_id}/version')
-                if r.status_code != 200:
-                    continue
-                versions = r.json() or []
-
-                # 过滤匹配当前 MC 版本与加载器的版本，并按发布时间倒序择最新
-                def is_compatible(v: Dict[str, Any]) -> bool:
-                    gv = v.get('game_versions') or []
-                    ld = v.get('loaders') or []
-                    is_velocity = core.server_type == 'velocity'
-                    if (not is_velocity) and core.core_version and core.core_version not in gv:
-                        return False
-                    if preferred_loader and preferred_loader not in ld:
-                        return False
-                    return True
-
-                compat = [v for v in versions if is_compatible(v)]
-
-                # 排序按 date_published 或者 id 顺序，优先 date_published
-                def _sort_key(v):
-                    return v.get('date_published') or v.get('version_number') or ''
-
-                compat.sort(key=_sort_key, reverse=True)
-
-                current_version = (meta.get('version') or '').strip()
-                if compat:
-                    latest_v = compat[0]
-                    latest_number = latest_v.get('version_number')
-                    latest_id = latest_v.get('id')
-                    if latest_number and current_version and latest_number != current_version:
-                        try:
-                            file_hash = m.get('hash_md5') or get_file_md5(Path(m['path']))
-                            db_mod = crud.get_mod_by_hash(db, hash_md5=file_hash) if file_hash else None
-                            if db_mod:
-                                mm = {}
-                                try:
-                                    mm = json.loads(db_mod.meta) if db_mod.meta else {}
-                                except Exception:
-                                    mm = {}
-                                mm['modrinth_update_available'] = True
-                                mm['modrinth_latest_version_number'] = latest_number
-                                if latest_id:
-                                    mm['modrinth_latest_version_id'] = latest_id
-                                db_mod.meta = json.dumps(mm)
-                                db.add(db_mod)
-                                db.commit()
-                        except Exception:
-                            pass
-                    else:
-                        # 没有更新，清除标记
-                        try:
-                            file_hash = m.get('hash_md5') or get_file_md5(Path(m['path']))
-                            db_mod = crud.get_mod_by_hash(db, hash_md5=file_hash) if file_hash else None
-                            if db_mod:
-                                mm = {}
-                                try:
-                                    mm = json.loads(db_mod.meta) if db_mod.meta else {}
-                                except Exception:
-                                    mm = {}
-                                mm.pop('modrinth_update_available', None)
-                                mm.pop('modrinth_latest_version_number', None)
-                                mm.pop('modrinth_latest_version_id', None)
-                                db_mod.meta = json.dumps(mm)
-                                db.add(db_mod)
-                                db.commit()
-                        except Exception:
-                            pass
-                else:
-                    # 不兼容：也清除更新标记
-                    try:
-                        file_hash = m.get('hash_md5') or get_file_md5(Path(m['path']))
-                        db_mod = crud.get_mod_by_hash(db, hash_md5=file_hash) if file_hash else None
-                        if db_mod:
-                            mm = {}
-                            try:
-                                mm = json.loads(db_mod.meta) if db_mod.meta else {}
-                            except Exception:
-                                mm = {}
-                            mm.pop('modrinth_update_available', None)
-                            mm.pop('modrinth_latest_version_number', None)
-                            mm.pop('modrinth_latest_version_id', None)
-                            db_mod.meta = json.dumps(mm)
-                            db.add(db_mod)
-                            db.commit()
-                    except Exception:
-                        pass
+    # 已迁移至 services.mod_manager.ModManager.check_updates_background
+    return
 
 
 @router.get('/mods/check-updates/{server_id}')
 async def check_updates(server_id: int, background_tasks: BackgroundTasks, _user=Depends(require_role(Role.ADMIN))):
     """将检查更新任务放入后台，立即返回提示前端稍后刷新。"""
-    background_tasks.add_task(_job_check_updates, server_id)
+    background_tasks.add_task(mod_manager.check_updates_background, server_id)
     return {'status': 'accepted', 'message': '检查任务已开始，请稍后刷新'}
