@@ -86,7 +86,6 @@ class PluginManager:
 
     @staticmethod
     def get_plugins_info(fp: Path) -> schemas.ServerPlugins:
-        # ... (此部分代码保持不变)
         ls = os.listdir(fp)
         if "__pycache__" in ls:
             ls.remove("__pycache__")
@@ -94,6 +93,15 @@ class PluginManager:
             data=list(sorted([PluginManager.get_plugin_info(fp / f) for f in ls],
                              key=lambda x: x.file_name)) if fp.is_dir() else []
         )
+
+    @staticmethod
+    def get_plugins_count(fp: Path) -> Optional[int]:
+        if fp.is_dir():
+            ls = os.listdir(fp)
+            if "__pycache__" in ls:
+                ls.remove("__pycache__")
+            return len(ls)
+        return None
 
     # --- 新增的插件操作方法 ---
 

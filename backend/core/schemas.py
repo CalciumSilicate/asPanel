@@ -193,6 +193,7 @@ class ServerDetail(Server):
     port: Optional[Any] = None
     rcon_port: Optional[Any] = None
     rcon_password: Optional[Any] = None
+    plugins_count: Optional[int] = None
 
 
 class ServerDashboardInfo(ServerBase):

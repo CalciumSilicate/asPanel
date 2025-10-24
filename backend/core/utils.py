@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Tuple, Optional, Dict, Union
 from zoneinfo import ZoneInfo
 from datetime import timezone, timedelta
+from cache import AsyncTTL
 
 from backend.core.constants import TIMEZONE
 from backend.core.logger import logger
@@ -64,8 +65,8 @@ def get_size_bytes(path: Union[str, Path], *, prefer_du: bool = True, timeout: f
 
     return _dir_size(p)
 
-
-def get_size_mb(path: str | Path) -> float:
+@AsyncTTL(time_to_live=60, maxsize=1024)
+def get_size_mb(path: str | Path, _r=None) -> float:
     return round(get_size_bytes(path) / (1024 ** 2), 3)
 
 
