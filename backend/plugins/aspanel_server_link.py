@@ -444,6 +444,15 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
         else:
             label.set_hover_text("图片地址缺失")
         return label
+    if seg_type == "file":
+        url = _normalize_media_url(data.get("url") or data.get("file"))
+        label = RText("[文件]", color=RColor.aqua)
+        if url:
+            label.set_click_event(RAction.open_url, url)
+            label.set_hover_text(f"点击打开文件 {url}")
+        else:
+            label.set_hover_text("文件地址缺失")
+        return label
     if seg_type == "reply":
         label = RText("[回复]", color=RColor.light_purple)
         if raw:
@@ -551,10 +560,7 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
     # 打印
     if level == "ALERT":
         # [ALERT] <user> message （红色粗体）
-        t = RText("[ALERT] ", color=RColor.red, styles=RStyle.bold) + RText(f"<{user}> ", color=RColor.red,
-                                                                            styles=RStyle.bold) + RText(message,
-                                                                                                        color=RColor.red,
-                                                                                                        styles=RStyle.bold)
+        t = RText("[ALERT] ", color=RColor.red, styles=RStyle.italic) + RText(f"<{user}> ", color=RColor.red, styles=RStyle.italic) + RText(message, color=RColor.red, styles=RStyle.italic)
         server.say(t)
     else:
         if source == "qq":
