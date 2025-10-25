@@ -20,13 +20,15 @@ from backend.core.constants import (
 
 async_client = httpx.AsyncClient(timeout=10)
 
-async def async_get(url:str) -> httpx.Response:
+
+async def async_get(url: str) -> httpx.Response:
     try:
         response = await async_client.get(url)
         response.raise_for_status()
         return response
     except httpx.RequestError as e:
         raise HTTPException(status_code=503, detail=f"Failed to fetch {url}: {e}")
+
 
 async def async_get_json(url: str) -> Dict | List:
     response = await async_get(url)
@@ -59,7 +61,7 @@ async def get_minecraft_version_detail_by_version_id(version_id: str) -> Dict[st
 
 
 @AsyncTTL(time_to_live=3600, maxsize=128)
-async def get_velocity_version_detail(version: str, build: str) -> Dict[str, Any]:
+async def get_velocity_version_detail(version: str, build: str | int) -> Dict[str, Any]:
     _ = await async_get_json(VELOCITY_BUILD_MANIFEST_URL.format(version))
     _build: Dict | None = None
     build: int = int(build)
@@ -74,13 +76,14 @@ async def get_velocity_version_detail(version: str, build: str) -> Dict[str, Any
 
 @AsyncTTL(time_to_live=3600, maxsize=1)
 async def get_fabric_game_version_list() -> List:
-    return list(x['version'] for x in (await async_get_json(FABRIC_GAME_VERSION_LIST_MANIFEST_URL)))
+    _ = await async_get_json(FABRIC_GAME_VERSION_LIST_MANIFEST_URL)
+    return list(x['version'] for x in _)
 
 
 @AsyncTTL(time_to_live=3600, maxsize=128)
 async def get_fabric_loader_version_list(vanilla_core_version: str) -> List:
-    return list(x['loader']['version'] for x in
-                (await async_get_json(FABRIC_LOADER_VERSION_LIST_MANIFEST_URL.format(vanilla_core_version))))
+    _ = await async_get_json(FABRIC_LOADER_VERSION_LIST_MANIFEST_URL.format(vanilla_core_version))
+    return list(x['loader']['version'] for x in _)
 
 
 @AsyncTTL(time_to_live=3600, maxsize=1024)
@@ -147,5 +150,5 @@ async def get_forge_installer_meta(mc_version: str, forge_version: str) -> Dict[
 
 
 @AsyncTTL(time_to_live=3600, maxsize=1)
-async def get_mcdr_plugins_catalogue() -> Dict:
+async def get_mcdr_plugins_catalogue(_r=None) -> Dict:
     return await async_get_json(MCDR_PLUGINS_CATALOGUE_URL)

@@ -22,7 +22,6 @@ def get_user_by_username(db: Session, username: str) -> Optional[models.User]:
 def create_user(db: Session, user: schemas.UserCreate, role: Optional[schemas.Role] = None) -> models.User:
     hashed_password = get_password_hash(user.password)
     bound_player_id = None
-    # 可选根据玩家名绑定现有玩家
     try:
         if getattr(user, 'player_name', None):
             p = db.query(models.Player).filter(models.Player.player_name == user.player_name).first()
@@ -274,18 +273,6 @@ def delete_download_file(db: Session, file_id: int) -> Optional[models.Download]
         db.delete(db_file)
         db.commit()
     return db_file
-
-
-# def refresh_download_file(db: Session):
-#     all_files = get_all_download_files(db)
-#     name_list = list(Path(x.path).name for x in all_files)
-#     for file in os.listdir(TEMP_PATH):
-#         if file not in name_list:
-#             file_path = TEMP_PATH
-#                 os.remove(file)
-#     for file in all_files:
-#         if Path(file.path).name not in os.listdir(TEMP_PATH):
-#             delete_download_file(db, file.id)
 
 
 # --- Archive CRUD ---

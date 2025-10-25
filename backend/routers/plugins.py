@@ -3,8 +3,8 @@
 import json
 import os
 import shutil
+import time
 import uuid
-
 from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -28,9 +28,10 @@ router = APIRouter(
 
 
 @router.get("/plugins/mcdr/versions", response_model=schemas.PluginCatalogue)
-async def get_mcdr_catalogue(_user=Depends(require_role(Role.HELPER))):
+async def get_mcdr_catalogue(do_refresh=False, _user=Depends(require_role(Role.HELPER))):
     """获取 MCDR 官方插件市场目录"""
-    catalogue_data = await get_mcdr_plugins_catalogue()
+    _r = time.time() if do_refresh else None
+    catalogue_data = await get_mcdr_plugins_catalogue(_r)
     return schemas.PluginCatalogue.model_validate(catalogue_data)
 
 
@@ -114,7 +115,8 @@ def get_db_plugins(db: Session = Depends(get_db), _user=Depends(require_role(Rol
 
 
 @router.post("/plugins/server/{server_id}/install/from-db/{plugin_db_id}", status_code=status.HTTP_201_CREATED)
-async def install_plugin_from_db(server_id: int, plugin_db_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
+async def install_plugin_from_db(server_id: int, plugin_db_id: int, db: Session = Depends(get_db),
+                                 _user=Depends(require_role(Role.HELPER))):
     """从中央仓库安装插件到服务器"""
     server = crud.get_server_by_id(db, server_id)
     if not server:
@@ -158,7 +160,8 @@ async def switch_server_plugin(server_id: int, file_name: str, enable: Optional[
 
 
 @router.delete("/plugins/server/{server_id}/{file_name}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_server_plugin(server_id: int, file_name: str, db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
+async def delete_server_plugin(server_id: int, file_name: str, db: Session = Depends(get_db),
+                               _user=Depends(require_role(Role.HELPER))):
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
