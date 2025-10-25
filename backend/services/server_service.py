@@ -210,6 +210,7 @@ class ServerService:
                 )
                 # 受限速且可断点续传复制，默认 128MB/s，可通过环境变量 ASP_IMPORT_BWLIMIT_MBPS 覆盖
                 await asyncio.to_thread(copytree_resumable_throttled, source_path, target_path)
+                await asyncio.to_thread(get_size_mb, target_path, time.time())
                 task.progress = 100
                 crud.update_server_core_config(db, db_server.id, infer_server_type_and_analyze_core_config(db_server))
                 # 导入完成：根据是否存在 world，为所有玩家添加 {server_name: 0}

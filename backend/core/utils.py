@@ -11,7 +11,7 @@ import zipfile
 import subprocess
 from pathlib import Path
 from threading import RLock
-from typing import Tuple, Optional, Dict, Union
+from typing import Tuple, Optional, Dict, Union, List
 from zoneinfo import ZoneInfo
 from datetime import timezone, timedelta
 from cachetools import TTLCache, cached
@@ -21,6 +21,23 @@ from backend.core.logger import logger
 
 _size_cache = TTLCache(ttl=60, maxsize=1024)
 _size_cache_lock = RLock()
+_hash_cache = TTLCache(ttl=60, maxsize=1024)
+_hash_cache_lock = RLock()
+
+_MC_NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,16}$")
+
+
+def _hash_cache_key(data: Path | bytes, hash_tool):
+    if isinstance(data, Path):
+        if not data.is_file():
+            return None
+        mtime = data.stat().st_mtime
+        return str(data), mtime, hash_tool.name
+    elif isinstance(data, bytes):
+        return hash(data), hash_tool.name
+    else:
+        raise TypeError(f"不支持的类型: {type(data)}，请输入 Path 或 bytes。")
+
 
 def get_size_bytes(path: Union[str, Path], *, prefer_du: bool = True, timeout: float = 3.0) -> int:
     p = Path(path)
@@ -69,11 +86,15 @@ def get_size_bytes(path: Union[str, Path], *, prefer_du: bool = True, timeout: f
 
     return _dir_size(p)
 
-@cached(_size_cache, lock=_size_cache_lock)
+
+@cached(_size_cache, key=lambda path, _r=None: (path,), lock=_size_cache_lock)
 def get_size_mb(path: str | Path, _r=None) -> float:
+    if _r is not None:
+        _size_cache.pop((path,), None)
     return round(get_size_bytes(path) / (1024 ** 2), 3)
 
 
+@cached(_hash_cache, key=_hash_cache_key, lock=_hash_cache_lock)
 def get_file_hash(data: Path | bytes, hash_tool) -> str | None:
     if isinstance(data, Path):
         if not data.is_file():
@@ -107,27 +128,34 @@ def get_str_md5(text: str) -> str:
 
 
 def is_valid_mc_name(name: str) -> bool:
-    return bool(re.fullmatch(r"[A-Za-z0-9_\-]{1,16}", name))
+    return bool(_MC_NAME_RE.match(name))
 
 
-def get_version_json_from_vanilla_jar(jar_path: Path) -> Dict | None:
-    if not os.path.exists(jar_path):
+def _read_files_in_zipfile(zip_file_path: Path, *files_name: str) -> List[Optional[bytes]]:
+    if not os.path.exists(zip_file_path):
         return None
     try:
-        with zipfile.ZipFile(jar_path, 'r') as jar_file:
-            if 'version.json' in jar_file.namelist():
-                version_json_bytes = jar_file.read('version.json')
-                return json.loads(version_json_bytes.decode('utf-8'))
-            else:
-                return None
+        file_bytes = []
+        with zipfile.ZipFile(zip_file_path, 'r') as jar_file:
+            for file_name in files_name:
+                if file_name in jar_file.namelist():
+                    file_bytes.append(jar_file.read(file_name))
+                else:
+                    file_bytes.append(jar_file.read(file_name))
     except zipfile.BadZipFile:
         return None
     except Exception as e:
         return None
+    return file_bytes
+
+
+def _get_version_json_from_vanilla_jar(jar_path: Path) -> Dict | None:
+    _ = _read_files_in_zipfile(jar_path, 'version.json')[0]
+    return json.loads(_.decode('utf-8')) if _ else None
 
 
 def get_vanilla_jar_version(jar_path: Path) -> Optional[str]:
-    js = get_version_json_from_vanilla_jar(jar_path)
+    js = _get_version_json_from_vanilla_jar(jar_path)
     if js is None:
         return None
     version_id: Optional[str] = js.get("id", None)
@@ -138,24 +166,13 @@ def get_vanilla_jar_version(jar_path: Path) -> Optional[str]:
     return version_id
 
 
-def get_manifest_mf_from_velocity_jar(jar_path: Path) -> str | None:
-    if not os.path.exists(jar_path):
-        return None
-    try:
-        with zipfile.ZipFile(jar_path, 'r') as jar_file:
-            if 'META-INF/MANIFEST.MF' in jar_file.namelist():
-                manifest_mf_bytes = jar_file.read('META-INF/MANIFEST.MF')
-                return manifest_mf_bytes.decode('utf-8')
-            else:
-                return None
-    except zipfile.BadZipFile:
-        return None
-    except Exception as e:
-        return None
+def _get_manifest_mf_from_velocity_jar(jar_path: Path) -> str | None:
+    _ = _read_files_in_zipfile(jar_path, 'META-INF/MANIFEST.MF')[0]
+    return _.decode('utf-8') if _ else None
 
 
 def get_velocity_jar_version(jar_path: Path) -> Optional[str]:
-    manifest_mf = get_manifest_mf_from_velocity_jar(jar_path)
+    manifest_mf = _get_manifest_mf_from_velocity_jar(jar_path)
     if manifest_mf is None:
         return None
     pattern = r"Implementation-Version:\s+(.+?)\s+\(git-[a-f0-9]+-b(\w+)\)"
@@ -170,32 +187,24 @@ def get_velocity_jar_version(jar_path: Path) -> Optional[str]:
 
 
 def get_fabric_jar_version(jar_path: Path) -> Tuple[Optional[str], Optional[str]]:
-    if not os.path.exists(jar_path):
-        return None, None
-    try:
-        vanilla_version = None
-        fabric_loader_version = None
-        with zipfile.ZipFile(jar_path, 'r') as jar_file:
-            if 'META-INF/MANIFEST.MF' in jar_file.namelist():
-                manifest = jar_file.read('META-INF/MANIFEST.MF')
-                lines = manifest.decode().splitlines()
-                class_string = ""
-                for line in lines[2:]:
-                    class_string += line.replace("Class-Path:", "")[1:]
-                class_entries = class_string.split()
-                for cls in class_entries:
-                    split_cls = cls.split("/")
-                    if "intermediary" in cls:
-                        vanilla_version = split_cls[-2]
-                    if "fabric-loader" in cls:
-                        fabric_loader_version = split_cls[-2]
-                    if vanilla_version and fabric_loader_version:
-                        return vanilla_version, fabric_loader_version
-        return vanilla_version, fabric_loader_version
-    except zipfile.BadZipFile:
-        return None, None
-    except Exception as e:
-        return None, None
+    _ = _read_files_in_zipfile(jar_path, 'META-INF/MANIFEST.MF')[0]
+    manifest_lines = _.decode().splitlines()
+
+    vanilla_version = None
+    fabric_loader_version = None
+    class_string = ""
+    for line in manifest_lines[2:]:
+        class_string += line.replace("Class-Path:", "")[1:]
+    class_entries = class_string.split()
+    for cls in class_entries:
+        split_cls = cls.split("/")
+        if "intermediary" in cls:
+            vanilla_version = split_cls[-2]
+        if "fabric-loader" in cls:
+            fabric_loader_version = split_cls[-2]
+        if vanilla_version and fabric_loader_version:
+            return vanilla_version, fabric_loader_version
+    return vanilla_version, fabric_loader_version
 
 
 def get_forge_jar_version(jar_path: Path) -> Tuple[Optional[str], Optional[str]]:
@@ -210,23 +219,18 @@ def get_forge_jar_version(jar_path: Path) -> Tuple[Optional[str], Optional[str]]
         match = re.match(pattern, jar_name)
         if match:
             return match.group("mc"), match.group("forge")
-    try:
-        with zipfile.ZipFile(jar_path, 'r') as jar_file:
-            for candidate in ["version.json", "META-INF/version.json"]:
-                if candidate in jar_file.namelist():
-                    try:
-                        version_info = json.loads(jar_file.read(candidate).decode())
-                    except Exception:
-                        continue
-                    version_id = version_info.get("id") or version_info.get("version")
-                    if isinstance(version_id, str) and version_id.startswith("forge-"):
-                        parts = version_id.split("-")
-                        if len(parts) >= 3:
-                            return parts[1], parts[2]
-    except zipfile.BadZipFile:
-        return None, None
-    except Exception:
-        return None, None
+    _ = _read_files_in_zipfile(jar_path, "version.json", "META-INF/version.json")
+    for candidate in _:
+        if candidate:
+            try:
+                version_info = json.loads(candidate.decode())
+            except Exception:
+                continue
+            version_id = version_info.get("id") or version_info.get("version")
+            if isinstance(version_id, str) and version_id.startswith("forge-"):
+                parts = version_id.split("-")
+                if len(parts) >= 3:
+                    return parts[1], parts[2]
     return None, None
 
 
@@ -277,7 +281,6 @@ class Timer:
             logger.info(f"[{self.name}.{point}] 当前已用时 {elapsed:.4f} 秒")
 
 
-
 def _bw_sleep(start_ts: float, bytes_written: int, limit_bps: float):
     if limit_bps <= 0:
         return
@@ -287,9 +290,7 @@ def _bw_sleep(start_ts: float, bytes_written: int, limit_bps: float):
         time.sleep(expected - elapsed)
 
 
-def copy_file_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 128.0, preserve_stat: bool = True):
-    src = Path(src)
-    dst = Path(dst)
+def _copy_file_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 1024.0, preserve_stat: bool = True):
     if not src.is_file():
         return
 
@@ -347,7 +348,7 @@ def copytree_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 1024
                 continue
             dp = (dst / rel / name)
             try:
-                copy_file_resumable_throttled(sp, dp, max_mbps=max_mbps)
+                _copy_file_resumable_throttled(sp, dp, max_mbps=max_mbps)
             except Exception as e:
                 logger.error(f"复制文件失败: {sp} -> {dp}：{e}")
 

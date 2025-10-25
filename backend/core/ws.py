@@ -7,18 +7,16 @@ from backend.core.database import get_db_context
 from backend.core.dependencies import mcdr_manager
 from backend.core import crud
 from backend.core.logger import logger
+from backend.core.constants import ALLOWED_ORIGINS
 
-# Socket.IO 实例
-sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
+sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins=ALLOWED_ORIGINS)
 mcdr_manager.sio = sio
 
-# 在线聊天室用户：group_id -> { sid -> user(dict) }
 CHAT_USERS: Dict[int, Dict[str, dict]] = {}
-# 反查：sid -> group_id，用于断开/离开时清理
 CHAT_SID_GROUP: Dict[str, int] = {}
 
 
-@sio.event
+@sio.on('join_console_room')
 async def join_console_room(sid, data):
     server_id = data.get('server_id')
     if server_id is not None:

@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Annotated
 
 
-def validate_core_config(v: Any) -> Any:
+def _validate_core_config(v: Any) -> Any:
     if isinstance(v, str):
         try:
             return json.loads(v)
@@ -145,8 +145,8 @@ class ServerCoreConfig(BaseModel):
     core_version: Optional[str] = None  # for all servers
     is_fabric: bool = False  # only when server_type == vanilla it can be true
     loader_version: Optional[str] = None  # either fabric or forge loader
-    launcher_jar: Optional[
-        str] = None  # when vanilla and is_fabric==True or forge server, it will be different from server_jar, indicating loader_version
+    launcher_jar: Optional[str] = None
+    # when vanilla and is_fabric==True or forge server, it will be different from server_jar, indicating loader_version
     server_jar: Optional[str] = "server.jar"  # indicates core_version
 
 
@@ -155,7 +155,7 @@ class Server(ServerBase):
     path: str
     creator_id: int
 
-    core_config: Annotated[ServerCoreConfig, BeforeValidator(validate_core_config)]
+    core_config: Annotated[ServerCoreConfig, BeforeValidator(_validate_core_config)]
 
     class Config:
         from_attributes = True
