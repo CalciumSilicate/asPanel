@@ -1,0 +1,28 @@
+{
+    "serverName": "Survival Server",
+    "commonJsonDataPath": null,
+    "mainServerName": "My Server",
+    "serverList": [
+        "survival",
+        "lobby",
+        {
+            "name": "creative1",
+            "display": null,
+            "description": "CMP Server#1",
+            "category": "CMP"
+        },
+        {
+            "name": "creative2",
+            "display": null,
+            "description": "CMP Server#2",
+            "category": "CMP"
+        }
+    ],
+    "start_day": null,
+    "daycount_plugin_ids": [
+        "mcd_daycount",
+        "day_count_reforged",
+        "daycount_nbt"
+    ],
+    "auto_reload_interval": null
+}
