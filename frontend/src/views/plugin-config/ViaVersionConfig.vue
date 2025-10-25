@@ -64,9 +64,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
-import apiClient from '@/api'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
-import { normalizeServerType, installModrinth, fetchServerMods, hasModrinthSlug } from './_Shared'
+import { normalizeServerType, installModrinth, fetchServerMods, hasModrinthSlug, fetchServersCached, invalidateServerMods } from './_Shared'
 import PluginConfigForm from './components/PluginConfigForm.vue'
 
 const servers = ref<any[]>([])
@@ -93,8 +92,7 @@ const selectServer = (row:any) => { if (!isAllowed(row) || !isInstalled(row)) re
 const loadServers = async () => {
   loadingServers.value = true
   try {
-    const { data } = await apiClient.get('/api/servers')
-    servers.value = data || []
+    servers.value = await fetchServersCached()
   } catch (e:any) {
     ElMessage.error('加载服务器失败')
   } finally { loadingServers.value = false }
@@ -120,6 +118,7 @@ const installFor = async (s:any) => {
   try {
     await installModrinth(s.id, 'viaversion')
     ElMessage.success(`已发起安装 ViaVersion 到 ${s.name}`)
+    invalidateServerMods(s.id)
     installedMap.value.set(s.id, true)
   } catch (e:any) {
     ElMessage.error(e.response?.data?.detail || e.message || '安装失败')
