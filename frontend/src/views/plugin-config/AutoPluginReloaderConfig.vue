@@ -62,9 +62,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
-import apiClient from '@/api'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
-import { normalizeServerType, installMCDR, fetchServerPlugins } from './_Shared'
+import { normalizeServerType, installMCDR, fetchServerPlugins, fetchServersCached, invalidateServerPlugins } from './_Shared'
 import PluginConfigForm from './components/PluginConfigForm.vue'
 
 const PLUGIN_ID = 'auto_plugin_reloader'
@@ -89,7 +88,7 @@ const selectServer = (row:any) => { if (!isAllowed(row) || !isInstalled(row)) re
 
 const loadServers = async () => {
   loadingServers.value = true
-  try { const { data } = await apiClient.get('/api/servers'); servers.value = data || [] } catch (e:any) { ElMessage.error('加载服务器失败') } finally { loadingServers.value = false }
+  try { servers.value = await fetchServersCached() } catch (e:any) { ElMessage.error('加载服务器失败') } finally { loadingServers.value = false }
   await refreshInstalled()
 }
 
@@ -104,7 +103,7 @@ const refreshInstalled = async () => {
 
 const installFor = async (s:any) => {
   installingServerId.value = s.id
-  try { await installMCDR(s.id, PLUGIN_ID); ElMessage.success(`已发起安装 ${PLUGIN_ID} 到 ${s.name}`); installedMap.value.set(s.id, true) }
+  try { await installMCDR(s.id, PLUGIN_ID); ElMessage.success(`已发起安装 ${PLUGIN_ID} 到 ${s.name}`); invalidateServerPlugins(s.id); installedMap.value.set(s.id, true) }
   catch (e:any) { ElMessage.error(e.response?.data?.detail || e.message || '安装失败') }
   finally { installingServerId.value = null }
 }

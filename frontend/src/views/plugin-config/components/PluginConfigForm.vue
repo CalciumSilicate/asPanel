@@ -63,6 +63,7 @@
 import { ref, reactive, computed, watch, onMounted, h, defineComponent, resolveComponent } from 'vue'
 import ConfigEditor from '@/components/ConfigEditor.vue'
 import apiClient from '@/api'
+import { fetchPluginConfigCached, fetchServersCached, invalidatePluginConfig } from '../_Shared'
 
 const props = defineProps({
   pluginKey: { type: String, required: true },
@@ -123,6 +124,8 @@ const submitChanges = async () => {
   const payload = { updates: rebuildNested(pending.value) }
   try {
     await apiClient.patch(`/api/configs/${props.pluginKey}/${props.serverId}`, payload)
+    // 变更成功后，失效缓存，确保后续重新加载获取新数据
+    invalidatePluginConfig(props.pluginKey, props.serverId)
   } catch (e) {
     console.error(e)
   } finally {
@@ -184,16 +187,16 @@ const saveRaw = async (content) => {
     await apiClient.post(`/api/configs/${props.pluginKey}/${props.serverId}/raw`, { content })
   } catch (e) {
     // ignore
-  } finally { raw.saving = false; raw.visible = false; await load() }
+  } finally { raw.saving = false; raw.visible = false; invalidatePluginConfig(props.pluginKey, props.serverId); await load() }
 }
 
 const load = async () => {
   if (!props.serverId) return
   try {
-    const { data } = await apiClient.get(`/api/configs/${props.pluginKey}/${props.serverId}`)
-    cfg.value = data.config || {}
-    fields.value = data.ui_fields || []
-    fmt.value = data.format || 'json'
+    const data = await fetchPluginConfigCached(props.pluginKey, props.serverId)
+    cfg.value = data?.config || {}
+    fields.value = data?.ui_fields || []
+    fmt.value = data?.format || 'json'
   } catch (e) {
     cfg.value = {}
     fields.value = []
@@ -205,7 +208,7 @@ watch(() => props.serverId, () => load())
 onMounted(async () => {
   // 准备服务器名选项（用于 joinMOTD.serverList 便捷添加）
   try {
-    const { data } = await apiClient.get('/api/servers')
+    const data = await fetchServersCached()
     serverNameOptions.value = (data || []).map(s => ({ label: s.name, value: s.name }))
   } catch {}
   await load()
