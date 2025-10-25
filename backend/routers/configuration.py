@@ -46,7 +46,7 @@ PLUGIN_SPECS: Dict[str, PluginSpec] = {
     "viaversion": PluginSpec(
         key="viaversion",
         fmt="yaml",
-        default_repo_path=_p("storages/mcdr-servers/testV/server/plugins/viaversion/config.yml"),
+        default_repo_path=_p("backend/default_config/viaversion.yml"),
         target_rel_path=Path("server/plugins/viaversion/config.yml"),
         editable=[
             "packet-limiter.max-per-second",
@@ -61,7 +61,7 @@ PLUGIN_SPECS: Dict[str, PluginSpec] = {
     "velocity_proxy": PluginSpec(
         key="velocity_proxy",
         fmt="toml",
-        default_repo_path=_p("storages/mcdr-servers/test1/server/config/FabricProxy-Lite.toml"),
+        default_repo_path=_p("backend/default_config/FabricProxy-Lite.toml"),
         target_rel_path=Path("server/config/FabricProxy-Lite.toml"),
         editable=["*"],
         ui_fields=[
@@ -76,7 +76,7 @@ PLUGIN_SPECS: Dict[str, PluginSpec] = {
     "prime_backup": PluginSpec(
         key="prime_backup",
         fmt="json",
-        default_repo_path=_p("storages/mcdr-servers/test1/config/prime_backup/config.json"),
+        default_repo_path=_p("backend/default_config/prime_backup.json"),
         target_rel_path=Path("config/prime_backup/config.json"),
         editable=[
             "enabled",
@@ -105,7 +105,7 @@ PLUGIN_SPECS: Dict[str, PluginSpec] = {
     "auto_plugin_reloader": PluginSpec(
         key="auto_plugin_reloader",
         fmt="json",
-        default_repo_path=_p("storages/mcdr-servers/importC/config/auto_plugin_reloader/config.json"),
+        default_repo_path=_p("backend/default_config/auto_plugin_reloader.json"),
         target_rel_path=Path("config/auto_plugin_reloader/config.json"),
         editable=["enabled"],
         ui_fields=[
@@ -116,7 +116,7 @@ PLUGIN_SPECS: Dict[str, PluginSpec] = {
     "bili_live_helper": PluginSpec(
         key="bili_live_helper",
         fmt="json",
-        default_repo_path=_p("storages/mcdr-servers/test1/config/bili_live_helper/config.json"),
+        default_repo_path=_p("backend/default_config/bili_live_helper.json"),
         target_rel_path=Path("config/bili_live_helper/config.json"),
         editable=["enable", "account.*"],
         ui_fields=[
@@ -132,7 +132,7 @@ PLUGIN_SPECS: Dict[str, PluginSpec] = {
     "where_is": PluginSpec(
         key="where_is",
         fmt="json",
-        default_repo_path=_p("storages/mcdr-servers/test1/config/where_is/config.json"),
+        default_repo_path=_p("backend/default_config/where_is.json"),
         target_rel_path=Path("config/where_is/config.json"),
         editable=[
             "command_prefix.where_is",
@@ -151,7 +151,7 @@ PLUGIN_SPECS: Dict[str, PluginSpec] = {
     "crash_restart": PluginSpec(
         key="crash_restart",
         fmt="json",
-        default_repo_path=_p("storages/mcdr-servers/importC2/config/CrashRestart.json"),
+        default_repo_path=_p("backend/default_config/CrashRestart.json"),
         target_rel_path=Path("config/CrashRestart.json"),
         editable=["*"],
         ui_fields=[
@@ -163,7 +163,7 @@ PLUGIN_SPECS: Dict[str, PluginSpec] = {
     "join_motd": PluginSpec(
         key="join_motd",
         fmt="json",
-        default_repo_path=_p("storages/mcdr-servers/test1/config/joinMOTD.json"),
+        default_repo_path=_p("backend/default_config/joinMOTD.json"),
         target_rel_path=Path("config/joinMOTD.json"),
         editable=["serverName", "mainServerName", "serverList", "start_day"],
         ui_fields=[
@@ -177,7 +177,7 @@ PLUGIN_SPECS: Dict[str, PluginSpec] = {
     "quick_backup_multi": PluginSpec(
         key="quick_backup_multi",
         fmt="json",
-        default_repo_path=_p("storages/mcdr-servers/importC2/config/QuickBackupM.json"),
+        default_repo_path=_p("backend/default_config/QuickBackupM.json"),
         target_rel_path=Path("config/QuickBackupM.json"),
         editable=["minimum_permission_level.back", "minimum_permission_level.confirm"],
         ui_fields=[

@@ -1,0 +1,13 @@
+{
+    "enable": true,
+    "data_file_path": "data.json",
+    "console_output": true,
+    "account": {
+        "uid": 0,
+        "sessdata": "",
+        "bili_jct": "",
+        "buvid3": "",
+        "ac_time_value": ""
+    },
+    "send": true
+}
