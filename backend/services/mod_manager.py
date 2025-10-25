@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+import time
 import httpx
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.orm import Session
@@ -27,6 +28,23 @@ class ModManager:
 
     目标：将 backend/routers/mods.py 中的大部分实现抽离到服务层，保持 API 不变，路由仅负责参数解析与鉴权。
     """
+
+    # ---------- 本地缓存（提升 list_server_mods 与补全性能） ----------
+    # 说明：
+    # - _list_cache：针对每个服务器的 mods 目录做指纹缓存（文件名+大小+mtime），在目录未变化且 TTL 未过期时直接复用结果。
+    # - _modrinth_hash_cache：Modrinth 通过 sha1 的元数据查询结果缓存，减少重复外网请求。
+    # - _project_slug_cache：Modrinth 项目 slug 查询缓存，减少重复外网请求。
+    # 注意：缓存为进程内易失缓存，TTL 到期或目录变化自然失效，无需手动失效控制。
+    _LIST_CACHE_TTL_SEC = 10
+    _MODRINTH_HASH_CACHE_TTL_SEC = 3600
+    _PROJECT_SLUG_CACHE_TTL_SEC = 3600
+
+    # key: f"{server_id}:{mods_dir}:{skip_enrich}" → value: { 'ts': float, 'fingerprint': str, 'payload': Dict }
+    _list_cache: Dict[str, Dict[str, Any]] = {}
+    # key: sha1 → value: (ts, meta_dict)
+    _modrinth_hash_cache: Dict[str, Any] = {}
+    # key: project_id → value: (ts, slug or None)
+    _project_slug_cache: Dict[str, Any] = {}
 
     # ---------- 路径与通用构件 ----------
     @staticmethod
@@ -63,6 +81,12 @@ class ModManager:
     async def try_fill_meta_from_modrinth_by_hash(file_path: Path) -> Dict[str, Any] | None:
         """通过 Modrinth 的文件哈希匹配接口补全元数据。"""
         sha1 = get_file_sha1(file_path)
+        # 先查本地缓存
+        cache_item = ModManager._modrinth_hash_cache.get(sha1)
+        now = time.time()
+        if cache_item and (now - cache_item[0] <= ModManager._MODRINTH_HASH_CACHE_TTL_SEC):
+            return cache_item[1]
+
         url = f"https://api.modrinth.com/v2/version_file/{sha1}?algorithm=sha1"
         async with httpx.AsyncClient(timeout=20) as client:
             r = await client.get(url)
@@ -93,25 +117,66 @@ class ModManager:
                 'follows': (project or {}).get('followers'),
                 'project_page': (project or {}).get('project_type'),
             }
+            # 设置缓存
+            ModManager._modrinth_hash_cache[sha1] = (now, meta)
             return meta
 
     # ---------- 列表与概览 ----------
     async def list_server_mods(self, server: Any, db: Session, *, skip_enrich: bool = False) -> Dict[str, Any]:
+        """列出服务器目录中的模组。
+
+        性能优化点：
+        1) 目录级缓存：基于目录指纹（文件名+大小+mtime）与 TTL，短时间内重复请求直接命中缓存结果。
+        2) DB 批量预取：一次性查询该目录下所有 path 对应的 Mod 记录，避免 N 次逐文件查询。
+        3) Modrinth 结果缓存：对基于 sha1 的元数据查询与项目 slug 查询做进程内 TTL 缓存，减少远端请求。
+        """
         mods_dir = self.mods_dir_for_server(server)
         items: List[Dict[str, Any]] = []
 
+        # 预扫描目录并构建指纹，用于目录级缓存
+        entries: List[os.DirEntry] = []
         with os.scandir(mods_dir) as it:
             for entry in it:
                 if entry.name.startswith('.'):
                     continue
                 if not entry.is_file():
                     continue
+                entries.append(entry)
 
+        # 指纹：文件名 + 大小 + mtime
+        parts: List[str] = []
+        for e in entries:
+            try:
+                st = e.stat()
+                parts.append(f"{e.name}|{st.st_size}|{int(st.st_mtime_ns)}")
+            except Exception:
+                # 即使个别 stat 失败，也尽量不影响整体；使用占位
+                parts.append(f"{e.name}|-1|0")
+        fingerprint = 'v1:' + '|'.join(sorted(parts))
+
+        cache_key = f"{getattr(server, 'id', '0')}:{str(mods_dir)}:{bool(skip_enrich)}"
+        now = time.time()
+        cached = ModManager._list_cache.get(cache_key)
+        if cached and cached.get('fingerprint') == fingerprint and (now - cached.get('ts', 0) <= ModManager._LIST_CACHE_TTL_SEC):
+            return cached.get('payload')  # type: ignore
+
+        # 批量查询 DB 中已有记录
+        path_list = [str(Path(e.path).resolve()) for e in entries]
+        existing: Dict[str, Any] = {}
+        if path_list:
+            try:
+                rows = db.query(models.Mod).filter(models.Mod.path.in_(path_list)).all()
+                for r in rows:
+                    existing[str(Path(r.path).resolve())] = r
+            except Exception:
+                existing = {}
+
+        # 为需要补 slug 的项目共用一个 http 客户端（避免重复创建开销）
+        async with httpx.AsyncClient(timeout=20) as shared_client:
+            for entry in entries:
                 fp = Path(entry.path)
                 enabled = not fp.name.endswith('.disabled')
-
-                # 优先根据 path 命中 DB，避免不必要的哈希/外网查询
-                db_mod = db.query(models.Mod).filter(models.Mod.path == str(fp.resolve())).first()
+                db_mod = existing.get(str(fp.resolve()))
                 meta: Dict[str, Any] | None = None
 
                 if db_mod:
@@ -120,28 +185,39 @@ class ModManager:
                     except JSONDecodeError:
                         meta = {}
 
-                    # 标记为 unknown 则不再补全，直接入结果并维护安装关系
+                    # 标记 unknown 则跳过补全，但仍维护服务器安装关系
                     if isinstance(meta, dict) and meta.get('unknown') is True:
                         try:
                             crud.add_server_to_mod(db, db_mod.id, server.id)
                         except Exception:
                             pass
-                        items.append(self.build_mod_item(fp, enabled, {}))
+                        items.append(self.build_mod_item(
+                            fp, enabled, {},
+                            hash_md5=getattr(db_mod, 'hash_md5', None),
+                            hash_sha256=getattr(db_mod, 'hash_sha256', None)
+                        ))
                         continue
 
-                    # 若为 modrinth 且缺少 slug，尽力补全并落 DB
-                    if (not skip_enrich) and isinstance(meta, dict) and meta.get('source') == 'modrinth' and (
-                            not meta.get('slug')):
+                    # 若为 modrinth 且缺少 slug，尽力补全并落 DB（带缓存）
+                    if (not skip_enrich) and isinstance(meta, dict) and meta.get('source') == 'modrinth' and (not meta.get('slug')):
                         pid = meta.get('modrinth_project_id') or meta.get('id')
                         if pid:
                             try:
-                                async with httpx.AsyncClient(timeout=20) as client:
-                                    pr = await client.get(f"https://api.modrinth.com/v2/project/{pid}")
+                                citem = ModManager._project_slug_cache.get(pid)
+                                slug: Optional[str] = None
+                                if citem and (now - citem[0] <= ModManager._PROJECT_SLUG_CACHE_TTL_SEC):
+                                    slug = citem[1]
+                                else:
+                                    pr = await shared_client.get(f"https://api.modrinth.com/v2/project/{pid}")
                                     if pr.status_code == 200:
-                                        meta['slug'] = (pr.json() or {}).get('slug')
-                                        db_mod.meta = json.dumps(meta)
-                                        db.add(db_mod)
-                                        db.commit()
+                                        slug = (pr.json() or {}).get('slug')
+                                    ModManager._project_slug_cache[pid] = (now, slug)
+
+                                if slug:
+                                    meta['slug'] = slug
+                                    db_mod.meta = json.dumps(meta)
+                                    db.add(db_mod)
+                                    db.commit()
                             except Exception:
                                 pass
 
@@ -151,7 +227,7 @@ class ModManager:
                     except Exception:
                         pass
 
-                    # 若 DB 中 meta 为空或缺少 id，尝试通过 Modrinth 进一步补全
+                    # 若 DB 中 meta 为空或缺少 id，尝试通过 Modrinth 进一步补全（带 hash 缓存）
                     if not skip_enrich and ((not meta) or (isinstance(meta, dict) and not meta.get('id'))):
                         try:
                             m2 = await self.try_fill_meta_from_modrinth_by_hash(fp)
@@ -185,9 +261,27 @@ class ModManager:
                     db_rec = crud.create_mod_record(db, rec)
                     crud.add_server_to_mod(db, db_rec.id, server.id)
 
-                items.append(self.build_mod_item(fp, enabled, meta))
+                # 输出项尽量带上已知的哈希，便于后续复用，避免重复计算
+                if db_mod:
+                    items.append(self.build_mod_item(
+                        fp, enabled, meta,
+                        hash_md5=getattr(db_mod, 'hash_md5', None),
+                        hash_sha256=getattr(db_mod, 'hash_sha256', None)
+                    ))
+                else:
+                    items.append(self.build_mod_item(
+                        fp, enabled, meta,
+                        hash_md5=rec.hash_md5,  # type: ignore
+                        hash_sha256=rec.hash_sha256  # type: ignore
+                    ))
 
-        return {'data': items}
+        payload = {'data': items}
+        ModManager._list_cache[cache_key] = {
+            'ts': now,
+            'fingerprint': fingerprint,
+            'payload': payload,
+        }
+        return payload
 
     def overview(self, server: Any) -> Dict[str, Any]:
         mods_dir = self.mods_dir_for_server(server)
@@ -624,4 +718,3 @@ class ModManager:
                                 db.commit()
                         except Exception:
                             pass
-
