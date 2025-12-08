@@ -608,7 +608,7 @@ async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, tex
     text = text.strip()
     split_text = text.split()
     cmd = text[0]
-    if cmd not in {"#", "%", "&"}:
+    if cmd not in {"#", "%", "&", "^"}:
         return False
     body = text[1:].strip()
     if cmd == "#" and len(text) == 1:
@@ -617,6 +617,10 @@ async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, tex
         await _cmd_restart_server(group_id, qq_group, body)
     elif cmd == "&" and len(text) == 1:
         await _cmd_show_status(group_id, qq_group)
+    elif cmd == "^" and len(split_text) >= 2:
+        await _cmd_kick_player(group_id, qq_group, body)
+    elif cmd == "^":
+        await _send_group_text(qq_group, "用法：^ <玩家名> [reason]")
     return True
 
 
@@ -716,6 +720,42 @@ async def _cmd_show_status(group_id: int, qq_group: str) -> None:
         name = server.name or srv.get("dir")
         lines.append(f"{mark} {name}")
     await _send_group_text(qq_group, "\n".join(lines) if lines else "无服务器")
+
+
+async def _cmd_kick_player(group_id: int, qq_group: str, body: str) -> None:
+    meta = _GROUP_META.get(group_id)
+    if not meta:
+        return
+    tokens = body.split()
+    if not tokens:
+        await _send_group_text(qq_group, "用法：^ <玩家名> [reason]")
+        return
+
+    player = tokens[0]
+    reason = " ".join(tokens[1:]).strip()
+    players_map = _PLAYERS_PROVIDER() or {}
+    targets: List[Dict[str, Any]] = []
+    for srv in meta.get("servers", []):
+        dir_name = srv.get("dir")
+        if dir_name and player in players_map.get(dir_name, set()):
+            targets.append(srv)
+
+    if not targets:
+        await _send_group_text(qq_group, f"未在该服务器组内找到玩家 {player}")
+        return
+
+    command = f"kick {player}{(' ' + reason) if reason else ''}"
+    executed: List[str] = []
+    with get_db_context() as db:
+        for srv in targets:
+            server = crud.get_server_by_id(db, srv["id"])
+            if not server:
+                continue
+            await mcdr_manager.send_command(server, command)
+            executed.append(srv.get("name") or srv.get("dir") or "-")
+
+    if executed:
+        await _send_group_text(qq_group, f"已在服务器 {', '.join(executed)} 执行：{command}")
 
 
 async def relay_web_message_to_qq(group_id: int, user: str, message: str) -> None:
