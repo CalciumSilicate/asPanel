@@ -2,7 +2,7 @@ import base64
 import io
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image
 
@@ -311,14 +311,36 @@ def _image_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def build_stats_picture(player: models.Player, tr: TimeRange, avatars: Dict[str, str]) -> str:
+def build_stats_picture(
+    player: models.Player,
+    tr: TimeRange,
+    avatars: Dict[str, str],
+    is_online: bool = False,
+    server_name: Optional[str] = None
+) -> str:
+    # 构造头像链接（如果未提供）
+    qq_avatar = avatars.get("qq")
+    if not qq_avatar and avatars.get("sender_qq"):
+        # 使用 QQ 官方头像接口
+        qq_avatar = f"http://q1.qlogo.cn/g?b=qq&nk={avatars['sender_qq']}&s=640"
+
+    mc_avatar = avatars.get("mc")
+    if not mc_avatar:
+        # 使用 Cravatar 头像接口
+        # 注意：这里假设 player.uuid 是带连字符的，如果不是需要处理
+        # Cravatar 支持无连字符 UUID，但带连字符更标准
+        mc_avatar = f"https://cravatar.eu/helmavatar/{player.uuid}/128.png"
+
     data = {
-        "qq_avatar": avatars.get("qq"),
-        "mc_avatar": avatars.get("mc"),
+        "qq_avatar": qq_avatar,
+        "mc_avatar": mc_avatar,
         "player_name": player.player_name or "Unknown",
         "uuid": player.uuid,
-        "last_seen": datetime.now(get_tz_info()).strftime("%Y-%m-%d %H:%M"),
+        # 若在线则显示当前时间，否则显示 "N/A" 或需要从某处获取最后离线时间（数据库里目前没有最后离线时间字段，暂用当前时间替代或留空）
+        "last_seen": datetime.now(get_tz_info()).strftime("%Y-%m-%d %H:%M"), 
         "time_range_label": tr.label,
+        "is_online": is_online,
+        "in_server": server_name,
     }
     data["totals"] = _build_totals(player.uuid, tr)
     data["charts"] = _build_charts(player.uuid, tr)
@@ -341,7 +363,12 @@ def bind_player_for_user(sender_qq: str, target_name: str) -> str:
         return f"已将账号绑定到玩家 {target_name}"
 
 
-def build_report_from_command(tokens: List[str], sender_qq: Optional[str], avatars: Dict[str, str]) -> Tuple[bool, str]:
+def build_report_from_command(
+    tokens: List[str],
+    sender_qq: Optional[str],
+    avatars: Dict[str, str],
+    online_players_map: Optional[Dict[str, Any]] = None
+) -> Tuple[bool, str]:
     if tokens and tokens[0].lower() == "bind":
         if len(tokens) < 2:
             return False, "用法：## bind <玩家名>"
@@ -355,10 +382,24 @@ def build_report_from_command(tokens: List[str], sender_qq: Optional[str], avata
     if not player:
         return False, "未找到玩家或尚未绑定"
 
+    # 补充 sender_qq 到 avatars 以便生成 QQ 头像
+    if sender_qq and "sender_qq" not in avatars:
+        avatars["sender_qq"] = sender_qq
+
+    # 判断在线状态
+    is_online = False
+    server_name = None
+    if online_players_map and player.player_name:
+        for srv_name, players in online_players_map.items():
+            if player.player_name in players:
+                is_online = True
+                server_name = srv_name
+                break
+
     range_tokens = tokens[1:] if len(tokens) > 1 else []
     tr = _time_range_from_tokens(range_tokens)
     try:
-        img_b64 = build_stats_picture(player, tr, avatars)
+        img_b64 = build_stats_picture(player, tr, avatars, is_online=is_online, server_name=server_name)
     except Exception as exc:
         logger.opt(exception=exc).warning("生成统计图失败")
         return False, "生成统计图失败，请稍后重试"
