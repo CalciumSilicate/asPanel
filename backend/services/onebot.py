@@ -620,7 +620,13 @@ async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, tex
     if text.startswith("##"):
         body = text[2:].strip()
         tokens = body.split()
-        success, payload = qq_stats_command.build_report_from_command(tokens, sender_qq, {"qq": None, "mc": None})
+        online_map = _PLAYERS_PROVIDER() or {}
+        success, payload = qq_stats_command.build_report_from_command(
+            tokens,
+            sender_qq,
+            {"qq": None, "mc": None},
+            online_players_map=online_map
+        )
         if success:
             await _send_group_image(qq_group, payload)
         else:

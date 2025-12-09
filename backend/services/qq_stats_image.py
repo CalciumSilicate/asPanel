@@ -3,6 +3,7 @@ import os
 import platform
 import math
 import json
+import httpx
 from typing import List, Dict, Tuple, Optional, Any
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -130,7 +131,7 @@ def load_font(size: int, is_bold: bool = False) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default()
 
 
-# ========= Matplotlib 字体初始化 =========
+# ========= Matplotlib ���体初始化 =========
 
 _MPL_FONT_INITIALIZED = False
 
@@ -192,9 +193,14 @@ def draw_shadow(img: Image.Image, bbox: Tuple[int, int, int, int], radius: int, 
 
 def crop_circle_avatar(img_path: str, size: int) -> Image.Image:
     try:
-        if not os.path.exists(img_path) and not img_path.startswith("http"):
+        if img_path and (img_path.startswith("http://") or img_path.startswith("https://")):
+            resp = httpx.get(img_path, timeout=5.0)
+            resp.raise_for_status()
+            img = Image.open(io.BytesIO(resp.content)).convert("RGBA")
+        elif not os.path.exists(img_path):
             raise FileNotFoundError
-        img = Image.open(img_path).convert("RGBA")
+        else:
+            img = Image.open(img_path).convert("RGBA")
     except Exception:
         img = Image.new("RGBA", (size, size), (220, 220, 220))
         d = ImageDraw.Draw(img)
