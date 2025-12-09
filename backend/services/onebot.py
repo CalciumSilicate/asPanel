@@ -20,6 +20,7 @@ from backend.core.database import get_db_context
 from backend.core.logger import logger
 from backend.core.ws import sio
 from backend.core.dependencies import mcdr_manager
+from backend.services import qq_stats_command
 
 router = APIRouter()
 
@@ -495,6 +496,13 @@ async def _send_group_text(qq_group: str, message: str) -> None:
             pass
 
 
+async def _send_group_image(qq_group: str, image_b64: str) -> None:
+    if not image_b64:
+        return
+    cq = f"[CQ:image,file=base64://{image_b64}]"
+    await _send_group_text(qq_group, cq)
+
+
 async def _emit_chat_message(group_id: int, nickname: str, message: str, *, sender_qq: Optional[str] = None) -> None:
     if not message:
         return
@@ -567,12 +575,13 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
         return
     plain_text = _segments_to_plain_text(segments)
 
+    sender_qq = str(payload.get("user_id") or "") or None
+
     # 命令检测
-    if await _maybe_handle_command(group_id, qq_group, nickname, plain_text):
+    if await _maybe_handle_command(group_id, qq_group, nickname, plain_text, sender_qq=sender_qq):
         return
 
     # QQ 号
-    sender_qq = str(payload.get("user_id") or "") or None
     await _emit_chat_message(group_id, nickname, raw_message, sender_qq=sender_qq)
 
     if _PLUGIN_BROADCASTER is not None:
@@ -602,11 +611,22 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
         )
 
 
-async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, text: str) -> bool:
+async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, text: str, *, sender_qq: Optional[str] = None) -> bool:
     if not text:
         return False
     text = text.strip()
     split_text = text.split()
+
+    if text.startswith("##"):
+        body = text[2:].strip()
+        tokens = body.split()
+        success, payload = qq_stats_command.build_report_from_command(tokens, sender_qq, {"qq": None, "mc": None})
+        if success:
+            await _send_group_image(qq_group, payload)
+        else:
+            await _send_group_text(qq_group, payload)
+        return True
+
     cmd = text[0]
     if cmd not in {"#", "%", "&", "^"}:
         return False
