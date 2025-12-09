@@ -33,16 +33,16 @@ TOTAL_ITEMS = [
     ("上线次数", ["custom.leave_game"], 1, "count"),
     ("在线时长 (hr)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, "round1"),
     ("挖掘方块", _BREAK_METRICS, 1, "count"),
-    ("鞘翅飞行距离(km)", ["custom.aviate_one_cm"], 0.00001, "round2"),
-    ("珍珠传送距离(km)", ["custom.ender_pearl_one_cm"], 0.00001, "round2"),
-    ("烟花火箭使用次数", ["custom.firework_boost"], 1, "count"),
-    ("不死图腾使用次数", ["used.totem_of_undying"], 1, "count"),
+    ("飞行距离", ["custom.aviate_one_cm"], 0.00001, "round2"),
+    ("珍珠距离", ["custom.ender_pearl_one_cm"], 0.00001, "round2"),
+    ("烟花次数", ["custom.firework_boost"], 1, "count"),
+    ("图腾次数", ["used.totem_of_undying"], 1, "count"),
     ("破基岩次数", ["custom.break_bedrock"], 1, "count"),
 ]
 
 CHART_ITEMS = [
-    ("上线活跃度 (hr)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, True),
-    ("鞘翅飞行距离(m)", ["custom.aviate_one_cm"], 0.01, True),
+    ("上线活跃度 (min)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 60, True),
+    ("鞘翅飞行距离 (m)", ["custom.aviate_one_cm"], 0.01, True),
     ("挖掘方块", _BREAK_METRICS, 1, False),
 ]
 
@@ -100,51 +100,79 @@ def _build_boundaries(tr: TimeRange) -> List[datetime]:
 
 
 def _calc_preset(label: str, offset: int = 0) -> TimeRange:
-    now = datetime.now(get_tz_info())
+    now = datetime.now()
     if label == "1d":
-        start = (now - timedelta(days=offset)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end = start + timedelta(hours=now.hour)
+        start = (now - timedelta(days=offset)).replace(hour=1, minute=0, second=0, microsecond=0)
+        if offset:
+            end = (start + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            end = start + timedelta(hours=now.hour)
         display = "今天" if offset == 0 else "昨天" if offset == 1 else f"{offset}天前"
         return TimeRange(start, end, "1h", f"{display}", [])
     if label == "1w":
         weekday = now.weekday()
-        start = (now - timedelta(days=weekday + offset * 7)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end = start + timedelta(days=now.weekday(), hours=now.hour)
+        start = (now - timedelta(days=weekday + offset * 7 - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        if offset:
+            end = (start + timedelta(days=6))
+        else:
+            end = start + timedelta(days=now.weekday())
         week_num = int(start.strftime("%W")) + 1
         prefix = "本周" if offset == 0 else "上周" if offset == 1 else f"{offset}周前"
-        return TimeRange(start, end, "24h", f"{prefix}（第{week_num}周）", [])
+        return TimeRange(start, end, "24h", f"{prefix}（{start.year}年第{week_num}周）", [])
     if label == "1m":
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        start_month = month_start.month - offset
-        year = month_start.year + ((start_month - 1) // 12)
-        month = ((start_month - 1) % 12) + 1
-        start = month_start.replace(year=year, month=month)
-        end_day = now.day if offset == 0 else month_start.day
-        end = start + timedelta(days=end_day - 1, hours=now.hour if offset == 0 else 0)
-        prefix = "本月" if offset == 0 else "上月" if offset == 1 else f"{offset}个月前"
-        return TimeRange(start, end, "24h", f"{prefix}（第{start.month}月）", [])
+        current_total_months = now.year * 12 + (now.month - 1)
+        target_total_months = current_total_months - offset
+        
+        target_year = target_total_months // 12
+        target_month = (target_total_months % 12) + 1
+        start = now.replace(year=target_year, month=target_month, day=2, 
+                            hour=0, minute=0, second=0, microsecond=0)
+        if offset == 0:
+            end = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            prefix = "本月"
+        else:
+            next_total_months = target_total_months + 1
+            next_year = next_total_months // 12
+            next_month = (next_total_months % 12) + 1
+            
+            end = now.replace(year=next_year, month=next_month, day=1, 
+                            hour=0, minute=0, second=0, microsecond=0)
+            
+            prefix = "上月" if offset == 1 else f"{offset}个月前"
+
+        return TimeRange(start, end, "24h", f"{prefix}（{start.year}年{start.month}月）", [])
     if label == "1y":
-        year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-        year = year_start.year - offset
-        start = year_start.replace(year=year)
-        end = start.replace(year=year, month=now.month, day=now.day, hour=0, minute=0, second=0)
-        prefix = f"{year}年" if offset == 0 else f"{year}年"
-        return TimeRange(start, end, "1month", prefix, [])
+        target_year = now.year - offset
+        start = now.replace(year=target_year, month=2, day=1, 
+                            hour=0, minute=0, second=0, microsecond=0)
+
+        end = now.replace(year=target_year + 1, month=1, day=1, 
+                            hour=0, minute=0, second=0, microsecond=0)
+        if offset == 0:
+            prefix = "今年"
+        else:
+            prefix = "去年" if offset == 1 else f"{offset}年前"
+
+        return TimeRange(start, end, "1month", f"{prefix}（{target_year}年）", [])
     if label == "all":
         start = now - timedelta(days=365 * 5)
         end = now
+
         return TimeRange(start, end, "1month", "全部记录", [])
     if label == "last":
-        end = now
-        start = end - timedelta(days=7)
-        return TimeRange(start, end, "1h", "上次在线", [])
+        min = (now.minute // 10 + 1) * 10
+        end = now.replace(microsecond=0, second=0, minute=min if min != 60 else 0)
+        if min == 60:
+            end + timedelta(hours=1)
+        start = end - timedelta(days=1)
+        return TimeRange(start, end, "10min", "上次在线", [])
     return TimeRange(now - timedelta(days=1), now, "1h", "最近", [])
 
 
 def _parse_custom_range(start_text: str, end_text: str) -> TimeRange:
     fmt = "%Y-%m-%d %H:%M"
-    start = datetime.strptime(start_text, fmt).replace(tzinfo=get_tz_info())
-    end = datetime.strptime(end_text, fmt).replace(tzinfo=get_tz_info())
+    start = datetime.strptime(start_text, fmt)
+    end = datetime.strptime(end_text, fmt)
     delta = end - start
     if delta < timedelta(days=1):
         granularity = "10min"
@@ -173,13 +201,25 @@ def _time_range_from_tokens(tokens: List[str]) -> TimeRange:
     return _calc_preset("1d", 0)
 
 
-def _series_to_xy(series: List[Tuple[int, int]], boundaries: List[datetime], unit: float) -> Tuple[List[str], List[float]]:
+def _series_to_xy(series: List[Tuple[int, int]], boundaries: List[datetime], unit: float, tr: TimeRange) -> Tuple[List[str], List[float]]:
     if not boundaries:
         return [], []
     ts_to_val = {int(ts): val for ts, val in series}
     x, y = [], []
     for b in boundaries:
-        label = b.strftime("%m-%d %H:%M")
+        # label = b.strftime("%m-%d %H:%M")
+        label = ""
+        if tr.granularity == "1h":
+            label = b.hour - 1
+        elif tr.granularity == "24h":
+            label = b.day - 1
+        elif tr.granularity == "1month":
+            month_num = b.month - 1
+            if month_num == 0:
+                month_num = 12
+            label = f'{month_num}月'
+        elif tr.granularity == "10min":
+            label = int((b - boundaries[-1]).total_seconds() / 60)
         x.append(label)
         y.append(ts_to_val.get(int(b.timestamp()), 0) * unit)
     return x, y
@@ -213,7 +253,7 @@ def _build_totals(player_uuid: str, tr: TimeRange) -> List[Dict[str, object]]:
     for label, metrics, unit, mode in TOTAL_ITEMS:
         series_map = stats_service.get_total_series(
             player_uuids=[player_uuid], metrics=metrics, granularity=tr.granularity,
-            start=tr.start.isoformat(), end=tr.end.isoformat()
+            start=tr.start.isoformat(), end=tr.end.isoformat(), server_ids=[3]
         )
         series = series_map.get(player_uuid, [])
         total, delta = _metrics_sum(series)
@@ -228,19 +268,39 @@ def _build_charts(player_uuid: str, tr: TimeRange) -> List[Dict[str, object]]:
         if is_delta:
             series_map = stats_service.get_delta_series(
                 player_uuids=[player_uuid], metrics=metrics, granularity=tr.granularity,
-                start=tr.start.isoformat(), end=tr.end.isoformat()
+                start=tr.start.isoformat(), end=tr.end.isoformat(), server_ids=[3]
             )
             series = series_map.get(player_uuid, [])
-            x, y = _series_to_xy(series, boundaries, unit)
+            x, y = _series_to_xy(series, boundaries, unit, tr)
             total = round(sum(val for val in y), 2)
+            logger.debug([player_uuid])
+            logger.debug(metrics)
+            logger.debug(tr.granularity)
+            logger.debug(tr.start.isoformat())
+            logger.debug(tr.end.isoformat())
+        
+            logger.debug(label)
+            logger.debug(', '.join(str(i) for i in x))
+            logger.debug(', '.join(str(i) for i in y))
+            if not any(y):
+                continue
         else:
             series_map = stats_service.get_total_series(
                 player_uuids=[player_uuid], metrics=metrics, granularity=tr.granularity,
-                start=tr.start.isoformat(), end=tr.end.isoformat()
+                start=tr.start.isoformat(), end=tr.end.isoformat(), fill_missing=True, server_ids=[3]
             )
             series = series_map.get(player_uuid, [])
-            x, y = _series_to_xy(series, boundaries, unit)
+            x, y = _series_to_xy(series, boundaries, unit, tr)
             total = y[-1] if y else 0
+            logger.debug([player_uuid])
+            logger.debug(metrics)
+            logger.debug(tr.granularity)
+            logger.debug(tr.start.isoformat())
+            logger.debug(tr.end.isoformat())
+        
+            logger.debug(label)
+            logger.debug(', '.join(str(i) for i in x))
+            logger.debug(', '.join(str(i) for i in y))
         charts.append({"label": label, "x": x, "y": y, "total": total})
     return charts
 

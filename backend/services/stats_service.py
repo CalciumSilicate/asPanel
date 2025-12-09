@@ -899,7 +899,8 @@ def leaderboard_delta(*, metrics: List[str], start: Optional[str] = None, end: O
 def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity: str = "10min",
                      start: Optional[str] = None, end: Optional[str] = None,
                      namespace: str = DEFAULT_NAMESPACE,
-                     server_ids: Optional[List[int]] = None) -> Dict[str, List[Tuple[int, int]]]:
+                     server_ids: Optional[List[int]] = None,
+                     fill_missing: bool = False) -> Dict[str, List[Tuple[int, int]]]:
     if not player_uuids:
         raise ValueError("必须提供至少一个 player_uuid")
     if not metrics:
@@ -913,12 +914,12 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
     # 输入指标按白名单/忽略进行过滤（支持通配符），并归一为 cat.item
     normed: List[str] = []
     for m in metrics:
-      nm = _normalize_metric(m)
-      try:
-          cat, item = nm.split('.', 1)
-          normed.append(f"{cat}.{item}")
-      except Exception:
-          continue
+        nm = _normalize_metric(m)
+        try:
+            cat, item = nm.split('.', 1)
+            normed.append(f"{cat}.{item}")
+        except Exception:
+            continue
     allowed = _filter_metrics(normed, namespace=namespace)
     if not allowed:
         return {uid: [] for uid in player_uuids}
@@ -932,15 +933,13 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
             return {uid: [] for uid in player_uuids}
 
         result: Dict[str, List[Tuple[int, int]]] = {}
-        # 查询阶段参数：不补零桶；仅在值变化或首点时输出
-        fill_missing = False
         for uid in player_uuids:
             player_id = db.scalar(select(models.Player.id).where(models.Player.uuid == uid))
             if player_id is None:
                 result[uid] = []
                 continue
 
-            # 使用统一边界构建（仅用于锚点），total 使用 "<= boundary" 最新值
+            # 使用统一边界构建
             boundaries, _delta_by_ts, start_anchor, end_boundary = _build_boundaries_for_player(
                 db, player_id=player_id, metric_ids=metric_ids, granularity=granularity,
                 start_ts=start_ts, end_ts=end_ts, server_ids=server_ids,
@@ -949,10 +948,8 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                 result[uid] = []
                 continue
 
-            first_b = boundaries[0]
-
-            # 1) 计算基线：在 first_b 时刻（含）之前，每个 (server, metric) 的最新 total 之和
-            # 修复：需要按 player_id 参与聚合与连接，否则会将不同玩家在同一时刻的记录混合
+            # --- 修正点 1: 基线计算应当在 start_anchor (整个时间窗口的左边界)，而不是 boundaries[0] ---
+            # 计算基线：在 start_anchor 时刻（含）之前，每个 (server, metric) 的最新 total 之和
             latest_baseline = (
                 select(
                     models.PlayerMetrics.server_id.label('server_id'),
@@ -963,7 +960,7 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                 .where(
                     models.PlayerMetrics.player_id == player_id,
                     models.PlayerMetrics.metric_id.in_(metric_ids),
-                    models.PlayerMetrics.ts <= first_b,
+                    models.PlayerMetrics.ts <= start_anchor,  # 改为 start_anchor
                 )
                 .group_by(
                     models.PlayerMetrics.server_id,
@@ -999,7 +996,7 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                 totals_by_key[key] = val
                 current_sum += val
 
-            # 2) 拉取 first_b..last_ts 期间的所有变更事件（按时间升序），逐边界推进最新值
+            # --- 修正点 2: 抓取 start_anchor 之后的所有事件 ---
             events_q = (
                 select(
                     models.PlayerMetrics.ts,
@@ -1010,7 +1007,7 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                 .where(
                     models.PlayerMetrics.player_id == player_id,
                     models.PlayerMetrics.metric_id.in_(metric_ids),
-                    models.PlayerMetrics.ts > first_b,
+                    models.PlayerMetrics.ts > start_anchor, # 改为 start_anchor
                     models.PlayerMetrics.ts <= end_boundary,
                 )
                 .order_by(models.PlayerMetrics.ts.asc())
@@ -1019,22 +1016,26 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                 events_q = events_q.where(models.PlayerMetrics.server_id.in_(server_ids))
             events = db.execute(events_q).all()
 
-            # 3) 沿边界推进，应用事件更新 current_sum，并记录 total 值
             out: List[Tuple[int, int]] = []
             idx = 0
-            # 首点：输出基线；若不补零桶，则保留首点作为锚点
             last_output_val = None
+
             def _maybe_append(point_ts: int, val: int):
                 nonlocal last_output_val
                 if fill_missing:
                     out.append((point_ts, int(val)))
                 else:
+                    # 仅当值变化或这是第一个点时输出，减少数据量
                     if last_output_val is None or int(val) != int(last_output_val):
                         out.append((point_ts, int(val)))
                         last_output_val = int(val)
 
-            _maybe_append(first_b, int(current_sum))
-            for b in boundaries[1:]:
+            # --- 修正点 3: 先输出起始点 (start_anchor) ---
+            _maybe_append(start_anchor, int(current_sum))
+
+            # 然后沿每个边界推进
+            for b in boundaries:
+                # 累加当前边界内的所有变更
                 while idx < len(events) and int(events[idx][0]) <= b:
                     _ts, sid, mid, tot = events[idx]
                     key = (int(sid), int(mid))
@@ -1044,6 +1045,7 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                         current_sum += (new_val - prev_val)
                         totals_by_key[key] = new_val
                     idx += 1
+                # 输出当前边界的状态
                 _maybe_append(b, int(current_sum))
 
             result[uid] = out

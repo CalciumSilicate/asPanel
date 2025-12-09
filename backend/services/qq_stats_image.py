@@ -14,7 +14,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import PchipInterpolator
+from matplotlib import font_manager as fm  # 新增
 
+from backend.core.constants import BASE_DIR
+
+
+# ========= 字体路径配置（你只需要改这里） =========
+# 指向你的 regular.ttf / bold.ttf
+FONT_REGULAR_PATH = BASE_DIR / "backend/resources/fonts/MapleMono-NF-CN-Regular.ttf"
+FONT_BOLD_PATH = BASE_DIR / "backend/resources/fonts/MapleMono-NF-CN-Bold.ttf"
 
 # ========= 配置与主题 (合并版) =========
 
@@ -31,6 +39,7 @@ class Theme:
     TEXT_PRIMARY = (30, 35, 50)
     TEXT_SECONDARY = (130, 140, 160)
     TEXT_ACCENT = (100, 100, 255)
+    ONLINE_COLOR = (34, 197, 94)  # 在线昵称/状态颜色，绿
 
     # 统计涨跌颜色
     POSITIVE = (16, 185, 129)
@@ -63,10 +72,13 @@ class Theme:
     CARD_RADIUS = 30
 
 
-# ========= 字体管理 =========
+# ========= 字体管理（统一使用 FONT_*_PATH） =========
 
 
 def get_default_font_path(font_type="regular"):
+    """
+    系统 fallback 字体查找（仅当你的 FONT_*_PATH 无效时才会用到）
+    """
     system = platform.system()
     if system == "Windows":
         if font_type == "bold":
@@ -81,7 +93,6 @@ def get_default_font_path(font_type="regular"):
     elif system == "Darwin":
         return "/System/Library/Fonts/PingFang.ttc"
     elif system == "Linux":
-        # 尝试查找常见的中文字体
         candidates = [
             "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
             "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc",
@@ -94,13 +105,72 @@ def get_default_font_path(font_type="regular"):
 
 
 def load_font(size: int, is_bold: bool = False) -> ImageFont.FreeTypeFont:
+    """
+    统一字体入口：
+    - 优先使用你配置的 FONT_BOLD_PATH / FONT_REGULAR_PATH
+    - 若不存在则 fallback 到系统字体
+    - 再不行用 PIL 默认字体
+    """
+    preferred_path = FONT_BOLD_PATH if is_bold else FONT_REGULAR_PATH
+
+    try:
+        if preferred_path and os.path.exists(preferred_path):
+            return ImageFont.truetype(str(preferred_path), size)
+    except Exception:
+        pass
+
+    # fallback
     font_path = get_default_font_path("bold" if is_bold else "regular")
     try:
-        if font_path:
+        if font_path and os.path.exists(font_path):
             return ImageFont.truetype(font_path, size)
-        return ImageFont.truetype("arial.ttf", size)
-    except OSError:
-        return ImageFont.load_default()
+    except Exception:
+        pass
+
+    return ImageFont.load_default()
+
+
+# ========= Matplotlib 字体初始化 =========
+
+_MPL_FONT_INITIALIZED = False
+
+
+def ensure_mpl_font():
+    """
+    确保 Matplotlib 使用与 PIL 一致的中文字体：
+    - 优先使用 FONT_REGULAR_PATH
+    - 失败则使用系统 fallback
+    """
+    global _MPL_FONT_INITIALIZED
+    if _MPL_FONT_INITIALIZED:
+        return
+
+    try:
+        font_path = None
+        if FONT_REGULAR_PATH and os.path.exists(FONT_REGULAR_PATH):
+            font_path = str(FONT_REGULAR_PATH)
+        else:
+            fallback = get_default_font_path("regular")
+            if fallback and os.path.exists(fallback):
+                font_path = fallback
+
+        if not font_path:
+            # 找不到有效字体就保持 Matplotlib 默认
+            return
+
+        # 用 FontProperties 获取 family 名字
+        prop = fm.FontProperties(fname=font_path)
+        fm.fontManager.addfont(font_path)
+        font_name = prop.get_name()
+
+        # 设置全局 rcParams
+        plt.rcParams["font.family"] = font_name
+        plt.rcParams["axes.unicode_minus"] = False  # 解决负号显示问题
+
+        _MPL_FONT_INITIALIZED = True
+    except Exception:
+        # 字体初始化失败则回退默认，不抛异常影响绘图
+        pass
 
 
 # ========= 通用工具函数 =========
@@ -111,7 +181,6 @@ def draw_shadow(img: Image.Image, bbox: Tuple[int, int, int, int], radius: int, 
     w, h = x1 - x0, y1 - y0
     shadow_w = w + blur * 4
     shadow_h = h + blur * 4
-    # 使用 RGBA 创建透明画布
     shadow_img = Image.new("RGBA", (shadow_w, shadow_h), (0, 0, 0, 0))
     shadow_draw = ImageDraw.Draw(shadow_img)
     sx0 = blur * 2 + offset[0]
@@ -127,13 +196,10 @@ def crop_circle_avatar(img_path: str, size: int) -> Image.Image:
             raise FileNotFoundError
         img = Image.open(img_path).convert("RGBA")
     except Exception:
-        # 生成占位图
         img = Image.new("RGBA", (size, size), (220, 220, 220))
         d = ImageDraw.Draw(img)
-        try:
-            font = ImageFont.truetype("arial.ttf", size // 2)
-        except Exception:
-            font = ImageFont.load_default()
+        # 使用统一字体
+        font = load_font(size // 2, is_bold=True)
         d.text((size / 2, size / 2), "?", fill=(150, 150, 150), font=font, anchor="mm")
 
     img = img.resize((size, size), Image.LANCZOS)
@@ -158,11 +224,14 @@ def hex_to_rgb(hex_str: str) -> Tuple[int, int, int]:
 
 
 def create_smooth_chart(width: int, height: int, x_labels: List[str], values: List[float], label: str) -> Image.Image:
+    """
+    使用 Matplotlib 生成平滑曲线图，并统一使用自定义字体
+    """
+    # 确保 Matplotlib 字体已经根据 FONT_REGULAR_PATH 配置
+    ensure_mpl_font()
+
     dpi = 150
     fig_w, fig_h = width / dpi, height / dpi
-
-    plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'Arial']
-    plt.rcParams['axes.unicode_minus'] = False
 
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi)
     fig.patch.set_alpha(0.0)
@@ -186,18 +255,14 @@ def create_smooth_chart(width: int, height: int, x_labels: List[str], values: Li
         x_smooth, y_smooth = x, y
 
     is_zoomed = False
-    # 判断是否需要缩放：如果最小值大于0，且波动幅度小于最小值的 50%，则进入缩放模式
     if y_min > 0 and y_spread < (y_min * 0.5):
         is_zoomed = True
-
         padding = y_spread * 0.15
-
         if padding == 0:
             padding = y_max * 0.01
 
         limit_bottom = max(0, y_min - padding)
         limit_top = y_max + padding
-
         ax.set_ylim(bottom=limit_bottom, top=limit_top)
     else:
         limit_bottom = 0
@@ -208,16 +273,17 @@ def create_smooth_chart(width: int, height: int, x_labels: List[str], values: Li
     ax.fill_between(x_smooth, y_smooth, y2=fill_base, alpha=0.2, color=Theme.CHART_FILL_COLOR, linewidth=0)
     ax.plot(x_smooth, y_smooth, color=Theme.CHART_LINE_COLOR, linewidth=2.5)
 
+    # 坐标轴样式
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.spines['left'].set_visible(False)
     ax.spines['bottom'].set_visible(True)
     ax.spines['bottom'].set_color('#E0E0E0')
 
-    def large_num_formatter(x, pos):
-        if x >= 1_000:
-            return f'{x * 1e-3:.1f}K'
-        return f'{int(x)}'
+    def large_num_formatter(x_val, pos):
+        if x_val >= 10_000:
+            return f'{x_val * 1e-4:.2f}W'
+        return f'{int(x_val)}'
 
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(large_num_formatter))
     ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=4))
@@ -225,9 +291,11 @@ def create_smooth_chart(width: int, height: int, x_labels: List[str], values: Li
     mpl_text_color = tuple(c / 255.0 for c in Theme.TEXT_SECONDARY)
     ax.grid(axis='y', linestyle='--', alpha=0.3, color='#B0B0B0')
     ax.tick_params(axis='y', length=0, labelcolor=mpl_text_color, labelsize=9)
+
     ax.set_xticks(range(len(x_labels)))
     ax.set_xticklabels(x_labels, fontsize=8, color=mpl_text_color)
 
+    # x 轴标签太多的时候隔一个隐藏一个
     if len(x_labels) > 7:
         for i, tick_label in enumerate(ax.xaxis.get_ticklabels()):
             if i % 2 != 0:
@@ -247,11 +315,10 @@ def create_smooth_chart(width: int, height: int, x_labels: List[str], values: Li
 class PositionMapRenderer:
     def __init__(self, nether_json_path: str, end_json_path: str):
         self.maps = {}
-        # Group 0: Nether/Overworld, Group 1: End
         self.maps[0] = self._load_single_json(nether_json_path)
         self.maps[1] = self._load_single_json(end_json_path)
 
-        # 预加载字体
+        # 预加载字体（统一走 load_font）
         self.font_h1 = load_font(48, True)
         self.font_h2 = load_font(32, True)
         self.font_sub = load_font(24, False)
@@ -333,7 +400,6 @@ class PositionMapRenderer:
         return Theme.ARROW_DEFAULT
 
     def _transform_coord(self, x, z, dim):
-        # 主世界坐标 /8 映射到下界
         if dim == 0:
             return x / 8, z / 8
         return x, z
@@ -366,31 +432,26 @@ class PositionMapRenderer:
         markers: List[dict] = None,
         player_marker: dict = None,
     ):
-        ss = 4  # 超采样
+        ss = 4
         w, h = ctx_w * ss, ctx_h * ss
         s_scale = scale * ss
 
-        # 使用 CARD_BG 作为地图背景，使其与卡片融合，或者使用 BG_COLOR
         img = Image.new("RGBA", (w, h), Theme.BG_COLOR)
         draw = ImageDraw.Draw(img)
 
-        # 1. 网格
         self._draw_grid(draw, center_x, center_z, s_scale, w, h, ss)
 
-        # 2. 地图路网
         map_data = self.maps.get(group_id, {"nodes": {}, "edges": []})
         for edge in map_data["edges"]:
             p1, p2 = edge["p1"], edge["p2"]
             s1 = self._world_to_screen(p1[0], p1[1], center_x, center_z, s_scale, w, h)
             s2 = self._world_to_screen(p2[0], p2[1], center_x, center_z, s_scale, w, h)
-            # 简单剪裁优化
             if max(s1[0], s2[0]) < 0 or min(s1[0], s2[0]) > w:
                 continue
             if max(s1[1], s2[1]) < 0 or min(s1[1], s2[1]) > h:
                 continue
             draw.line([s1, s2], fill=edge["color"], width=2 * ss)
 
-        # 3. 站点
         node_radius = 5 * ss
         font_name = load_font(18 * ss, True)
         text_occupied = []
@@ -411,7 +472,6 @@ class PositionMapRenderer:
                 width=2 * ss,
             )
 
-        # 简单的文本避让
         def is_colliding(box):
             for other in text_occupied:
                 if not (box[2] < other[0] or box[0] > other[2] or box[3] < other[1] or box[1] > other[3]):
@@ -441,7 +501,6 @@ class PositionMapRenderer:
                 )
                 text_occupied.append(box_candidate)
 
-        # 4. 路径
         arrow_step = 160 * ss
         for segment in path_segments:
             coords = segment["coords"]
@@ -453,7 +512,6 @@ class PositionMapRenderer:
 
             if len(screen_pts) > 1:
                 draw.line(screen_pts, fill=seg_color, width=4 * ss, joint="curve")
-                # 绘制箭头
                 dist_accum = 0
                 for i in range(len(screen_pts) - 1):
                     p1, p2 = screen_pts[i], screen_pts[i + 1]
@@ -466,13 +524,13 @@ class PositionMapRenderer:
                         remaining = arrow_step - dist_accum
                         if current_dist + remaining <= seg_len:
                             t = (current_dist + remaining) / seg_len
-                            ax = p1[0] + dx * t
-                            ay = p1[1] + dy * t
+                            ax_ = p1[0] + dx * t
+                            ay_ = p1[1] + dy * t
                             angle = math.degrees(math.atan2(dy, dx))
                             arrow_img = self.create_arrow_marker(angle, 14 * ss, arrow_color)
                             img.paste(
                                 arrow_img,
-                                (int(ax - arrow_img.width / 2), int(ay - arrow_img.height / 2)),
+                                (int(ax_ - arrow_img.width / 2), int(ay_ - arrow_img.height / 2)),
                                 arrow_img,
                             )
                             dist_accum = 0
@@ -481,7 +539,6 @@ class PositionMapRenderer:
                             dist_accum += (seg_len - current_dist)
                             break
 
-        # 5. 标记点 (Markers)
         if markers:
             font_mk = load_font(18 * ss, True)
             for m in markers:
@@ -496,7 +553,6 @@ class PositionMapRenderer:
                 )
                 draw.text((sx, sy - 1 * ss), m.get("label", ""), font=font_mk, fill=(255, 255, 255), anchor="mm")
 
-        # 6. 玩家位置
         if player_marker:
             pm = player_marker
             sx, sy = self._world_to_screen(pm["x"], pm["z"], center_x, center_z, s_scale, w, h)
@@ -511,7 +567,6 @@ class PositionMapRenderer:
                 width=2 * ss,
             )
 
-            # 绘制玩家头像气泡
             if pm.get("avatar"):
                 avatar_size = 64 * ss
                 offset_y = 60 * ss
@@ -537,7 +592,6 @@ class PositionMapRenderer:
                     width=4 * ss,
                 )
 
-        # 7. 比例尺
         self._draw_scale_bar(draw, w, h, s_scale, ss)
 
         return img.resize((ctx_w, ctx_h), Image.LANCZOS)
@@ -614,8 +668,6 @@ class PositionMapRenderer:
         stations.sort(key=lambda item: item[1])
         return stations
 
-    # --- 外部接口：生成图片对象 ---
-
     def generate_location_image(
         self,
         width: int,
@@ -626,14 +678,12 @@ class PositionMapRenderer:
         avatar_path: str = "",
         yaw: float = 0,
     ) -> Tuple[Image.Image, Dict]:
-        """生成玩家位置视图"""
         group_id = 1 if dim == 1 else 0
         mx, mz = self._transform_coord(x, z, dim)
 
         sorted_stations = self._get_sorted_stations(mx, mz, group_id)
         nearest = sorted_stations[0] if sorted_stations else (None, 0)
 
-        # 自动缩放
         if len(sorted_stations) >= 2:
             target_radius = sorted_stations[1][1] * 1.2
         elif len(sorted_stations) == 1:
@@ -641,13 +691,12 @@ class PositionMapRenderer:
         else:
             target_radius = 500
         view_radius = min(max(250, target_radius), 3000)
-        scale = width / 2 / view_radius  # 近似
+        scale = width / 2 / view_radius
 
         player_info = {"x": mx, "z": mz, "dim": dim, "avatar": avatar_path, "yaw": yaw}
 
         img = self._render_layer(width, height, mx, mz, scale, [], group_id, markers=[], player_marker=player_info)
 
-        # 返回图片和附加信息供外部绘制 Info Card
         info = {
             "x": x,
             "z": z,
@@ -664,14 +713,12 @@ class PositionMapRenderer:
         points: List[Tuple[float, float, int]],
         avatar_path: str = "",
     ) -> Image.Image:
-        """生成路径视图"""
         if not points:
             return Image.new("RGBA", (width, height), Theme.BG_COLOR)
 
         pts_end = [p for p in points if p[2] == 1]
         pts_other = [p for p in points if p[2] != 1]
 
-        # 标记逻辑
         markers_other, markers_end = [], []
         marker_counter = 1
         for i in range(len(points) - 1):
@@ -695,10 +742,9 @@ class PositionMapRenderer:
         pm_other = dest_pm if (not has_end) or (last[2] != 1) else None
         pm_end = dest_pm if (last[2] == 1) else None
 
-        # 渲染逻辑
-        def _render_sub(pts, w, h, gid, mks, pm):
+        def _render_sub(pts, w_, h_, gid, mks, pm_):
             if not pts:
-                return Image.new("RGBA", (w, h), Theme.BG_COLOR)
+                return Image.new("RGBA", (w_, h_), Theme.BG_COLOR)
             segments, curr_seg = [], []
             last_dim = pts[0][2]
             xs, zs = [], []
@@ -720,23 +766,23 @@ class PositionMapRenderer:
             pad = 200
             span_x = max((max_x - min_x) + pad * 2, 400)
             span_z = max((max_z - min_z) + pad * 2, 400)
-            scale = min(min(w / span_x, h / span_z), 2.0)
+            scale_ = min(min(w_ / span_x, h_ / span_z), 2.0)
 
-            img = self._render_layer(
-                w,
-                h,
+            img_ = self._render_layer(
+                w_,
+                h_,
                 (min_x + max_x) / 2,
                 (min_z + max_z) / 2,
-                scale,
+                scale_,
                 segments,
                 gid,
                 mks,
-                pm,
+                pm_,
             )
-            d = ImageDraw.Draw(img)
+            d_ = ImageDraw.Draw(img_)
             lbl = "THE END" if gid == 1 else "NETHER & OVERWORLD"
-            d.text((w - 20, h - 20), lbl, fill=Theme.TEXT_SECONDARY, font=load_font(24, True), anchor="rb")
-            return img
+            d_.text((w_ - 20, h_ - 20), lbl, fill=Theme.TEXT_SECONDARY, font=load_font(24, True), anchor="rb")
+            return img_
 
         if has_end and has_other:
             h1 = int(height * 0.55)
@@ -755,30 +801,46 @@ class PositionMapRenderer:
 
 
 def render_combined_view(
-    data: Dict,
-    map_config: Dict[str, str],
+        data: Dict,
+        map_config: Dict[str, str],
 ):
-    """
-    data: 包含头像、文本、totals、charts 以及 location 或 path 数据
-    map_config: 包含 nether_json 和 end_json 的路径
-    """
+    # === 先根据数据“预估”一个足够大的画布高度 ===
+    totals = data.get("totals", [])
+    charts = data.get("charts", [])
 
-    # --- 1. 计算高度 ---
-    base_height = 750
-    # 统计图表高度
-    chart_area_height = len(data.get("charts", [])) * 340
+    is_online = data.get("is_online", True)
+    in_server = data.get("in_server", "Survival")
 
-    # 地图高度预留 (如果有地图数据)
+    # 和排版使用的数值保持一致
+    avatar_size = 180
+    card_height = 110
+    card_gap = 30
+    chart_card_h = 300
+    chart_gap = 50
+
+    # 统计卡片行数（两列）
+    rows = (len(totals) + 1) // 2
+
+    # 头像区高度：padding + 顶部余量 + 头像 + 下方留白
+    header_height = Theme.PADDING + 20 + avatar_size + 80
+    # 统计卡片区高度：rows * (卡片高度 + 间隔) + 底部额外 40px
+    stats_height = rows * (card_height + card_gap) + 40
+    # 图表区高度：每个图表 card 高度 + 之间的 50px 间隔
+    chart_area_height = len(charts) * (chart_card_h + chart_gap)
+
+    # 是否有地图
     has_map = "location" in data or "path" in data
     map_height = 800 if has_map else 0
 
-    total_height = base_height + chart_area_height + map_height + 100
+    # 预估总高度，再加一点额外余量
+    total_height = header_height + stats_height + chart_area_height + map_height + 100
     total_height = max(total_height, 1000)
 
+    # === 真正开始画图 ===
     img = Image.new("RGBA", (Theme.WIDTH, total_height), Theme.BG_COLOR)
     draw = ImageDraw.Draw(img)
 
-    # --- 字体 ---
+    # --- 字体 (全部统一走 load_font) ---
     font_h1 = load_font(64, is_bold=True)
     font_h2 = load_font(36, is_bold=True)
     font_label = load_font(26, is_bold=False)
@@ -790,19 +852,18 @@ def render_combined_view(
     cursor_y = Theme.PADDING + 20
 
     # --- 2. 头部区域 (Avatar + Info) ---
-    avatar_size = 180
     qq_avatar = crop_circle_avatar(data.get("qq_avatar", ""), avatar_size)
 
-    # 阴影与边框
-    draw.ellipse((Theme.PADDING, cursor_y, Theme.PADDING + avatar_size, cursor_y + avatar_size), fill=Theme.SHADOW_COLOR)
+    draw.ellipse((Theme.PADDING, cursor_y, Theme.PADDING + avatar_size, cursor_y + avatar_size),
+                 fill=Theme.SHADOW_COLOR)
     border_w = 8
     draw.ellipse(
-        (Theme.PADDING - border_w, cursor_y - border_w, Theme.PADDING + avatar_size + border_w, cursor_y + avatar_size + border_w),
+        (Theme.PADDING - border_w, cursor_y - border_w, Theme.PADDING + avatar_size + border_w,
+         cursor_y + avatar_size + border_w),
         fill=Theme.CARD_BG,
     )
     img.paste(qq_avatar, (Theme.PADDING, cursor_y), qq_avatar)
 
-    # 副头像
     mc_size = 70
     mc_avatar = crop_circle_avatar(data.get("mc_avatar", ""), mc_size)
     badge_x = Theme.PADDING + avatar_size - mc_size + 10
@@ -810,7 +871,6 @@ def render_combined_view(
     draw.ellipse((badge_x - 4, badge_y - 4, badge_x + mc_size + 4, badge_y + mc_size + 4), fill=Theme.CARD_BG)
     img.paste(mc_avatar, (badge_x, badge_y), mc_avatar)
 
-    # 文本信息
     text_x = Theme.PADDING + avatar_size + 50
     date_text = data.get("time_range_label", "")
     draw.text((text_x, cursor_y + 10), date_text, fill=Theme.TEXT_SECONDARY, font=font_sub, anchor="lt")
@@ -822,12 +882,18 @@ def render_combined_view(
     draw.text((text_x, cursor_y + 125), f"{uuid_str}", fill=Theme.TEXT_SECONDARY, font=font_info, anchor="lt")
 
     last_seen = data.get("last_seen", "N/A")
-    draw.text((text_x, cursor_y + 155), f"最后在线: {last_seen}", fill=Theme.TEXT_SECONDARY, font=font_info, anchor="lt")
+    if is_online:
+        status_text = f"当前在线于 {in_server}" if in_server else "当前在线"
+        status_color = Theme.ONLINE_COLOR
+    else:
+        status_text = f"最后在线: {last_seen}"
+        status_color = Theme.TEXT_SECONDARY
+    draw.text((text_x, cursor_y + 155), status_text, fill=status_color, font=font_info,
+              anchor="lt")
 
     cursor_y += avatar_size + 80
 
     # --- 3. 统计网格 (Grid Stats) ---
-    totals = data.get("totals", [])
     card_gap = 30
     card_height = 110
     card_width = (Theme.WIDTH - 2 * Theme.PADDING - card_gap) // 2
@@ -856,7 +922,8 @@ def render_combined_view(
             delta_color = Theme.POSITIVE if delta > 0 else Theme.NEGATIVE
             draw.text((right_edge_x, y_mid), delta_str, fill=delta_color, font=font_delta, anchor="rm")
             delta_len = draw.textlength(delta_str, font=font_delta)
-            draw.text((right_edge_x - delta_len - 15, y_mid), val_str, fill=Theme.TEXT_PRIMARY, font=font_h2, anchor="rm")
+            draw.text((right_edge_x - delta_len - 15, y_mid), val_str, fill=Theme.TEXT_PRIMARY, font=font_h2,
+                      anchor="rm")
         else:
             draw.text((right_edge_x, y_mid), val_str, fill=Theme.TEXT_PRIMARY, font=font_h2, anchor="rm")
 
@@ -864,7 +931,6 @@ def render_combined_view(
     cursor_y += rows * (card_height + card_gap) + 40
 
     # --- 4. 底部图表区 (Charts) ---
-    charts = data.get("charts", [])
     chart_card_h = 300
 
     for chart in charts:
@@ -887,20 +953,16 @@ def render_combined_view(
 
         cursor_y += chart_card_h + 50
 
-    # --- 5. 地图展示区 (Map View) [新增] ---
+    # --- 5. 地图展示区 (Map View) ---
     if has_map:
-        # 准备地图卡片容器
-        bbox = (Theme.PADDING, cursor_y, Theme.WIDTH - Theme.PADDING, cursor_y + map_height - 50)  # 减一点padding
+        bbox = (Theme.PADDING, cursor_y, Theme.WIDTH - Theme.PADDING, cursor_y + map_height - 50)
 
-        # 绘制背景卡片
         draw_shadow(img, bbox, radius=Theme.CARD_RADIUS, blur=25)
-        # 使用 Clip 确保地图圆角
         mask = Image.new("L", (bbox[2] - bbox[0], bbox[3] - bbox[1]), 0)
         ImageDraw.Draw(mask).rounded_rectangle(
             (0, 0, bbox[2] - bbox[0], bbox[3] - bbox[1]), radius=Theme.CARD_RADIUS, fill=255
         )
 
-        # 生成地图内容
         renderer = PositionMapRenderer(map_config.get("nether_json"), map_config.get("end_json"))
         map_img = None
         info_data = {}
@@ -909,7 +971,6 @@ def render_combined_view(
 
         if "location" in data:
             loc = data["location"]
-            # 生成位置图
             map_raw, info_data = renderer.generate_location_image(
                 inner_w,
                 inner_h,
@@ -923,33 +984,27 @@ def render_combined_view(
             title = "当前位置"
 
         elif "path" in data:
-            path_pts = data["path"]  # List[(x, z, dim)]
+            path_pts = data["path"]
             map_raw = renderer.generate_path_image(inner_w, inner_h, path_pts, data.get("mc_avatar", ""))
             map_img = map_raw
             title = "最近轨迹"
             info_data = {"is_path": True}
 
         if map_img:
-            # 将地图粘贴到卡片区域 (带圆角Mask)
             container = Image.new("RGBA", (inner_w, inner_h), (0, 0, 0, 0))
             container.paste(map_img, (0, 0))
             img.paste(container, (bbox[0], bbox[1]), mask)
 
-            # 在地图上叠加半透明信息浮窗
             if info_data and "is_path" not in info_data:
-                # 绘制 Info Card 覆盖在地图右下角或居中
                 card_w, card_h = 500, 140
                 cx = bbox[0] + (inner_w - card_w) // 2
                 cy = bbox[1] + inner_h - card_h - 30
 
-                # 浮窗背景
                 overlay = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
                 od = ImageDraw.Draw(overlay)
                 od.rounded_rectangle((0, 0, card_w, card_h), radius=20, fill=(255, 255, 255, 230))
-                # 边框
                 od.rounded_rectangle((0, 0, card_w, card_h), radius=20, outline=Theme.MAP_LINE_COLOR, width=2)
 
-                # 写入坐标信息
                 dim_str = "The End" if info_data["dim"] == 1 else ("Nether" if info_data["dim"] == -1 else "Overworld")
                 dim_color = renderer._get_dim_color(info_data["dim"])
 
@@ -957,11 +1012,13 @@ def render_combined_view(
                 font_dim = load_font(24, True)
                 font_near = load_font(22, False)
 
-                od.text((30, 20), f"{int(info_data['x'])}, {int(info_data['z'])}", fill=Theme.TEXT_PRIMARY, font=font_loc)
+                od.text((30, 20), f"{int(info_data['x'])}, {int(info_data['z'])}", fill=Theme.TEXT_PRIMARY,
+                        font=font_loc)
                 od.text((30, 70), dim_str, fill=dim_color, font=font_dim)
 
                 if info_data.get("nearest_name"):
-                    od.text((card_w - 30, 20), "Nearest Station", fill=Theme.TEXT_SECONDARY, font=font_near, anchor="rt")
+                    od.text((card_w - 30, 20), "Nearest Station", fill=Theme.TEXT_SECONDARY, font=font_near,
+                            anchor="rt")
                     n_name = info_data['nearest_name']
                     if len(n_name) > 12:
                         n_name = n_name[:11] + "..."
@@ -976,7 +1033,6 @@ def render_combined_view(
 
                 img.alpha_composite(overlay.convert("RGBA"), (cx, cy))
 
-            # 绘制大标题 (左上角)
             draw.text(
                 (bbox[0] + 30, bbox[1] + 20),
                 title,
@@ -988,18 +1044,19 @@ def render_combined_view(
 
         cursor_y += map_height
 
+    # 最终裁剪到实际内容高度
     final_img = img.crop((0, 0, Theme.WIDTH, cursor_y))
     return final_img
 
 
+
+
 if __name__ == "__main__":
-    # 配置区
     MAP_CONFIG = {
         "nether_json": "the_nether.json",
         "end_json": "the_end.json",
     }
 
-    # 模拟输入数据
     sample_data = {
         "qq_avatar": "qq_avatar.png",
         "mc_avatar": "mc_avatar.png",
@@ -1027,15 +1084,6 @@ if __name__ == "__main__":
                 "y": [2587194, 2587294, 2587394, 2587494, 2587594, 2587694, 2598794],
             },
         ],
-
-        # --- 新增：位置数据 (二选一) ---
-
-        # # 模式 A: 单点位置
-        # "location": {
-        #     "x": 100, "z": 200.345, "dim": -1, "yaw": 45
-        # },
-
-        # 模式 B: 路径 (如果存在 path，优先显示 path，或者你可以自行修改逻辑)
         "path": [
             (0, 0, 0),
             (100, 100, -1),
@@ -1048,5 +1096,4 @@ if __name__ == "__main__":
         ],
     }
 
-    # 运行
-    render_combined_view(sample_data, MAP_CONFIG)
+    render_combined_view(sample_data, MAP_CONFIG).save("A.png")
