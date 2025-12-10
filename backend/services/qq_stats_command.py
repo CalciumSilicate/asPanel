@@ -337,7 +337,7 @@ def build_stats_picture(
         "player_name": player.player_name or "Unknown",
         "uuid": player.uuid,
         # 若在线则显示当前时间，否则显示 "N/A" 或需要从某处获取最后离线时间（数据库里目前没有最后离线时间字段，暂用当前时间替代或留空）
-        "last_seen": datetime.now(get_tz_info()).strftime("%Y-%m-%d %H:%M"), 
+        "last_seen": None, 
         "time_range_label": tr.label,
         "is_online": is_online,
         "in_server": server_name,
@@ -363,28 +363,51 @@ def bind_player_for_user(sender_qq: str, target_name: str) -> str:
         return f"已将账号绑定到玩家 {target_name}"
 
 
+def _get_qq_from_player(player_id: int) -> Optional[str]:
+    with get_db_context() as db:
+        user = db.query(models.User).filter(models.User.bound_player_id == player_id).first()
+        if user and user.qq:
+            return user.qq
+    return None
+
 def build_report_from_command(
     tokens: List[str],
     sender_qq: Optional[str],
     avatars: Dict[str, str],
     online_players_map: Optional[Dict[str, Any]] = None
 ) -> Tuple[bool, str]:
-    if tokens and tokens[0].lower() == "bind":
-        if len(tokens) < 2:
-            return False, "用法：## bind <玩家名>"
-        return False, bind_player_for_user(sender_qq or "", tokens[1])
+    # if tokens and tokens[0].lower() == "bind":
+    #     if len(tokens) < 2:
+    #         return False, "用法：## bind <玩家名>"
+    #     return False, bind_player_for_user(sender_qq or "", tokens[1])
+
+    target_qq = None
 
     if not tokens and sender_qq:
+        # 查自己
         player = _player_from_qq(sender_qq)
+        target_qq = sender_qq
     else:
+        # 查别人
         player_name = tokens[0] if tokens else None
         player = _get_player_by_name(player_name) if player_name else _player_from_qq(sender_qq)
-    if not player:
-        return False, "未找到玩家或尚未绑定"
+        if player:
+            # 尝试查找该玩家绑定的 QQ
+            target_qq = _get_qq_from_player(player.id)
+            if not target_qq and not tokens and sender_qq:
+                 # Fallback: 如果是查自己（没tokens）但没绑定（理论上 _player_from_qq 已经保证绑定了，这里防御性写一下）
+                 target_qq = sender_qq
 
-    # 补充 sender_qq 到 avatars 以便生成 QQ 头像
-    if sender_qq and "sender_qq" not in avatars:
-        avatars["sender_qq"] = sender_qq
+    if not player:
+        return False, "未找到玩家或尚未绑定（请前往：https://panel.assx.top/ 注册，注册时绑定QQ与游戏名）"
+
+    # 设置用于生成头像的 QQ 号
+    if target_qq:
+        avatars["sender_qq"] = target_qq
+    else:
+        # 明确移除 sender_qq，避免使用了命令发送者的 QQ 头像
+        avatars.pop("sender_qq", None)
+        avatars.pop("qq", None)
 
     # 判断在线状态
     is_online = False
