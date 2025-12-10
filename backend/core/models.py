@@ -88,6 +88,7 @@ class ServerLinkGroup(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
     server_ids = Column(String, default="[]")
+    data_source_ids = Column(String, default="[]")
     chat_bindings = Column(String, default="[]")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

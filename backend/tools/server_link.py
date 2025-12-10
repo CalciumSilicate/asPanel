@@ -32,6 +32,8 @@ async def sl_list_groups(db: Session) -> List[schemas.ServerLinkGroup]:
 
 async def sl_create_group(db: Session, payload: schemas.ServerLinkGroupCreate) -> schemas.ServerLinkGroup:
     payload.server_ids = _validate_server_ids(db, payload.server_ids)
+    if payload.data_source_ids:
+        payload.data_source_ids = _validate_server_ids(db, payload.data_source_ids)
     rec = crud.create_server_link_group(db, payload)
     return schemas.ServerLinkGroup.model_validate(rec)
 
@@ -39,6 +41,8 @@ async def sl_create_group(db: Session, payload: schemas.ServerLinkGroupCreate) -
 async def sl_update_group(db: Session, group_id: int, payload: schemas.ServerLinkGroupUpdate) -> schemas.ServerLinkGroup:
     if payload.server_ids is not None:
         payload.server_ids = _validate_server_ids(db, payload.server_ids)
+    if payload.data_source_ids is not None:
+        payload.data_source_ids = _validate_server_ids(db, payload.data_source_ids)
     rec = crud.update_server_link_group(db, group_id, payload)
     if not rec:
         raise ValueError("服务器组不存在")

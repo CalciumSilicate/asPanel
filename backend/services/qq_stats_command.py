@@ -248,12 +248,12 @@ def _metrics_sum(series: List[Tuple[int, int]]) -> Tuple[int, int]:
     return end_val, end_val - start_val
 
 
-def _build_totals(player_uuid: str, tr: TimeRange) -> List[Dict[str, object]]:
+def _build_totals(player_uuid: str, tr: TimeRange, server_ids: List[int]) -> List[Dict[str, object]]:
     out: List[Dict[str, object]] = []
     for label, metrics, unit, mode in TOTAL_ITEMS:
         series_map = stats_service.get_total_series(
             player_uuids=[player_uuid], metrics=metrics, granularity=tr.granularity,
-            start=tr.start.isoformat(), end=tr.end.isoformat(), server_ids=[3]
+            start=tr.start.isoformat(), end=tr.end.isoformat(), server_ids=server_ids
         )
         series = series_map.get(player_uuid, [])
         total, delta = _metrics_sum(series)
@@ -261,14 +261,14 @@ def _build_totals(player_uuid: str, tr: TimeRange) -> List[Dict[str, object]]:
     return out
 
 
-def _build_charts(player_uuid: str, tr: TimeRange) -> List[Dict[str, object]]:
+def _build_charts(player_uuid: str, tr: TimeRange, server_ids: List[int]) -> List[Dict[str, object]]:
     boundaries = _build_boundaries(tr)
     charts: List[Dict[str, object]] = []
     for label, metrics, unit, is_delta in CHART_ITEMS:
         if is_delta:
             series_map = stats_service.get_delta_series(
                 player_uuids=[player_uuid], metrics=metrics, granularity=tr.granularity,
-                start=tr.start.isoformat(), end=tr.end.isoformat(), server_ids=[3]
+                start=tr.start.isoformat(), end=tr.end.isoformat(), server_ids=server_ids
             )
             series = series_map.get(player_uuid, [])
             x, y = _series_to_xy(series, boundaries, unit, tr)
@@ -287,7 +287,7 @@ def _build_charts(player_uuid: str, tr: TimeRange) -> List[Dict[str, object]]:
         else:
             series_map = stats_service.get_total_series(
                 player_uuids=[player_uuid], metrics=metrics, granularity=tr.granularity,
-                start=tr.start.isoformat(), end=tr.end.isoformat(), fill_missing=True, server_ids=[3]
+                start=tr.start.isoformat(), end=tr.end.isoformat(), fill_missing=True, server_ids=server_ids
             )
             series = series_map.get(player_uuid, [])
             x, y = _series_to_xy(series, boundaries, unit, tr)
@@ -316,7 +316,9 @@ def build_stats_picture(
     tr: TimeRange,
     avatars: Dict[str, str],
     is_online: bool = False,
-    server_name: Optional[str] = None
+    server_name: Optional[str] = None,
+    server_ids: List[int] = None,
+    data_source_text: str = ""
 ) -> str:
     # 构造头像链接（如果未提供）
     qq_avatar = avatars.get("qq")
@@ -341,9 +343,14 @@ def build_stats_picture(
         "time_range_label": tr.label,
         "is_online": is_online,
         "in_server": server_name,
+        "data_source_text": data_source_text,
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
-    data["totals"] = _build_totals(player.uuid, tr)
-    data["charts"] = _build_charts(player.uuid, tr)
+    # 默认使用 [3] 如果未提供 server_ids，防止报错
+    effective_server_ids = server_ids if server_ids else [3]
+
+    data["totals"] = _build_totals(player.uuid, tr, effective_server_ids)
+    data["charts"] = _build_charts(player.uuid, tr, effective_server_ids)
     img = render_combined_view(data, MAP_CONFIG)
     return _image_to_base64(img)
 
@@ -374,12 +381,40 @@ def build_report_from_command(
     tokens: List[str],
     sender_qq: Optional[str],
     avatars: Dict[str, str],
-    online_players_map: Optional[Dict[str, Any]] = None
+    online_players_map: Optional[Dict[str, Any]] = None,
+    group_id: Optional[int] = None
 ) -> Tuple[bool, str]:
     # if tokens and tokens[0].lower() == "bind":
     #     if len(tokens) < 2:
     #         return False, "用法：## bind <玩家名>"
     #     return False, bind_player_for_user(sender_qq or "", tokens[1])
+
+    # 获取服务器组配置
+    server_ids = [3]  # 默认
+    data_source_text = ""
+    
+    if group_id:
+        with get_db_context() as db:
+            group = crud.get_server_link_group(db, group_id)
+            if group:
+                try:
+                    import json
+                    ds_ids = json.loads(group.data_source_ids or "[]")
+                    srv_ids = json.loads(group.server_ids or "[]")
+                    target_ids = ds_ids if ds_ids else srv_ids
+                    if target_ids:
+                        server_ids = [int(i) for i in target_ids]
+                        
+                        # 构建数据来源文本
+                        names = []
+                        for sid in server_ids:
+                            s = crud.get_server_by_id(db, sid)
+                            if s:
+                                names.append(s.name)
+                        if names:
+                            data_source_text = f"数据来源：{', '.join(names)}"
+                except Exception:
+                    logger.warning(f"解析服务器组 {group_id} 配置失败，使用默认配置")
 
     target_qq = None
 
@@ -422,7 +457,10 @@ def build_report_from_command(
     range_tokens = tokens[1:] if len(tokens) > 1 else []
     tr = _time_range_from_tokens(range_tokens)
     try:
-        img_b64 = build_stats_picture(player, tr, avatars, is_online=is_online, server_name=server_name)
+        img_b64 = build_stats_picture(
+            player, tr, avatars, is_online=is_online, server_name=server_name,
+            server_ids=server_ids, data_source_text=data_source_text
+        )
     except Exception as exc:
         logger.opt(exception=exc).warning("生成统计图失败")
         return False, "生成统计图失败，请稍后重试"

@@ -74,6 +74,18 @@
                 </el-select>
               </el-form-item>
 
+              <el-form-item label="数据来源（统计图展示用）">
+                <el-select v-model="activeGroup.dataSourceIds" multiple filterable placeholder="默认使用所有选中的服务器" style="width: 100%;">
+                   <el-option
+                    v-for="s in dataSourceOptions"
+                    :key="s.id"
+                    :label="s.name"
+                    :value="s.id"
+                  />
+                </el-select>
+                <div class="muted mt-1">若留空，则默认统计该组内所有服务器的数据。</div>
+              </el-form-item>
+
               <el-form-item label="QQ群聊（群号）">
                 <div class="chat-bindings">
                   <el-input
@@ -127,11 +139,16 @@ const selectedServersCount = computed(() => activeGroup.value?.serverIds?.length
 // 预留字段：后续可接入真实群聊绑定统计
 const connectedChatsCount = computed(() => (activeGroup.value?.qqGroup ? 1 : 0))
 
+const dataSourceOptions = computed(() => {
+  if (!activeGroup.value || !activeGroup.value.serverIds) return []
+  return servers.value.filter(s => activeGroup.value.serverIds.includes(s.id))
+})
+
 const handleCreateGroup = async () => {
   try {
     const id = Date.now()
     const name = `新建组-${id % 100000}`
-    const payload = { name, server_ids: [], chat_bindings: [] }
+    const payload = { name, server_ids: [], data_source_ids: [], chat_bindings: [] }
     const { data } = await apiClient.post('/api/tools/server-link/groups', payload)
     const created = toUIGroup(data)
     groups.value.unshift(created)
@@ -163,6 +180,7 @@ const selectGroup = (row) => { activeGroup.value = row }
 const ensureActiveGroup = () => {
   if (!activeGroup.value) return false
   if (!activeGroup.value.serverIds) activeGroup.value.serverIds = []
+  if (!activeGroup.value.dataSourceIds) activeGroup.value.dataSourceIds = []
   if (!activeGroup.value.chatBindings) activeGroup.value.chatBindings = []
   if (activeGroup.value.qqGroup === undefined || activeGroup.value.qqGroup === null) {
     activeGroup.value.qqGroup = activeGroup.value.chatBindings?.[0] || ''
@@ -218,6 +236,7 @@ const scheduleAutoSave = () => {
 
 watch(() => activeGroup.value && activeGroup.value.name, scheduleAutoSave)
 watch(() => activeGroup.value && JSON.stringify(activeGroup.value.serverIds || []), scheduleAutoSave)
+watch(() => activeGroup.value && JSON.stringify(activeGroup.value.dataSourceIds || []), scheduleAutoSave)
 watch(() => activeGroup.value && activeGroup.value.qqGroup, scheduleAutoSave)
 
 const loadServers = async () => {
@@ -243,6 +262,7 @@ const toUIGroup = (g) => ({
   id: g.id,
   name: g.name,
   serverIds: g.server_ids || [],
+  dataSourceIds: g.data_source_ids || [],
   chatBindings: g.chat_bindings || [],
   qqGroup: (g.chat_bindings && g.chat_bindings[0]) || '',
   created_at: g.created_at
@@ -250,6 +270,7 @@ const toUIGroup = (g) => ({
 const toAPIPayload = (g) => ({
   name: g.name,
   server_ids: g.serverIds || [],
+  data_source_ids: g.dataSourceIds || [],
   chat_bindings: g.qqGroup ? [g.qqGroup] : []
 })
 

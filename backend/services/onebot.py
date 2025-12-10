@@ -625,7 +625,8 @@ async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, tex
             tokens,
             sender_qq,
             {"qq": None, "mc": None},
-            online_players_map=online_map
+            online_players_map=online_map,
+            group_id=group_id
         )
         if success:
             await _send_group_image(qq_group, payload)

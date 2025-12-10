@@ -859,6 +859,11 @@ def render_combined_view(
 
     # --- 2. 头部区域 (Avatar + Info) ---
     qq_avatar = crop_circle_avatar(data.get("qq_avatar", ""), avatar_size)
+    
+    # 顶部生成时间 (左上角，灰色)
+    gen_time = data.get("generated_at", "")
+    if gen_time:
+        draw.text((Theme.PADDING, 15), f"Generated: {gen_time}", fill=Theme.TEXT_SECONDARY, font=font_info, anchor="lt")
 
     draw.ellipse((Theme.PADDING, cursor_y, Theme.PADDING + avatar_size, cursor_y + avatar_size),
                  fill=Theme.SHADOW_COLOR)
@@ -1049,6 +1054,16 @@ def render_combined_view(
             )
 
         cursor_y += map_height
+
+    # 底部数据来源 (左下角，灰色)
+    data_source = data.get("data_source_text", "")
+    if data_source:
+        ds_font = load_font(20, is_bold=False)
+        # 确保不超出边界：简单截断或者换行（这里先简单处理，防止太长）
+        if len(data_source) > 60:
+             data_source = data_source[:57] + "..."
+        draw.text((Theme.PADDING, cursor_y + 10), data_source, fill=Theme.TEXT_SECONDARY, font=ds_font, anchor="lt")
+        cursor_y += 40
 
     # 最终裁剪到实际内容高度
     final_img = img.crop((0, 0, Theme.WIDTH, cursor_y))
