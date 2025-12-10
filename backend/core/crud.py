@@ -233,6 +233,8 @@ def create_server(db: Session, server: schemas.ServerCreateInternal, creator_id:
 def delete_server(db: Session, server_id: int) -> Optional[models.Server]:
     db_server = get_server_by_id(db, server_id)
     if db_server:
+        # Cleanup sessions
+        db.query(models.PlayerSession).filter(models.PlayerSession.server_id == server_id).delete()
         db.delete(db_server)
         db.commit()
     return db_server
@@ -625,6 +627,38 @@ def cleanup_server_link_groups_for_server(db: Session, server_id: int) -> int:
             continue
     db.commit()
     return updated
+
+
+# --- Player Session CRUD ---
+def create_player_session(db: Session, server_id: int, player_uuid: str) -> models.PlayerSession:
+    # 强制结束该玩家在该服可能存在的未关闭会话
+    close_player_session(db, server_id, player_uuid)
+    
+    sess = models.PlayerSession(
+        server_id=server_id,
+        player_uuid=player_uuid,
+        logout_time=None
+    )
+    # login_time 有 server_default，但也可用 python 传
+    db.add(sess)
+    db.commit()
+    db.refresh(sess)
+    return sess
+
+
+def close_player_session(db: Session, server_id: int, player_uuid: str):
+    from sqlalchemy.sql import func
+    # 查找所有未结束的会话并关闭（理论上应该只有一个，但为了稳健处理所有）
+    sessions = db.query(models.PlayerSession).filter(
+        models.PlayerSession.server_id == server_id,
+        models.PlayerSession.player_uuid == player_uuid,
+        models.PlayerSession.logout_time.is_(None)
+    ).all()
+    if sessions:
+        for s in sessions:
+            s.logout_time = func.now()
+            db.add(s)
+        db.commit()
 
 
 # --- System Settings CRUD ---
