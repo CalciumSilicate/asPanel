@@ -568,6 +568,7 @@ def create_server_link_group(db: Session, payload: schemas.ServerLinkGroupCreate
     rec = models.ServerLinkGroup(
         name=payload.name,
         server_ids=json.dumps(payload.server_ids or []),
+        data_source_ids=json.dumps(payload.data_source_ids or []),
         chat_bindings=json.dumps(_normalize_chat_bindings(payload.chat_bindings)),
     )
     db.add(rec)
@@ -589,6 +590,8 @@ def update_server_link_group(db: Session, group_id: int, payload: schemas.Server
         rec.name = payload.name
     if payload.server_ids is not None:
         rec.server_ids = json.dumps(payload.server_ids)
+    if payload.data_source_ids is not None:
+        rec.data_source_ids = json.dumps(payload.data_source_ids)
     if payload.chat_bindings is not None:
         rec.chat_bindings = json.dumps(_normalize_chat_bindings(payload.chat_bindings))
     db.add(rec)
