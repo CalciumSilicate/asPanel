@@ -431,6 +431,18 @@ async def _handle_single(payload: Dict[str, Any]):
                             pass
                 except Exception:
                     pass
+                # 记录会话开始 (Session)
+                try:
+                    with get_db_context() as db:
+                        rec = crud.get_player_by_name(db, player)
+                        if rec and rec.uuid:
+                            server_path = _get_server_path_by_name(server_name)
+                            if server_path:
+                                srv = crud.get_server_by_path(db, server_path)
+                                if srv:
+                                    crud.create_player_session(db, srv.id, rec.uuid)
+                except Exception:
+                    pass
                 try:
                     await onebot.handle_player_join(server_name, player)
                 except Exception:
@@ -492,6 +504,18 @@ async def _handle_single(payload: Dict[str, Any]):
                         JOINED_TIME.get(server_name, {}).pop(player, None)
                     except Exception:
                         pass
+                except Exception:
+                    pass
+                # 记录会话结束 (Session)
+                try:
+                    with get_db_context() as db:
+                        rec = crud.get_player_by_name(db, player)
+                        if rec and rec.uuid:
+                            server_path = _get_server_path_by_name(server_name)
+                            if server_path:
+                                srv = crud.get_server_by_path(db, server_path)
+                                if srv:
+                                    crud.close_player_session(db, srv.id, rec.uuid)
                 except Exception:
                     pass
                 try:

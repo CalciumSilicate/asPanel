@@ -221,9 +221,15 @@ def _series_to_xy(series: List[Tuple[int, int]], boundaries: List[datetime], uni
         # label = b.strftime("%m-%d %H:%M")
         label = ""
         if tr.granularity == "1h":
-            label = f'{b.hour - 1}时'
+            hour_num = b.hour - 1
+            if hour_num == -1:
+                hour_num = 23
+            label = f'{hour_num}时'
         elif tr.granularity == "24h":
-            label = f'{b.day - 1}日'
+            day_num = b.day - 1
+            if day_num == 0:
+                day_num = (b - timedelta(days=1)).day
+            label = f'{day_num}日'
         elif tr.granularity == "1month":
             month_num = b.month - 1
             if month_num == 0:

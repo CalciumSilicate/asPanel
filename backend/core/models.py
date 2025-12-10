@@ -156,3 +156,16 @@ class JsonDim(Base):
         UniqueConstraint("server_id", "json_file_name", name="uq_json_dim_server_file"),
         Index("idx_json_dim_server", "server_id"),
     )
+
+
+class PlayerSession(Base):
+    __tablename__ = "player_sessions"
+    id = Column(Integer, primary_key=True, index=True)
+    player_uuid = Column(String, index=True, nullable=False)
+    server_id = Column(Integer, ForeignKey("servers.id"), nullable=False, index=True)
+    login_time = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    logout_time = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_player_sessions_lookup", "player_uuid", "server_id", "logout_time"),
+    )
