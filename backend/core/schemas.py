@@ -626,7 +626,6 @@ class PBRestorePayload(BaseModel):
 class ServerLinkGroupBase(BaseModel):
     name: str
     server_ids: List[int] = Field(default_factory=list)
-    # chat_bindings 留空待定：使用 Any 数组占位，便于后续扩展结构
     chat_bindings: List[Any] = Field(default_factory=list)
 
 
