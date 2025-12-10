@@ -289,7 +289,7 @@ def create_smooth_chart(width: int, height: int, x_labels: List[str], values: Li
     def large_num_formatter(x_val, pos):
         if x_val >= 10_000:
             return f'{x_val * 1e-4:.2f}W'
-        return f'{int(x_val)}'
+        return f'{x_val: .2f}'
 
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(large_num_formatter))
     ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=4))
@@ -925,7 +925,7 @@ def render_combined_view(
 
         right_edge_x = cx + card_width - 30
         val_raw = item.get("total", 0)
-        val_str = f"{int(val_raw):,}" if isinstance(val_raw, (int, float)) else str(val_raw)
+        val_str = f"{val_raw:,}" if isinstance(val_raw, (int, float)) else str(val_raw)
         delta = item.get("delta", 0)
 
         if delta != 0:

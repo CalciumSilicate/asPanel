@@ -28,22 +28,33 @@ _TOOLS = [
 ]
 _MATS = ["wooden", "stone", "iron", "golden", "diamond", "netherite", "copper"]
 _BREAK_METRICS = ["used.shears", *[f"used.{m}_{t}" for m in _MATS for t in _TOOLS]]
+_WALK_METRICS = ['custom.sprint_one_cm','custom.walk_one_cm','custom.walk_under_water_one_cm','custom.walk_on_water_one_cm', 'custom.crouch_one_cm', 'custom.swim_one_cm']
+_VEHICLE = ['boat','horse','minecart','pig','crouch']
+_VEHICLE_METRICS = [f'custom.{v}_one_cm' for v in _VEHICLE]
 
 TOTAL_ITEMS = [
     ("上线次数", ["custom.leave_game"], 1, "count"),
-    ("在线时长 (hr)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, "round1"),
+    ("在线时长(hr)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, "round1"),
+    ("击杀玩家", ["custom.player_kills"], 1, "count"),
+    ("被玩家击杀", ["killed_by.player"], 1, "count"),
     ("挖掘方块", _BREAK_METRICS, 1, "count"),
-    ("飞行距离", ["custom.aviate_one_cm"], 0.00001, "round2"),
-    ("珍珠距离", ["custom.ender_pearl_one_cm"], 0.00001, "round2"),
-    ("烟花次数", ["custom.firework_boost"], 1, "count"),
-    ("图腾次数", ["used.totem_of_undying"], 1, "count"),
-    ("破基岩次数", ["custom.break_bedrock"], 1, "count"),
+    ("死亡次数", ["custom.deaths"], 1, "count"),
+    ("鞘翅飞行(km)", ["custom.aviate_one_cm"], 0.00001, "round2"),
+    ("珍珠传送(km)", ["custom.ender_pearl_one_cm"], 0.00001, "round2"),
+    ("步行前进(km)", _WALK_METRICS, 0.00001, "round2"),
+    ("交通工具(km)", _VEHICLE_METRICS, 0.00001, "round2"),
+    ("使用烟花", ["custom.firework_boost"], 1, "count"),
+    ("消耗不死图腾", ["used.totem_of_undying"], 1, "count"),
+    ("破基岩", ["custom.break_bedrock"], 1, "count"),
 ]
 
 CHART_ITEMS = [
-    ("上线活跃度 (min)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 60, True),
-    ("鞘翅飞行距离 (m)", ["custom.aviate_one_cm"], 0.01, True),
-    ("挖掘方块", _BREAK_METRICS, 1, False),
+    ("上线时长 (min)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 60, True),
+    ("上线次数", ["custom.leave_game"], 1, True),
+    ("移动 (m)", ['custom.aviate_one_cm', 'custom.ender_pearl_one_cm', *_WALK_METRICS, *_VEHICLE_METRICS], 0.01, True),
+    ("挖掘方块", _BREAK_METRICS, 1, True),
+    ("破基岩", ["custom.break_bedrock"], 1, True),
+    ("死亡次数", ["custom.deaths"], 1, True),
 ]
 
 
@@ -210,9 +221,9 @@ def _series_to_xy(series: List[Tuple[int, int]], boundaries: List[datetime], uni
         # label = b.strftime("%m-%d %H:%M")
         label = ""
         if tr.granularity == "1h":
-            label = b.hour - 1
+            label = f'{b.hour - 1}时'
         elif tr.granularity == "24h":
-            label = b.day - 1
+            label = f'{b.day - 1}日'
         elif tr.granularity == "1month":
             month_num = b.month - 1
             if month_num == 0:
@@ -257,7 +268,8 @@ def _build_totals(player_uuid: str, tr: TimeRange, server_ids: List[int]) -> Lis
         )
         series = series_map.get(player_uuid, [])
         total, delta = _metrics_sum(series)
-        out.append({"label": label, "total": _format_number(total * unit, mode), "delta": _format_number(delta * unit, mode)})
+        if total:
+            out.append({"label": label, "total": _format_number(total * unit, mode), "delta": _format_number(delta * unit, mode)})
     return out
 
 
@@ -390,12 +402,12 @@ def build_report_from_command(
     #     return False, bind_player_for_user(sender_qq or "", tokens[1])
 
     # 获取服务器组配置
-    server_ids = [3]  # 默认
+    server_ids = []  # 默认
     data_source_text = ""
     
     if group_id:
         with get_db_context() as db:
-            group = crud.get_server_link_group(db, group_id)
+            group = crud.get_server_link_group_by_id(db, group_id)
             if group:
                 try:
                     import json
