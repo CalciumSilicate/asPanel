@@ -1,6 +1,7 @@
 # backend/core/crud.py
 
 import json
+from datetime import datetime
 from sqlalchemy.orm import Session
 from typing import Any, List, Optional, Type, Tuple
 
@@ -235,6 +236,8 @@ def delete_server(db: Session, server_id: int) -> Optional[models.Server]:
     if db_server:
         # Cleanup sessions
         db.query(models.PlayerSession).filter(models.PlayerSession.server_id == server_id).delete()
+        # Cleanup player positions
+        db.query(models.PlayerPosition).filter(models.PlayerPosition.server_id == server_id).delete()
         db.delete(db_server)
         db.commit()
     return db_server
@@ -659,6 +662,53 @@ def close_player_session(db: Session, server_id: int, player_uuid: str):
             s.logout_time = func.now()
             db.add(s)
         db.commit()
+
+
+# --- Player Position CRUD ---
+def add_player_position(
+    db: Session,
+    player_id: int,
+    server_id: int,
+    ts: datetime,
+    x: float,
+    y: float,
+    z: float,
+    dim: Optional[str] = None,
+) -> models.PlayerPosition:
+    row = models.PlayerPosition(
+        player_id=player_id,
+        server_id=server_id,
+        ts=ts,
+        x=x,
+        y=y,
+        z=z,
+        dim=dim,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_player_positions(
+    db: Session,
+    player_id: int,
+    start: datetime,
+    end: datetime,
+    server_ids: Optional[List[int]] = None,
+) -> List[models.PlayerPosition]:
+    q = db.query(models.PlayerPosition).filter(
+        models.PlayerPosition.player_id == player_id,
+        models.PlayerPosition.ts >= start,
+        models.PlayerPosition.ts <= end,
+    )
+    if server_ids:
+        q = q.filter(models.PlayerPosition.server_id.in_(server_ids))
+    return q.order_by(models.PlayerPosition.ts.asc()).all()
+
+
+def delete_player_positions_for_server(db: Session, server_id: int) -> int:
+    return db.query(models.PlayerPosition).filter(models.PlayerPosition.server_id == server_id).delete()
 
 
 # --- System Settings CRUD ---

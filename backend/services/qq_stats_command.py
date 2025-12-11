@@ -75,6 +75,8 @@ def get_now_tz() -> datetime:
 class TimeRange:
     start: datetime
     end: datetime
+    real_start: datetime
+    real_end: datetime
     granularity: str
     label: str
     x_labels: List[str]
@@ -132,7 +134,7 @@ def _calc_preset(label: str, offset: int = 0) -> TimeRange:
         else:
             end = start + timedelta(hours=now.hour)
         display = "今天" if offset == 0 else "昨天" if offset == 1 else f"{offset}天前"
-        return TimeRange(start, end, "1h", f"{display}", [])
+        return TimeRange(start, end, start, end, "1h", f"{display}", [])
     if label == "1w":
         weekday = now.weekday()
         start = (now - timedelta(days=weekday + offset * 7 - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -142,7 +144,7 @@ def _calc_preset(label: str, offset: int = 0) -> TimeRange:
             end = start + timedelta(days=now.weekday())
         week_num = int(start.strftime("%W")) + 1
         prefix = "本周" if offset == 0 else "上周" if offset == 1 else f"{offset}周前"
-        return TimeRange(start, end, "24h", f"{prefix}（{start.year}年第{week_num}周）", [])
+        return TimeRange(start, end, start, end, "24h", f"{prefix}（{start.year}年第{week_num}周）", [])
     if label == "1m":
         current_total_months = now.year * 12 + (now.month - 1)
         target_total_months = current_total_months - offset
@@ -164,7 +166,7 @@ def _calc_preset(label: str, offset: int = 0) -> TimeRange:
             
             prefix = "上月" if offset == 1 else f"{offset}个月前"
 
-        return TimeRange(start, end, "24h", f"{prefix}（{start.year}年{start.month}月）", [])
+        return TimeRange(start, end, start, end, "24h", f"{prefix}（{start.year}年{start.month}月）", [])
     if label == "1y":
         target_year = now.year - offset
         start = now.replace(year=target_year, month=2, day=1, 
@@ -177,12 +179,12 @@ def _calc_preset(label: str, offset: int = 0) -> TimeRange:
         else:
             prefix = "去年" if offset == 1 else f"{offset}年前"
 
-        return TimeRange(start, end, "1month", f"{prefix}（{target_year}年）", [])
+        return TimeRange(start, end, start, end, "1month", f"{prefix}（{target_year}年）", [])
     if label == "all":
         start = now - timedelta(days=365 * 5)
         end = now
 
-        return TimeRange(start, end, "1month", "全部记录", [])
+        return TimeRange(start, end, start, end, "1month", "全部记录", [])
     if label == "last":
         min = (now.minute // 10 + 1) * 10
         end = now.replace(microsecond=0, second=0, minute=min if min != 60 else 0)
@@ -192,8 +194,8 @@ def _calc_preset(label: str, offset: int = 0) -> TimeRange:
         start = convert_to_tz(start)
         end = convert_to_tz(end)
         label = f"上次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
-        return TimeRange(start, end, "10min", label, [])
-    return TimeRange(now - timedelta(days=1), now, "1h", "最近", [])
+        return TimeRange(start, end, start, end, "10min", label, [])
+    return TimeRange(now - timedelta(days=1), now, start, end, "1h", "最近", [])
 
 
 def _parse_custom_range(start_text: str, end_text: str) -> TimeRange:
@@ -418,12 +420,12 @@ def _get_session_range_for_last(db: Session, player: models.Player, server_ids: 
         start = convert_to_tz(start)
         end = convert_to_tz(end)
         label = f"上次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
-        start = ceil_to_10min(start)
+        c_start = ceil_to_10min(start)
         if not end:
             end = datetime.now()
-        end = ceil_to_10min(end) if end else None
+        c_end = ceil_to_10min(end) if end else None
         
-        return TimeRange(start, end, "10min", label, [])
+        return TimeRange(c_start, c_end, start, end, "10min", label, [])
     
     return None
 
@@ -463,8 +465,8 @@ def _calculate_time_range(tokens: List[str], player: models.Player, is_online: b
         end = ceil_to_10min(get_now_tz())
         start = convert_to_tz(start)
         label = f"本次在线({start.strftime('%Y-%m-%d %H:%M')} ~ 现在)"
-        start = ceil_to_10min(start)
-        return TimeRange(start, end, "10min", label, [])
+        c_start = ceil_to_10min(start)
+        return TimeRange(c_start, end, start, get_now_tz(), "10min", label, [])
     
     # Offline default or specific tokens
     if not tokens:
@@ -519,7 +521,32 @@ def build_stats_picture(
 
     data["totals"] = _build_totals(player.uuid, tr, effective_server_ids)
     data["charts"] = _build_charts(player.uuid, tr, effective_server_ids)
+    # 位置/路径
+    with get_db_context() as db:
+        positions = crud.get_player_positions(db, player.id, tr.real_start.astimezone(timezone.utc), tr.real_end.astimezone(timezone.utc), effective_server_ids)
+    if positions:
+        def _dim_to_int(d: Optional[str]) -> int:
+            if d is None:
+                return 0
+            s = str(d).lower()
+            if "nether" in s:
+                return -1
+            if "end" in s:
+                return 1
+            try:
+                return int(s)
+            except Exception:
+                return 0
+        pts = [(float(p.x), float(p.z), _dim_to_int(p.dim)) for p in positions if p.x is not None and p.z is not None]
+        if len(pts) == 1:
+            data["location"] = {"x": pts[0][0], "z": pts[0][1], "dim": pts[0][2]}
+        elif len(pts) > 1:
+            data["path"] = pts
+        print(pts)
+        
+
     img = render_combined_view(data, MAP_CONFIG)
+    logger.debug(f"生成统计图成功 | player={player.player_name} uuid={player.uuid} range={tr.start}~{tr.end} path={'yes' if 'path' in data else 'no'}")
     return _image_to_base64(img)
 
 

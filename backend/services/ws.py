@@ -3,6 +3,7 @@
 import json
 import asyncio
 import time
+import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from typing import Any, Dict, List, Optional, Set
@@ -435,7 +436,7 @@ async def _handle_single(payload: Dict[str, Any]):
 
         if event == "mcdr.player_position" and isinstance(data, dict):
             server_name = str(data.get("server") or "")
-            positions = data.get("positions") or {}
+            positions = data.get("positions") or []
             server_id = data.get("server_id")
             if not server_id and server_name:
                 try:
@@ -446,8 +447,31 @@ async def _handle_single(payload: Dict[str, Any]):
                                 break
                 except Exception:
                     server_id = None
+            ts_now = datetime.datetime.now(datetime.timezone.utc)
+            if server_id:
+                try:
+                    with get_db_context() as db:
+                        for item in positions:
+                            try:
+                                player_name = item.get("player")
+                                pos = item.get("position") or {}
+                                x = pos.get("x")
+                                y = pos.get("y")
+                                z = pos.get("z")
+                                dim = item.get("dimension")
+                                if player_name is None or x is None or y is None or z is None:
+                                    continue
+                                p = crud.get_player_by_name(db, str(player_name))
+                                if not p:
+                                    continue
+                                crud.add_player_position(db, p.id, int(server_id), ts_now, float(x), float(y), float(z), str(dim) if dim is not None else None)
+                            except Exception:
+                                continue
+                        logger.debug(f"[MCDR-WS] 位置上报已落库 | server={server_name} id={server_id} count={len(positions)}")
+                except Exception:
+                    logger.exception("[MCDR-WS] 位置上报入库失败")
             try:
-                logger.debug(f"[MCDR-WS] 收到位置上报 | server={server_name} id={server_id} count={len(positions)} reason={data.get('reason')} positions={positions}")
+                logger.debug(f"[MCDR-WS] 收到位置上报 | server={server_name} id={server_id} count={len(positions)} reason={data.get('reason')}")
             except Exception as e:
                 logger.error(f"[MCDR-WS] 位置上报日志记录失败: {e}")
                 pass

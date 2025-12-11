@@ -3,7 +3,7 @@
 import json
 import enum
 from sqlalchemy import Column, Integer, String, DateTime, Enum as SQLAlchemyEnum, Text, Boolean, PrimaryKeyConstraint, \
-    UniqueConstraint, ForeignKey, Index
+    UniqueConstraint, ForeignKey, Index, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from backend.core.constants import DEFAULT_CORE_CONFIG, DEFAULT_USER_ROLE
@@ -169,3 +169,15 @@ class PlayerSession(Base):
     __table_args__ = (
         Index("idx_player_sessions_lookup", "player_uuid", "server_id", "logout_time"),
     )
+
+
+class PlayerPosition(Base):
+    __tablename__ = "player_positions"
+    id = Column(Integer, primary_key=True, index=True)
+    player_id = Column(Integer, ForeignKey("players.id"), nullable=False, index=True)
+    server_id = Column(Integer, ForeignKey("servers.id"), nullable=False, index=True)
+    ts = Column(DateTime(timezone=True), nullable=False, index=True)
+    x = Column(Float, nullable=True)
+    y = Column(Float, nullable=True)
+    z = Column(Float, nullable=True)
+    dim = Column(String, nullable=True)
