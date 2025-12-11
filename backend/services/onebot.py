@@ -471,10 +471,6 @@ async def refresh_bindings() -> None:
             new_group_players[gid] = await _compute_group_players(gid)
         _GROUP_PLAYERS = new_group_players
 
-        try:
-            logger.info(f"[OneBot] 组绑定已刷新 | groups={len(_GROUP_META)}")
-        except Exception:
-            pass
 
 
 async def _send_group_text(qq_group: str, message: str) -> None:
