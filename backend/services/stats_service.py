@@ -49,6 +49,26 @@ def _ingest_for_query(granularity: str, server_ids: Optional[List[int]], metrics
             if not stats_dir.exists():
                 continue
             try:
+                # 查询前 save-all，单服 30 秒防抖
+                proc = mcdr_manager.processes.get(srv.id)
+                if proc and proc.returncode is None:
+                    last_ts = _SAVEALL_LAST_TS.get(srv.id, 0)
+                    if now_float - last_ts >= 30:
+                        logger.debug(f"查询前 save-all server_id={srv.id}")
+                        try:
+                            loop = mcdr_manager.loop if hasattr(mcdr_manager, "loop") else None
+                        except Exception:
+                            loop = None
+                        try:
+                            import asyncio as _asyncio
+                            if loop and loop.is_running():
+                                _asyncio.run_coroutine_threadsafe(mcdr_manager.send_command(srv, 'save-all'), loop).result(timeout=5)
+                            else:
+                                _asyncio.run(mcdr_manager.send_command(srv, 'save-all'))
+                        except Exception:
+                            pass
+                        _SAVEALL_LAST_TS[srv.id] = now_float
+                        time.sleep(1.0)
                 ingest_once_for_server(srv.id, stats_dir, metrics, target_ts=target_ts)
             except Exception:
                 continue
@@ -138,9 +158,20 @@ def _server_stats_dir(server_path: str | Path) -> Path:
     base = Path(server_path)
     return base / "server" / "world" / "stats"
 
+# 防抖缓存
+_DISCOVER_CACHE_TS: float = 0.0
+_DISCOVER_CACHE: List[str] = []
+_DISCOVER_CACHE_WINDOW = 10  # 秒
+_SAVEALL_LAST_TS: dict[int, float] = {}
+
 
 def discover_metrics_from_all_servers() -> List[str]:
-    """从所有服务器的 stats 目录中发现可用指标并应用过滤。"""
+    """从所有服务器的 stats 目录中发现可用指标并应用过滤（带防抖）。"""
+    global _DISCOVER_CACHE_TS, _DISCOVER_CACHE
+    now = time.time()
+    if now - _DISCOVER_CACHE_TS < _DISCOVER_CACHE_WINDOW and _DISCOVER_CACHE:
+        return list(_DISCOVER_CACHE)
+
     db = SessionLocal()
     try:
         servers = crud.get_all_servers(db)
@@ -156,6 +187,8 @@ def discover_metrics_from_all_servers() -> List[str]:
     if not metrics:
         # 回退至少包含游玩时长（历史兼容）
         metrics = ["custom.play_one_minute"]
+    _DISCOVER_CACHE_TS = now
+    _DISCOVER_CACHE = list(metrics)
     return metrics
 
 
@@ -403,9 +436,13 @@ async def ingest_scheduler_loop():
                 try:
                     proc = mcdr_manager.processes.get(srv.id)
                     if proc and proc.returncode is None:
-                        logger.debug(f"服务器运行中，试发送命令save-all server_id={srv.id}")
-                        await mcdr_manager.send_command(srv, 'save-all')
-                        await asyncio.sleep(1.0)
+                        last_ts = _SAVEALL_LAST_TS.get(srv.id, 0)
+                        now_ts = time.time()
+                        if now_ts - last_ts >= 3:
+                            logger.debug(f"服务器运行中，试发送命令save-all server_id={srv.id}")
+                            await mcdr_manager.send_command(srv, 'save-all')
+                            _SAVEALL_LAST_TS[srv.id] = now_ts
+                            await asyncio.sleep(1.0)
                 except Exception:
                     pass
                 # 入库放到线程池中，避免阻塞事件循环
