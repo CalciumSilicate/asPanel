@@ -439,11 +439,11 @@ def _report_positions(server: ServerInterface, reason: str) -> None:
 
 
 def _position_loop(server: ServerInterface):
-    """每整分钟上报一次位置。"""
+    """每 10 整秒上报一次位置。"""
     while not _POS_STOP.is_set():
         now = time.time()
-        # sleep 到下一整分钟
-        sleep_sec = max(1.0, 60.0 - (now % 60.0))
+        # sleep 到下一个 10 秒边界
+        sleep_sec = max(0.1, 5 - (now % 5))
         _POS_STOP.wait(sleep_sec)
         if _POS_STOP.is_set():
             break
@@ -454,6 +454,7 @@ def _position_loop(server: ServerInterface):
                 server.logger.debug("[asPanel] 定时位置上报失败")
             except Exception:
                 pass
+
 
 
 # ----------------------------- 远端事件处理（转发显示） -----------------------------
