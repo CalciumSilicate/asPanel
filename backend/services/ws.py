@@ -39,6 +39,26 @@ def _get_server_path_by_name(server_name: str) -> Optional[str]:
     return None
 
 
+def _is_proxy_server(server_name: str) -> bool:
+    """根据数据库记录判断该服务器是否为代理（velocity/bungeecord）。"""
+    try:
+        with get_db_context() as db:
+            for s in crud.get_all_servers(db):
+                try:
+                    if Path(s.path).name != server_name:
+                        continue
+                    import json as _json
+                    cfg = _json.loads(s.core_config or "{}")
+                    stype = (cfg.get("server_type") or "").lower()
+                    if stype in {"velocity", "bungeecord"}:
+                        return True
+                except Exception:
+                    continue
+    except Exception:
+        return False
+    return False
+
+
 async def _playtime_tick_loop():
     """
     每分钟遍历在线表，将在线满 60s 的玩家对应服务器的 play_time += 1200（gt）。
@@ -404,6 +424,35 @@ async def _handle_single(payload: Dict[str, Any]):
     try:
         from backend.services import player_manager as _pm
         _ensure_playtime_task()
+        if event in {"mcdr.player_joined", "mcdr.player_left", "mcdr.player_position"} and isinstance(data, dict):
+            server_name = str(data.get("server") or "")
+            if server_name and _is_proxy_server(server_name):
+                try:
+                    logger.debug(f"[MCDR-WS] 代理服务器事件已忽略 | server={server_name} event={event}")
+                except Exception:
+                    pass
+                return
+
+        if event == "mcdr.player_position" and isinstance(data, dict):
+            server_name = str(data.get("server") or "")
+            positions = data.get("positions") or {}
+            server_id = data.get("server_id")
+            if not server_id and server_name:
+                try:
+                    with get_db_context() as db:
+                        for s in crud.get_all_servers(db):
+                            if Path(s.path).name == server_name:
+                                server_id = s.id
+                                break
+                except Exception:
+                    server_id = None
+            try:
+                logger.debug(f"[MCDR-WS] 收到位置上报 | server={server_name} id={server_id} count={len(positions)} reason={data.get('reason')} positions={positions}")
+            except Exception as e:
+                logger.error(f"[MCDR-WS] 位置上报日志记录失败: {e}")
+                pass
+            return
+
         if event == "mcdr.player_joined" and isinstance(data, dict):
             server_name = str(data.get("server") or "")
             player = str(data.get("player") or "")
@@ -717,11 +766,20 @@ async def broadcast_server_link_update(server_name: str, group_names: List[str])
         await onebot.refresh_bindings()
     except Exception:
         pass
+    server_id: Optional[int] = None
+    try:
+        with get_db_context() as db:
+            for s in crud.get_all_servers(db):
+                if Path(s.path).name == server_name:
+                    server_id = s.id
+                    break
+    except Exception:
+        server_id = None
     dead: List[WebSocket] = []
     msg = json.dumps({
         "event": "sl.group_update",
         "ts": "-",
-        "data": {"server": server_name, "server_groups": group_names}
+        "data": {"server": server_name, "server_groups": group_names, "server_id": server_id}
     }, ensure_ascii=False)
     sent = 0
     for ws, bound in list(_PLUGIN_CLIENTS.items()):
