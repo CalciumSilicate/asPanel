@@ -46,7 +46,7 @@ TOTAL_ITEMS = [
     ("珍珠传送(km)", ["custom.ender_pearl_one_cm"], 0.00001, "round2"),
     ("步行前进(km)", _WALK_METRICS, 0.00001, "round2"),
     ("交通工具(km)", _VEHICLE_METRICS, 0.00001, "round2"),
-    ("使用烟花", ["custom.firework_boost"], 1, "count"),
+    ("使用烟花", ["custom.firework_boost", "used.firework_rocket"], 1, "count"),
     ("消耗不死图腾", ["used.totem_of_undying"], 1, "count"),
     ("破基岩", ["custom.break_bedrock"], 1, "count"),
 ]

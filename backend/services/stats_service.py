@@ -52,23 +52,8 @@ def _ingest_for_query(granularity: str, server_ids: Optional[List[int]], metrics
                 # 查询前 save-all，单服 30 秒防抖
                 proc = mcdr_manager.processes.get(srv.id)
                 if proc and proc.returncode is None:
-                    last_ts = _SAVEALL_LAST_TS.get(srv.id, 0)
-                    if now_float - last_ts >= 30:
-                        logger.debug(f"查询前 save-all server_id={srv.id}")
-                        try:
-                            loop = mcdr_manager.loop if hasattr(mcdr_manager, "loop") else None
-                        except Exception:
-                            loop = None
-                        try:
-                            import asyncio as _asyncio
-                            if loop and loop.is_running():
-                                _asyncio.run_coroutine_threadsafe(mcdr_manager.send_command(srv, 'save-all'), loop).result(timeout=5)
-                            else:
-                                _asyncio.run(mcdr_manager.send_command(srv, 'save-all'))
-                        except Exception:
-                            pass
-                        _SAVEALL_LAST_TS[srv.id] = now_float
-                        time.sleep(1.0)
+                    _run_save_all_sync(srv, debounce_sec=30.0)
+                    time.sleep(1.0)
                 ingest_once_for_server(srv.id, stats_dir, metrics, target_ts=target_ts)
             except Exception:
                 continue
@@ -190,6 +175,28 @@ def discover_metrics_from_all_servers() -> List[str]:
     _DISCOVER_CACHE_TS = now
     _DISCOVER_CACHE = list(metrics)
     return metrics
+
+
+def _run_save_all_sync(server: models.Server, debounce_sec: float) -> None:
+    """在同步上下文执行 save-all，带每服防抖。"""
+    now = time.time()
+    last = _SAVEALL_LAST_TS.get(server.id, 0.0)
+    if now - last < debounce_sec:
+        return
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # 已在事件循环中：安排异步任务执行，避免 asyncio.run 抛错导致协程未 awaited
+            loop.create_task(mcdr_manager.send_command(server, "save-all"))
+        else:
+            asyncio.run(mcdr_manager.send_command(server, "save-all"))
+    except Exception:
+        logger.exception("发送 save-all 命令失败")
+    _SAVEALL_LAST_TS[server.id] = now
 
 
 def ingest_once_for_server(
@@ -436,9 +443,9 @@ async def ingest_scheduler_loop():
                 try:
                     proc = mcdr_manager.processes.get(srv.id)
                     if proc and proc.returncode is None:
-                        last_ts = _SAVEALL_LAST_TS.get(srv.id, 0)
+                        last_ts = _SAVEALL_LAST_TS.get(srv.id, 0.0)
                         now_ts = time.time()
-                        if now_ts - last_ts >= 3:
+                        if now_ts - last_ts >= 3.0:
                             logger.debug(f"服务器运行中，试发送命令save-all server_id={srv.id}")
                             await mcdr_manager.send_command(srv, 'save-all')
                             _SAVEALL_LAST_TS[srv.id] = now_ts
@@ -807,8 +814,8 @@ def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity
     if not allowed:
         return {uid: [] for uid in player_uuids}
 
-    # 查询前对齐一次入库
-    _ingest_for_query(granularity, server_ids, allowed)
+    # 查询前对齐一次入库，使用全局发现的 metrics（防抖）
+    _ingest_for_query(granularity, server_ids, discover_metrics_from_all_servers())
 
     pairs = _normalize_metrics(allowed, namespace)
     db = SessionLocal()
@@ -1020,8 +1027,8 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
     if not allowed:
         return {uid: [] for uid in player_uuids}
 
-    # 查询前对齐一次入库
-    _ingest_for_query(granularity, server_ids, allowed)
+    # 查询前对齐一次入库，使用全局发现的 metrics（防抖）
+    _ingest_for_query(granularity, server_ids, discover_metrics_from_all_servers())
 
     pairs = _normalize_metrics(allowed, namespace)
 
