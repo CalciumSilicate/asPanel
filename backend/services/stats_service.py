@@ -20,14 +20,22 @@ DEFAULT_NAMESPACE = "minecraft"
 
 
 
+_LAST_QUERY_INGEST_AT: float = 0.0
+
+
 def _ingest_for_query(granularity: str, server_ids: Optional[List[int]], metrics: List[str]) -> None:
     """
     查询前触发一次“对齐到下一颗粒度边界”的入库，覆盖之前同 ts 的记录。
     """
-    step = 600
+    step = _GRANULARITY_SECONDS.get(granularity)
     if step is None:
         return
-    now = int(time.time())
+    now_float = time.time()
+    global _LAST_QUERY_INGEST_AT
+    if now_float - _LAST_QUERY_INGEST_AT < 10:
+        return
+    _LAST_QUERY_INGEST_AT = now_float
+    now = int(now_float)
     target_ts = ((now + step - 1) // step) * step  # 向上取整到下一个边界
 
     with SessionLocal() as db:
@@ -224,13 +232,15 @@ def ingest_once_for_server(
                 return 0, 1
             return int(curr_total - prev_total), 0
 
+        dropped = 0
         for fp in files:
             fn = fp.name
             mtime = int(fp.stat().st_mtime)
             last_read = json_dim_map.get(fn)
-            # 若文件未变化（mtime <= last_read_time），跳过
             if last_read is not None and mtime <= int(last_read or 0):
+                dropped += 1
                 continue
+            logger.debug(f"服务器 {server_id} 处理 stats 文件：{fn} | mtime={mtime} | last_read={last_read}")
 
             # 读取并解析 JSON（一次）
             try:
@@ -285,7 +295,8 @@ def ingest_once_for_server(
                 curr_total = _read_metric_from_json(js, metric)
                 prev_total = prev_map.get(mid)
                 delta, new = _compute_delta(prev_total, curr_total)
-                if delta == 0 and not new:
+                # target_ts/force_update：即便 delta==0 也需要写入新桶
+                if delta == 0 and not new and target_ts is None:
                     continue
                 if curr_total == 0 and new:
                     continue
@@ -316,7 +327,7 @@ def ingest_once_for_server(
             crud.upsert_json_dim_last_read(db, server_id, fn, now)
 
             rows_written_total += updated_count + len(to_add)
-
+        logger.debug(f"服务器 {server_id} 处理 stats 文件完成：总文件数={len(files)} | 跳过未改动文件={dropped} | 写入行数={rows_written_total}")
         db.commit()
         logger.debug(f"服务器 {server_id} 入库完成 stats_dir={stats_dir} | rows_written={rows_written_total}")
         return rows_written_total

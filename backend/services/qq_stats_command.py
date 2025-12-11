@@ -443,7 +443,7 @@ def _calculate_time_range(tokens: List[str], player: models.Player, is_online: b
             start = now - timedelta(hours=1)
         def ceil_to_10min(dt: datetime) -> datetime:
             minute = dt.minute % 10
-            return dt + timedelta(minutes=(10 - minute) if minute != 0 else 0, seconds=-dt.second, microseconds=-dt.microsecond)
+            return dt + timedelta(minutes=10 - minute, seconds=-dt.second, microseconds=-dt.microsecond)
         end = ceil_to_10min(get_now_tz())
         start = convert_to_tz(start)
         label = f"本次在线({start.strftime('%Y-%m-%d %H:%M')} ~ 现在)"

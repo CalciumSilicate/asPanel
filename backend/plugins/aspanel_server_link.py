@@ -429,7 +429,7 @@ def _report_positions(server: ServerInterface, reason: str) -> None:
             pass
         return
     try:
-        server.logger.info(f"[asPanel] 上报玩家位置：reason={reason} count={len(payload)}")
+        server.logger.debug(f"[asPanel] 上报玩家位置：reason={reason} count={len(payload)}")
     except Exception:
         pass
     _send_event(server, "mcdr.player_position", {
