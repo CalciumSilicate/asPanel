@@ -1,10 +1,13 @@
 import base64
 import io
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image
+from sqlalchemy import select, desc, func, and_
+from sqlalchemy.orm import Session
+
 
 from backend.core import crud, models
 from backend.core.database import get_db_context
@@ -57,6 +60,16 @@ CHART_ITEMS = [
     ("死亡次数", ["custom.deaths"], 1, True),
 ]
 
+
+def convert_to_tz(dt: datetime) -> datetime:
+    tz = get_tz_info()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(tz)
+
+def get_now_tz() -> datetime:
+    tz = get_tz_info()
+    return datetime.now(tz)
 
 @dataclass
 class TimeRange:
@@ -176,7 +189,10 @@ def _calc_preset(label: str, offset: int = 0) -> TimeRange:
         if min == 60:
             end + timedelta(hours=1)
         start = end - timedelta(days=1)
-        return TimeRange(start, end, "10min", "上次在线", [])
+        start = convert_to_tz(start)
+        end = convert_to_tz(end)
+        label = f"上次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
+        return TimeRange(start, end, "10min", label, [])
     return TimeRange(now - timedelta(days=1), now, "1h", "最近", [])
 
 
@@ -323,6 +339,140 @@ def _build_charts(player_uuid: str, tr: TimeRange, server_ids: List[int]) -> Lis
     return charts
 
 
+def _get_last_seen_str(db: Session, player: models.Player, server_ids: List[int]) -> str:
+    # 1. Check PlayerSession
+    stmt = select(models.PlayerSession.logout_time).where(
+        models.PlayerSession.player_uuid == player.uuid,
+        models.PlayerSession.logout_time.isnot(None)
+    )
+    if server_ids:
+        stmt = stmt.where(models.PlayerSession.server_id.in_(server_ids))
+    
+    last_session_time = db.scalar(stmt.order_by(models.PlayerSession.logout_time.desc()).limit(1))
+    
+    if last_session_time:
+        last_session_time = convert_to_tz(last_session_time)
+        return last_session_time.strftime("%Y-%m-%d %H:%M")
+    
+    # 2. Check Metrics (custom.leave_game)
+    cat_key = "minecraft:custom"
+    item_key = "minecraft:leave_game"
+    metric_id = db.scalar(select(models.MetricsDim.metric_id).where(
+        models.MetricsDim.category == cat_key,
+        models.MetricsDim.item == item_key
+    ))
+    
+    if not metric_id:
+        return "N/A"
+        
+    latest_timestamp = 0
+    
+    target_servers = server_ids if server_ids else []
+    
+    for sid in target_servers:
+        q = select(models.PlayerMetrics.ts).where(
+            models.PlayerMetrics.server_id == sid,
+            models.PlayerMetrics.player_id == player.id,
+            models.PlayerMetrics.metric_id == metric_id
+        ).order_by(models.PlayerMetrics.ts.desc()).limit(2)
+        
+        rows = db.execute(q).scalars().all()
+        # "If the found value is the first value for that player in that server (no earlier values) then discard it."
+        # If we have at least 2 rows, the latest (rows[0]) has a predecessor (rows[1]).
+        if len(rows) >= 2:
+            ts = rows[0]
+            if ts > latest_timestamp:
+                latest_timestamp = ts
+    
+    if latest_timestamp > 0:
+        dt = datetime.fromtimestamp(latest_timestamp)
+        dt = convert_to_tz(dt)
+        return f"至少于 {dt.strftime('%Y-%m-%d %H:%M')} 前"
+    
+    return "N/A"
+
+
+def _get_session_range_for_last(db: Session, player: models.Player, server_ids: List[int], offset: int, is_online: bool) -> Optional[TimeRange]:
+    stmt = select(models.PlayerSession).where(
+        models.PlayerSession.player_uuid == player.uuid
+    )
+    if server_ids:
+        stmt = stmt.where(models.PlayerSession.server_id.in_(server_ids))
+    
+    stmt = stmt.order_by(models.PlayerSession.login_time.desc())
+    
+    # If online, offset=1 means index 1 (previous). If offline, offset=1 means index 0 (last).
+    idx = (1 if is_online else 0) + (offset - 1)
+    limit = idx + 1
+    
+    sessions = db.execute(stmt.limit(limit)).scalars().all()
+    
+    def ceil_to_10min(dt: datetime) -> datetime:
+        minute = dt.minute % 10
+        return dt + timedelta(minutes=(10 - minute) if minute != 0 else 0, seconds=-dt.second, microseconds=-dt.microsecond)
+
+    if 0 <= idx < len(sessions):
+        s = sessions[idx]
+        start = s.login_time
+        end = s.logout_time
+        start = convert_to_tz(start)
+        end = convert_to_tz(end)
+        label = f"上次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
+        start = ceil_to_10min(start)
+        if not end:
+            end = datetime.now()
+        end = ceil_to_10min(end) if end else None
+        
+        return TimeRange(start, end, "10min", label, [])
+    
+    return None
+
+
+def _calculate_time_range(tokens: List[str], player: models.Player, is_online: bool, db: Session, server_ids: List[int]) -> TimeRange:
+    now = datetime.now()
+    
+    is_last = False
+    offset = 0
+    if tokens and tokens[0] == "last":
+        is_last = True
+        offset = 1
+        if len(tokens) > 1 and tokens[1].isdigit():
+            offset = int(tokens[1])
+    
+    if is_last:
+        tr = _get_session_range_for_last(db, player, server_ids, offset, is_online)
+        if tr:
+            return tr
+        return _calc_preset("1d", 0)
+    
+    if is_online and not tokens:
+        # Online default: Login to Now, 10min
+        stmt = select(models.PlayerSession.login_time).where(
+            models.PlayerSession.player_uuid == player.uuid,
+            models.PlayerSession.logout_time.is_(None)
+        )
+        if server_ids:
+            stmt = stmt.where(models.PlayerSession.server_id.in_(server_ids))
+        
+        start = db.scalar(stmt.order_by(models.PlayerSession.login_time.desc()).limit(1))
+        if not start:
+            start = now - timedelta(hours=1)
+        def ceil_to_10min(dt: datetime) -> datetime:
+            minute = dt.minute % 10
+            return dt + timedelta(minutes=(10 - minute) if minute != 0 else 0, seconds=-dt.second, microseconds=-dt.microsecond)
+        end = ceil_to_10min(get_now_tz())
+        start = convert_to_tz(start)
+        label = f"本次在线({start.strftime('%Y-%m-%d %H:%M')} ~ 现在)"
+        start = ceil_to_10min(start)
+        return TimeRange(start, end, "10min", label, [])
+    
+    # Offline default or specific tokens
+    if not tokens:
+        return _calc_preset("1d", 0)
+        
+    return _time_range_from_tokens(tokens)
+
+
 def _image_to_base64(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -336,7 +486,8 @@ def build_stats_picture(
     is_online: bool = False,
     server_name: Optional[str] = None,
     server_ids: List[int] = None,
-    data_source_text: str = ""
+    data_source_text: str = "",
+    last_seen_text: Optional[str] = None
 ) -> str:
     # 构造头像链接（如果未提供）
     qq_avatar = avatars.get("qq")
@@ -356,8 +507,7 @@ def build_stats_picture(
         "mc_avatar": mc_avatar,
         "player_name": player.player_name or "Unknown",
         "uuid": player.uuid,
-        # 若在线则显示当前时间，否则显示 "N/A" 或需要从某处获取最后离线时间（数据库里目前没有最后离线时间字段，暂用当前时间替代或留空）
-        "last_seen": None, 
+        "last_seen": last_seen_text, 
         "time_range_label": tr.label,
         "is_online": is_online,
         "in_server": server_name,
@@ -407,12 +557,12 @@ def build_report_from_command(
     #         return False, "用法：## bind <玩家名>"
     #     return False, bind_player_for_user(sender_qq or "", tokens[1])
 
-    # 获取服务器组配置
-    server_ids = []  # 默认
-    data_source_text = ""
-    
-    if group_id:
-        with get_db_context() as db:
+    with get_db_context() as db:
+        # 获取服务器组配置
+        server_ids = []  # 默认
+        data_source_text = ""
+        
+        if group_id:
             group = crud.get_server_link_group_by_id(db, group_id)
             if group:
                 try:
@@ -434,52 +584,84 @@ def build_report_from_command(
                 except Exception:
                     logger.warning(f"解析服务器组 {group_id} 配置失败，使用默认配置")
 
-    target_qq = None
+        target_qq = None
+        player = None
+        range_tokens = []
 
-    if not tokens and sender_qq:
-        # 查自己
-        player = _player_from_qq(sender_qq)
-        target_qq = sender_qq
-    else:
-        # 查别人
-        player_name = tokens[0] if tokens else None
-        player = _get_player_by_name(player_name) if player_name else _player_from_qq(sender_qq)
-        if player:
-            # 尝试查找该玩家绑定的 QQ
-            target_qq = _get_qq_from_player(player.id)
-            if not target_qq and not tokens and sender_qq:
-                 # Fallback: 如果是查自己（没tokens）但没绑定（理论上 _player_from_qq 已经保证绑定了，这里防御性写一下）
-                 target_qq = sender_qq
+        # 尝试解析目标玩家
+        if not tokens and sender_qq:
+            # Case 1: ## (无参数，查自己)
+            user = db.query(models.User).filter(models.User.qq == str(sender_qq)).first()
+            if user and getattr(user, "bound_player_id", None):
+                player = db.query(models.Player).filter(models.Player.id == user.bound_player_id).first()
+            target_qq = sender_qq
+            range_tokens = []
+        else:
+            # Case 2: 有参数，可能是 "## 玩家名 [args]" 或 "## [args]" (查自己)
+            possible_name = tokens[0]
+            found_player = crud.get_player_by_name(db, possible_name)
+            
+            if found_player:
+                # tokens[0] 是有效的玩家名 -> ## 玩家名 [args]
+                player = found_player
+                range_tokens = tokens[1:]
+                
+                # 尝试查找该玩家绑定的 QQ
+                user = db.query(models.User).filter(models.User.bound_player_id == player.id).first()
+                if user and user.qq:
+                    target_qq = user.qq
+                elif sender_qq and not target_qq:
+                    # 如果查的是自己（名字匹配），fallback到sender_qq
+                    user_sender = db.query(models.User).filter(models.User.qq == str(sender_qq)).first()
+                    if user_sender and user_sender.bound_player_id == player.id:
+                        target_qq = sender_qq
 
-    if not player:
-        return False, "未找到玩家或尚未绑定（请前往：https://panel.assx.top/ 注册，注册时绑定QQ与游戏名）"
+            else:
+                # tokens[0] 不是玩家名 -> 假设是 ## [args] (查自己)
+                # 例如 ## last, ## 1d
+                if sender_qq:
+                    user = db.query(models.User).filter(models.User.qq == str(sender_qq)).first()
+                    if user and getattr(user, "bound_player_id", None):
+                        player = db.query(models.Player).filter(models.Player.id == user.bound_player_id).first()
+                    target_qq = sender_qq
+                    range_tokens = tokens # 所有 tokens 都是参数
 
-    # 设置用于生成头像的 QQ 号
-    if target_qq:
-        avatars["sender_qq"] = target_qq
-    else:
-        # 明确移除 sender_qq，避免使用了命令发送者的 QQ 头像
-        avatars.pop("sender_qq", None)
-        avatars.pop("qq", None)
+        if not player:
+            if tokens:
+                 return False, f"未找到玩家 '{tokens[0]}'，且您尚未绑定无法查询自身。"
+            return False, "未找到玩家或尚未绑定（请前往：https://panel.assx.top/ 注册，注册时绑定QQ与游戏名）"
 
-    # 判断在线状态
-    is_online = False
-    server_name = None
-    if online_players_map and player.player_name:
-        for srv_name, players in online_players_map.items():
-            if player.player_name in players:
-                is_online = True
-                server_name = srv_name
-                break
+        # 设置用于生成头像的 QQ 号
+        if target_qq:
+            avatars["sender_qq"] = target_qq
+        else:
+            # 明确移除 sender_qq，避免使用了命令发送者的 QQ 头像
+            avatars.pop("sender_qq", None)
+            avatars.pop("qq", None)
 
-    range_tokens = tokens[1:] if len(tokens) > 1 else []
-    tr = _time_range_from_tokens(range_tokens)
-    try:
-        img_b64 = build_stats_picture(
-            player, tr, avatars, is_online=is_online, server_name=server_name,
-            server_ids=server_ids, data_source_text=data_source_text
-        )
-    except Exception as exc:
-        logger.opt(exception=exc).warning("生成统计图失败")
-        return False, "生成统计图失败，请稍后重试"
-    return True, img_b64
+        # 判断在线状态
+        is_online = False
+        server_name = None
+        if online_players_map and player.player_name:
+            for srv_name, players in online_players_map.items():
+                if player.player_name in players:
+                    is_online = True
+                    server_name = srv_name
+                    break
+
+        tr = _calculate_time_range(range_tokens, player, is_online, db, server_ids)
+        
+        last_seen_text = None
+        if not is_online:
+            last_seen_text = _get_last_seen_str(db, player, server_ids)
+
+        try:
+            img_b64 = build_stats_picture(
+                player, tr, avatars, is_online=is_online, server_name=server_name,
+                server_ids=server_ids, data_source_text=data_source_text,
+                last_seen_text=last_seen_text
+            )
+        except Exception as exc:
+            logger.opt(exception=exc).warning("生成统计图失败")
+            return False, "生成统计图失败，请稍后重试"
+        return True, img_b64
