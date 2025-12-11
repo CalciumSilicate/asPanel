@@ -4,6 +4,7 @@ import platform
 import math
 import json
 import httpx
+import functools
 from typing import List, Dict, Tuple, Optional, Any
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -105,6 +106,7 @@ def get_default_font_path(font_type="regular"):
     return None
 
 
+@functools.lru_cache(maxsize=128)
 def load_font(size: int, is_bold: bool = False) -> ImageFont.FreeTypeFont:
     """
     统一字体入口：
@@ -191,7 +193,8 @@ def draw_shadow(img: Image.Image, bbox: Tuple[int, int, int, int], radius: int, 
     img.alpha_composite(shadow_img, (x0 - blur * 2, y0 - blur * 2))
 
 
-def crop_circle_avatar(img_path: str, size: int) -> Image.Image:
+@functools.lru_cache(maxsize=64)
+def _cached_circle_avatar(img_path: str, size: int) -> Image.Image:
     try:
         if img_path and (img_path.startswith("http://") or img_path.startswith("https://")):
             resp = httpx.get(img_path, timeout=5.0)
@@ -204,7 +207,6 @@ def crop_circle_avatar(img_path: str, size: int) -> Image.Image:
     except Exception:
         img = Image.new("RGBA", (size, size), (220, 220, 220))
         d = ImageDraw.Draw(img)
-        # 使用统一字体
         font = load_font(size // 2, is_bold=True)
         d.text((size / 2, size / 2), "?", fill=(150, 150, 150), font=font, anchor="mm")
 
@@ -214,6 +216,38 @@ def crop_circle_avatar(img_path: str, size: int) -> Image.Image:
     output = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     output.paste(img, (0, 0), mask)
     return output
+
+
+def crop_circle_avatar(img_path: str, size: int) -> Image.Image:
+    # 返回副本避免调用方修改缓存内容
+    return _cached_circle_avatar(img_path or "", size).copy()
+
+
+@functools.lru_cache(maxsize=512)
+def _cached_arrow_marker(angle_deg: float, size: int, color: Tuple[int, int, int]) -> Image.Image:
+    canvas_size = int(size * 1.5)
+    img = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    cx, cy = canvas_size / 2, canvas_size / 2
+    half = size / 2
+    p1 = (cx + half, cy)
+    p2 = (cx - half, cy - half * 0.7)
+    p3 = (cx - half, cy + half * 0.7)
+    p4 = (cx - half * 0.4, cy)
+    d.polygon([p1, p2, p4, p3], fill=color)
+    return img.rotate(-angle_deg, resample=Image.BICUBIC)
+
+
+@functools.lru_cache(maxsize=4)
+def _load_json_cached(path: str) -> Dict:
+    if not path or not os.path.exists(path):
+        return {"nodes": {}, "edges": []}
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading JSON {path}: {e}")
+        return {"nodes": {}, "edges": []}
 
 
 def hex_to_rgb(hex_str: str) -> Tuple[int, int, int]:
@@ -312,13 +346,19 @@ def create_smooth_chart(width: int, height: int, x_labels: List[str], values: Li
     plt.savefig(buf, format='png', transparent=True)
     plt.close(fig)
     buf.seek(0)
-    return Image.open(buf).convert("RGBA").resize((width, height), Image.LANCZOS)
+    img = Image.open(buf).convert("RGBA")
+    if img.size != (width, height):
+        img = img.resize((width, height), Image.LANCZOS)
+    return img
 
 
 # ========= 地图生成逻辑 (Position View) =========
 
 
 class PositionMapRenderer:
+    # 解析结果缓存，避免重复读盘/解析
+    _parsed_cache: Dict[str, Dict] = {}
+
     def __init__(self, nether_json_path: str, end_json_path: str):
         self.maps = {}
         self.maps[0] = self._load_single_json(nether_json_path)
@@ -331,15 +371,10 @@ class PositionMapRenderer:
         self.font_mark = load_font(20, True)
 
     def _load_single_json(self, path: str) -> Dict:
-        if not path or not os.path.exists(path):
-            return {"nodes": {}, "edges": []}
+        if path in self._parsed_cache:
+            return self._parsed_cache[path]
 
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except Exception as e:
-            print(f"Error loading JSON {path}: {e}")
-            return {"nodes": {}, "edges": []}
+        data = _load_json_cached(path)
 
         nodes = {}
         edges = []
@@ -378,7 +413,9 @@ class PositionMapRenderer:
                     "p2": (nodes[tgt]["x"], nodes[tgt]["z"]),
                     "color": hex_to_rgb(color_hex),
                 })
-        return {"nodes": nodes, "edges": edges}
+        parsed = {"nodes": nodes, "edges": edges}
+        self._parsed_cache[path] = parsed
+        return parsed
 
     def _extract_name(self, attrs):
         if attrs.get("type") == "shmetro-basic":
@@ -414,17 +451,7 @@ class PositionMapRenderer:
         return (wx - cx) * scale + w / 2, (wz - cz) * scale + h / 2
 
     def create_arrow_marker(self, angle_deg: float, size: int, color: Tuple[int, int, int]) -> Image.Image:
-        canvas_size = int(size * 1.5)
-        img = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
-        d = ImageDraw.Draw(img)
-        cx, cy = canvas_size / 2, canvas_size / 2
-        half = size / 2
-        p1 = (cx + half, cy)
-        p2 = (cx - half, cy - half * 0.7)
-        p3 = (cx - half, cy + half * 0.7)
-        p4 = (cx - half * 0.4, cy)
-        d.polygon([p1, p2, p4, p3], fill=color)
-        return img.rotate(-angle_deg, resample=Image.BICUBIC)
+        return _cached_arrow_marker(angle_deg, size, color).copy()
 
     def _render_layer(
         self,
