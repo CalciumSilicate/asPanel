@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from sqlalchemy.orm import Session
 from typing import Any, List, Optional, Type, Tuple
+import datetime
 
 from backend.core import models, models as _models, schemas
 from backend.core.models import Server
@@ -658,9 +659,22 @@ def close_player_session(db: Session, server_id: int, player_uuid: str):
         models.PlayerSession.logout_time.is_(None)
     ).all()
     if sessions:
+        player = get_player_by_uuid(db, player_uuid)
+        now = datetime.datetime.now(datetime.timezone.utc)
         for s in sessions:
             s.logout_time = func.now()
             db.add(s)
+            # 删除该会话期间记录的坐标
+            if player:
+                try:
+                    db.query(models.PlayerPosition).filter(
+                        models.PlayerPosition.player_id == player.id,
+                        models.PlayerPosition.server_id == server_id,
+                        models.PlayerPosition.ts >= (s.login_time or now),
+                        models.PlayerPosition.ts <= now
+                    ).delete()
+                except Exception:
+                    pass
         db.commit()
 
 
