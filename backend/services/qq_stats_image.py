@@ -267,7 +267,7 @@ def create_smooth_chart(width: int, height: int, x_labels: List[str], values: Li
         if padding == 0:
             padding = y_max * 0.01
 
-        limit_bottom = max(0, y_min - padding)
+        limit_bottom = y_min - padding
         limit_top = y_max + padding
         ax.set_ylim(bottom=limit_bottom, top=limit_top)
     else:
