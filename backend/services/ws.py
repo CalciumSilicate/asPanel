@@ -13,7 +13,7 @@ from backend.core.ws import sio
 from backend.core.logger import logger
 from pathlib import Path
 from backend.core.database import get_db_context
-from backend.core import crud, models as _models, schemas
+from backend.core import crud, models as models, schemas
 from backend.core.dependencies import mcdr_manager
 from backend.services import onebot
 
@@ -393,7 +393,7 @@ async def _handle_single(payload: Dict[str, Any]):
                                 continue
                         if target is None:
                             continue
-                        row = _models.ChatMessage(
+                        row = models.ChatMessage(
                             group_id=g.id,
                             level="NORMAL",
                             source="game",
@@ -464,7 +464,35 @@ async def _handle_single(payload: Dict[str, Any]):
                                 p = crud.get_player_by_name(db, str(player_name))
                                 if not p:
                                     continue
-                                crud.add_player_position(db, p.id, int(server_id), ts_now, float(x), float(y), float(z), str(dim) if dim is not None else None)
+                                # 去重：若与该服最后一条位置相同则跳过
+                                last_pos = (
+                                    db.query(models.PlayerPosition)
+                                    .filter(
+                                        models.PlayerPosition.player_id == p.id,
+                                        models.PlayerPosition.server_id == int(server_id),
+                                    )
+                                    .order_by(models.PlayerPosition.ts.desc())
+                                    .first()
+                                )
+                                same_as_last = (
+                                    last_pos
+                                    and last_pos.x == float(x)
+                                    and last_pos.y == float(y)
+                                    and last_pos.z == float(z)
+                                    and (str(dim) if dim is not None else None) == last_pos.dim
+                                )
+                                if same_as_last:
+                                    continue
+                                crud.add_player_position(
+                                    db,
+                                    p.id,
+                                    int(server_id),
+                                    ts_now,
+                                    float(x),
+                                    float(y),
+                                    float(z),
+                                    str(dim) if dim is not None else None,
+                                )
                             except Exception:
                                 continue
                         logger.debug(f"[MCDR-WS] 位置上报已落库 | server={server_name} id={server_id} count={len(positions)}")
