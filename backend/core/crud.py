@@ -664,17 +664,16 @@ def close_player_session(db: Session, server_id: int, player_uuid: str):
         for s in sessions:
             s.logout_time = func.now()
             db.add(s)
-            # 删除该会话期间记录的坐标
-            if player:
-                try:
-                    db.query(models.PlayerPosition).filter(
-                        models.PlayerPosition.player_id == player.id,
-                        models.PlayerPosition.server_id == server_id,
-                        models.PlayerPosition.ts >= (s.login_time or now),
-                        models.PlayerPosition.ts <= now
-                    ).delete()
-                except Exception:
-                    pass
+        # 保留最近 24 小时的坐标，清理更早的坐标
+        if player:
+            try:
+                cutoff = now - datetime.timedelta(hours=24)
+                db.query(models.PlayerPosition).filter(
+                    models.PlayerPosition.player_id == player.id,
+                    models.PlayerPosition.ts < cutoff
+                ).delete()
+            except Exception:
+                pass
         db.commit()
 
 

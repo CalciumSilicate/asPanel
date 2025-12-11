@@ -3,6 +3,7 @@
 import asyncio
 import fnmatch
 import json
+import time
 from typing import Iterable, List, Optional, Set, Tuple
 from pathlib import Path
 
@@ -16,6 +17,33 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 DEFAULT_NAMESPACE = "minecraft"
+
+
+
+def _ingest_for_query(granularity: str, server_ids: Optional[List[int]], metrics: List[str]) -> None:
+    """
+    查询前触发一次“对齐到下一颗粒度边界”的入库，覆盖之前同 ts 的记录。
+    """
+    step = 600
+    if step is None:
+        return
+    now = int(time.time())
+    target_ts = ((now + step - 1) // step) * step  # 向上取整到下一个边界
+
+    with SessionLocal() as db:
+        if server_ids:
+            servers = [crud.get_server_by_id(db, sid) for sid in server_ids]
+            servers = [s for s in servers if s]
+        else:
+            servers = crud.get_all_servers(db)
+        for srv in servers:
+            stats_dir = _server_stats_dir(srv.path)
+            if not stats_dir.exists():
+                continue
+            try:
+                ingest_once_for_server(srv.id, stats_dir, metrics, target_ts=target_ts)
+            except Exception:
+                continue
 
 # ---------- 指标发现与过滤 ----------
 
@@ -123,7 +151,14 @@ def discover_metrics_from_all_servers() -> List[str]:
     return metrics
 
 
-def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], *, namespace: str = DEFAULT_NAMESPACE) -> int:
+def ingest_once_for_server(
+    server_id: int,
+    stats_dir: Path,
+    metrics: List[str],
+    *,
+    namespace: str = DEFAULT_NAMESPACE,
+    target_ts: Optional[int] = None,
+) -> int:
     """对单个服务器执行一次入库（使用主库 models 定义），包含：
     - 跳过未修改的 JSON（基于 JsonDim.last_read_time 与文件 mtime）
     - 缓存 JSON 解析结果，避免重复读取
@@ -136,7 +171,10 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
     import time
     now = int(time.time())
     step = 600
-    ts = now - (now % step)
+    if target_ts is not None:
+        ts = int(target_ts)
+    else:
+        ts = now - (now % step)
 
     files = sorted(stats_dir.glob("*.json"))
     if not files:
@@ -714,6 +752,9 @@ def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity
     if not allowed:
         return {uid: [] for uid in player_uuids}
 
+    # 查询前对齐一次入库
+    _ingest_for_query(granularity, server_ids, allowed)
+
     pairs = _normalize_metrics(allowed, namespace)
     db = SessionLocal()
     try:
@@ -924,6 +965,9 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
     if not allowed:
         return {uid: [] for uid in player_uuids}
 
+    # 查询前对齐一次入库
+    _ingest_for_query(granularity, server_ids, allowed)
+
     pairs = _normalize_metrics(allowed, namespace)
 
     db = SessionLocal()
@@ -1034,7 +1078,37 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
             _maybe_append(start_anchor, int(current_sum))
 
             # 然后沿每个边界推进
+            fetched_future = False
             for b in boundaries:
+                # 若遇到未来时间点（大于当前时间），尝试获取一次最新数据作为该点
+                if not fetched_future:
+                    try:
+                        now_ts = int(time.time())
+                        if b > now_ts:
+                            # 获取一次当前数据（不落库）
+                            # 复用 ingest_once_for_server 逻辑：聚合每个 server 的最新 totals
+                            with get_db_context() as tmp_db:
+                                live_sum = 0
+                                for mid in metric_ids:
+                                    for sid in server_ids or []:
+                                        latest = (
+                                            tmp_db.query(models.PlayerMetrics.total)
+                                            .filter(
+                                                models.PlayerMetrics.player_id == player_id,
+                                                models.PlayerMetrics.metric_id == mid,
+                                                models.PlayerMetrics.server_id == sid,
+                                            )
+                                            .order_by(models.PlayerMetrics.ts.desc())
+                                            .first()
+                                        )
+                                        if latest and latest[0] is not None:
+                                            live_sum += int(latest[0])
+                                current_sum = live_sum if live_sum else current_sum
+                                _maybe_append(b, int(current_sum))
+                            fetched_future = True
+                            continue
+                    except Exception:
+                        fetched_future = True  # 避免后续重复尝试
                 # 累加当前边界内的所有变更
                 while idx < len(events) and int(events[idx][0]) <= b:
                     _ts, sid, mid, tot = events[idx]
