@@ -195,7 +195,7 @@ def _calc_preset(label: str, offset: int = 0) -> TimeRange:
         end = convert_to_tz(end)
         label = f"上次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
         return TimeRange(start, end, start, end, "10min", label, [])
-    return TimeRange(now - timedelta(days=1), now, start, end, "1h", "最近", [])
+    return TimeRange(now - timedelta(days=1), now, now - timedelta(days=1), now, "1h", "最近", [])
 
 
 def _parse_custom_range(start_text: str, end_text: str) -> TimeRange:
@@ -309,15 +309,6 @@ def _build_charts(player_uuid: str, tr: TimeRange, server_ids: List[int]) -> Lis
             series = series_map.get(player_uuid, [])
             x, y = _series_to_xy(series, boundaries, unit, tr)
             total = round(sum(val for val in y), 2)
-            logger.debug([player_uuid])
-            logger.debug(metrics)
-            logger.debug(tr.granularity)
-            logger.debug(tr.start.isoformat())
-            logger.debug(tr.end.isoformat())
-        
-            logger.debug(label)
-            logger.debug(', '.join(str(i) for i in x))
-            logger.debug(', '.join(str(i) for i in y))
             if not any(y):
                 continue
         else:
@@ -328,15 +319,6 @@ def _build_charts(player_uuid: str, tr: TimeRange, server_ids: List[int]) -> Lis
             series = series_map.get(player_uuid, [])
             x, y = _series_to_xy(series, boundaries, unit, tr)
             total = y[-1] if y else 0
-            logger.debug([player_uuid])
-            logger.debug(metrics)
-            logger.debug(tr.granularity)
-            logger.debug(tr.start.isoformat())
-            logger.debug(tr.end.isoformat())
-        
-            logger.debug(label)
-            logger.debug(', '.join(str(i) for i in x))
-            logger.debug(', '.join(str(i) for i in y))
         charts.append({"label": label, "x": x, "y": y, "total": total})
     return charts
 
@@ -542,7 +524,6 @@ def build_stats_picture(
             data["location"] = {"x": pts[0][0], "z": pts[0][1], "dim": pts[0][2]}
         elif len(pts) > 1:
             data["path"] = pts
-        print(pts)
         
 
     img = render_combined_view(data, MAP_CONFIG)

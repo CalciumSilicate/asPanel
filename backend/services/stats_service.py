@@ -739,6 +739,13 @@ def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity
     start_ts = _parse_iso(start) if start else None
     end_ts = _parse_iso(end) if end else None
 
+    # 特殊处理：当 start == end 时，调用方通常期望获取“该边界前一个完整桶”的 delta。
+    # 例如 start=end=21:10 且粒度10min，应返回 (21:00,21:10] 的变更。
+    if start_ts is not None and end_ts is not None and start_ts == end_ts:
+        step = _GRANULARITY_SECONDS.get(granularity)
+        if step:
+            start_ts = start_ts - step
+
     # 输入指标按白名单/忽略进行过滤（支持通配符），并归一为 cat.item
     normed: List[str] = []
     for m in metrics:
