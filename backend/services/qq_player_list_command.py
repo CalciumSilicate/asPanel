@@ -3,6 +3,7 @@ import math
 import os
 import platform
 import functools
+import hashlib
 import httpx
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Tuple, Union, Optional
@@ -22,6 +23,15 @@ except ImportError:
     AVATAR_MC_PATH = None  # <--- 本地运行时的 fallback
     FONT_REGULAR_PATH = None
     FONT_BOLD_PATH = None
+
+# md5 工具与项目保持一致（与 /users/mc/avatar 的缓存命名相同）
+try:
+    from backend.core.utils import get_str_md5
+except ImportError:
+    def get_str_md5(text: str) -> str:
+        md5_obj = hashlib.md5()
+        md5_obj.update(text.encode("utf-8"))
+        return md5_obj.hexdigest()
 
 
 # ========= 主题配置 (保持一致性) =========
@@ -84,58 +94,76 @@ def _crop_to_circle(img: Image.Image, size: int) -> Image.Image:
     output.paste(img, (0, 0), mask)
     return output
 
-def _load_local_avatar(uuid: str) -> Optional[Image.Image]:
-    """尝试从本地存储加载头像"""
-    if not AVATAR_MC_PATH or not uuid:
+def _load_local_avatar(name: Optional[str] = None, uuid: Optional[str] = None) -> Optional[Image.Image]:
+    """尝试从本地缓存加载头像。
+
+    项目在 /users/mc/avatar 中以 md5(mc_name_or_uuid).png 方式缓存，
+    这里保持一致，并兼容早期 clean_uuid.png 命名。
+    """
+    if not AVATAR_MC_PATH:
         return None
-    
-    # 截图显示文件名是无横杠的 UUID (例如: 0ae9d2df...)
-    # 数据库存的可能是带横杠的 (例如: 0ae9d2df-...)，需要统一去杠
-    clean_uuid = uuid.replace("-", "")
-    file_path = AVATAR_MC_PATH / f"{clean_uuid}.png"
-    
-    if file_path.exists() and file_path.is_file():
-        try:
-            return Image.open(file_path).convert("RGBA")
-        except Exception:
-            return None
+
+    candidates: List[str] = []
+    if uuid:
+        candidates.append(get_str_md5(uuid))
+        candidates.append(uuid.replace("-", ""))  # legacy
+    if name:
+        candidates.append(get_str_md5(name))
+
+    seen = set()
+    for key in candidates:
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        file_path = (AVATAR_MC_PATH / f"{key}.png")
+        if file_path.exists() and file_path.is_file():
+            try:
+                return Image.open(file_path).convert("RGBA")
+            except Exception:
+                continue
     return None
 
+
 @functools.lru_cache(maxsize=128)
-def _download_remote_avatar(url: str) -> Image.Image:
-    """从网络下载头像 (带缓存)"""
-    try:
-        resp = httpx.get(url, timeout=3.0)
-        if resp.status_code == 200:
-            return Image.open(io.BytesIO(resp.content)).convert("RGBA")
-    except Exception:
-        pass
-    
-    # 下载失败返回默认头像 (灰色 Steve)
-    return Image.new("RGBA", (64, 64), (200, 200, 200))
+def _download_remote_avatar(mc_name_or_uuid: str) -> Optional[Image.Image]:
+    """从多个来源下载头像 (带缓存)。失败返回 None。"""
+    if not mc_name_or_uuid:
+        return None
+
+    urls = [
+        f"https://api.mcheads.org/avatar/{mc_name_or_uuid}",
+        f"https://mineskin.eu/helm/{mc_name_or_uuid}",
+        f"https://crafatar.com/avatars/{mc_name_or_uuid}",
+        f"https://mc-heads.net/avatar/{mc_name_or_uuid}",
+        f"https://minotar.net/helm/{mc_name_or_uuid}"
+    ]
+
+    timeout = httpx.Timeout(5.0, connect=3.0)
+    for url in urls:
+        try:
+            resp = httpx.get(url, timeout=timeout, follow_redirects=True)
+            if resp.status_code == 200 and resp.content:
+                return Image.open(io.BytesIO(resp.content)).convert("RGBA")
+        except Exception:
+            continue
+    return None
 
 def get_player_avatar(name: str, uuid: str = None, size: int = 64) -> Image.Image:
     """
     获取头像流程：
-    1. 如果有 UUID，优先去 AVATAR_MC_PATH 找本地文件。
-    2. 如果本地没有，去 Minotar 下载。
+    1. 优先去 AVATAR_MC_PATH 找本地 md5 缓存（兼容 legacy）。
+    2. 如果本地没有，按多来源顺序下载。
     3. 统一裁剪为圆形返回。
     """
-    raw_img = None
+    raw_img = _load_local_avatar(name=name, uuid=uuid)
 
-    # 1. 优先尝试本地查找 (仅当 UUID 存在时)
-    if uuid:
-        raw_img = _load_local_avatar(uuid)
-    
-    # 2. 如果本地没有，则尝试网络下载
     if raw_img is None:
-        if uuid:
-            url = f"https://minotar.net/helm/{uuid}/{size}.png"
-        else:
-            url = f"https://minotar.net/helm/{name}/{size}.png"
-        raw_img = _download_remote_avatar(url)
-    
-    # 3. 裁剪并返回
+        key = uuid or name
+        raw_img = _download_remote_avatar(key)
+
+    if raw_img is None:
+        raw_img = Image.new("RGBA", (64, 64), (200, 200, 200))
+
     return _crop_to_circle(raw_img, size)
 def format_duration(start_time: Union[datetime, float, None]) -> str:
     """计算并格式化在线时长 (统一使用 UTC 计算)"""
