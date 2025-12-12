@@ -260,6 +260,35 @@ def hex_to_rgb(hex_str: str) -> Tuple[int, int, int]:
         return (200, 200, 200)
 
 
+def _extract_map_json_paths(map_config: Any) -> Tuple[Optional[str], Optional[str]]:
+    """兼容 dict / pydantic model / 任意对象的 map_config 输入。"""
+    if not map_config:
+        return None, None
+    if isinstance(map_config, dict):
+        nether_json = map_config.get("nether_json") or map_config.get("the_nether") or map_config.get("the_overworld")
+        end_json = map_config.get("end_json") or map_config.get("the_end")
+    else:
+        nether_json = getattr(map_config, "nether_json", None) or getattr(map_config, "the_nether", None) or getattr(map_config, "the_overworld", None)
+        end_json = getattr(map_config, "end_json", None) or getattr(map_config, "the_end", None)
+    return (str(nether_json) if nether_json else None, str(end_json) if end_json else None)
+
+
+def _resolve_map_json_path(path: Optional[str]) -> Optional[str]:
+    """尝试解析相对路径到 BASE_DIR 下，避免工作目录不同导致找不到文件。"""
+    if not path:
+        return None
+    s = str(path)
+    if os.path.exists(s):
+        return s
+    try:
+        candidate = str((BASE_DIR / s).resolve())
+        if os.path.exists(candidate):
+            return candidate
+    except Exception:
+        pass
+    return s
+
+
 # ========= 图表生成逻辑 (Stats) =========
 
 
@@ -835,7 +864,7 @@ class PositionMapRenderer:
 
 def render_combined_view(
         data: Dict,
-        map_config: Dict[str, str],
+        map_config: Any = None,
 ):
     # === 先根据数据“预估”一个足够大的画布高度 ===
     totals = data.get("totals", [])
@@ -1001,7 +1030,10 @@ def render_combined_view(
             (0, 0, bbox[2] - bbox[0], bbox[3] - bbox[1]), radius=Theme.CARD_RADIUS, fill=255
         )
 
-        renderer = PositionMapRenderer(map_config.get("nether_json"), map_config.get("end_json"))
+        nether_json, end_json = _extract_map_json_paths(map_config)
+        nether_json = _resolve_map_json_path(nether_json)
+        end_json = _resolve_map_json_path(end_json)
+        renderer = PositionMapRenderer(nether_json, end_json)
         map_img = None
         info_data = {}
 

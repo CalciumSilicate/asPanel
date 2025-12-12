@@ -18,6 +18,17 @@ def _validate_core_config(v: Any) -> Any:
         return v
 
 
+def _validate_server_map(v: Any) -> Any:
+    if v is None:
+        return {}
+    if isinstance(v, str):
+        try:
+            return json.loads(v)
+        except json.JSONDecodeError:
+            raise ValueError("map is an invalid JSON string")
+    return v
+
+
 # --- Enums ---
 class ArchiveType(str, enum.Enum):
     SERVER = "SERVER"
@@ -150,12 +161,20 @@ class ServerCoreConfig(BaseModel):
     server_jar: Optional[str] = "server.jar"  # indicates core_version
 
 
+class ServerMapConfig(BaseModel):
+    # the_nether.json: nether + overworld
+    nether_json: Optional[str] = None
+    # the_end.json: end only
+    end_json: Optional[str] = None
+
+
 class Server(ServerBase):
     id: int
     path: str
     creator_id: int
 
     core_config: Annotated[ServerCoreConfig, BeforeValidator(_validate_core_config)]
+    map: Annotated[ServerMapConfig, BeforeValidator(_validate_server_map)] = Field(default_factory=ServerMapConfig)
 
     class Config:
         from_attributes = True

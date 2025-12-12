@@ -6,7 +6,8 @@ import ruamel.yaml
 import yaml
 import asyncio
 import psutil
-from fastapi import APIRouter, Depends, HTTPException, status, Response, BackgroundTasks
+import shutil
+from fastapi import APIRouter, Depends, HTTPException, status, Response, BackgroundTasks, UploadFile
 from sqlalchemy.orm import Session
 from typing import List
 from pathlib import Path
@@ -19,7 +20,7 @@ from backend.core.dependencies import mcdr_manager, server_service
 from backend.core.dependencies import task_manager
 from backend.core.schemas import TaskType, Role, PaperBuild, PaperBuildDownload, ServerCoreConfig
 from backend.tasks.background import background_download_jar, background_install_fabric, background_install_forge
-from backend.core.constants import DEFAULT_SERVER_PROPERTIES_CONFIG, PUBLIC_PLUGINS_DIRECTORIES
+from backend.core.constants import DEFAULT_SERVER_PROPERTIES_CONFIG, PUBLIC_PLUGINS_DIRECTORIES, MAP_JSON_STORAGE_PATH
 from backend.core.utils import get_file_sha1, get_file_sha256, get_fabric_jar_version, get_forge_jar_version
 from backend.core.api import (
     get_velocity_version_detail,
@@ -528,6 +529,77 @@ async def save_config_file(
         return {"message": "File saved successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
+
+
+@router.post("/servers/{server_id}/map-json/{map_kind}")
+async def upload_server_map_json(
+        server_id: int,
+        map_kind: str,
+        file: UploadFile,
+        db: Session = Depends(get_db),
+        _user: models.User = Depends(require_role(Role.ADMIN))
+):
+    """上传位置地图 json（nether/overworld 双维度、end 单维度）并写入 Server.map。"""
+    if map_kind not in ["nether", "end"]:
+        raise HTTPException(status_code=400, detail="Invalid map_kind, must be 'nether' or 'end'.")
+    if not file or not file.filename or not file.filename.lower().endswith(".json"):
+        raise HTTPException(status_code=400, detail="Invalid file, must be a .json file.")
+
+    server = crud.get_server_by_id(db, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    dst_dir = MAP_JSON_STORAGE_PATH / str(server_id)
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    dst_name = "the_nether.json" if map_kind == "nether" else "the_end.json"
+    dst_path = dst_dir / dst_name
+    tmp_path = dst_path.with_suffix(dst_path.suffix + ".tmp")
+
+    try:
+        with open(tmp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        # 先验证 JSON，避免写入脏数据
+        try:
+            json.loads(tmp_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
+        tmp_path.replace(dst_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"Failed to save map json: {e}")
+
+    # 更新 Server.map（JSON string）
+    try:
+        current = json.loads(getattr(server, "map", None) or "{}")
+        if not isinstance(current, dict):
+            current = {}
+    except Exception:
+        current = {}
+
+    if map_kind == "nether":
+        current["nether_json"] = str(dst_path)
+    else:
+        current["end_json"] = str(dst_path)
+
+    try:
+        server.map = json.dumps(current, ensure_ascii=False)
+        db.add(server)
+        db.commit()
+        db.refresh(server)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update server map config: {e}")
+
+    return {"message": "ok", "map": current}
 
 
 @router.post('/servers/import', status_code=status.HTTP_201_CREATED)

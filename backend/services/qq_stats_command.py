@@ -1,5 +1,7 @@
+import json
 import base64
 import io
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -10,16 +12,118 @@ from sqlalchemy.orm import Session
 
 
 from backend.core import crud, models
+from backend.core.constants import BASE_DIR
 from backend.core.database import get_db_context
 from backend.core.logger import logger
 from backend.core.utils import get_tz_info
 from backend.services import stats_service
 from backend.services.qq_stats_image import render_combined_view
 
-MAP_CONFIG = {
-    "nether_json": "the_nether.json",
-    "end_json": "the_end.json",
+DEFAULT_MAP_CONFIG = {
+    "nether_json": str(BASE_DIR / "the_nether.json"),
+    "end_json": str(BASE_DIR / "the_end.json"),
 }
+
+
+def _resolve_map_json_path(path: Optional[str]) -> Optional[str]:
+    """尽量把路径解析为可用的本地路径（兼容旧的相对路径写法）。"""
+    if not path:
+        return None
+    s = str(path)
+    if os.path.exists(s):
+        return s
+    try:
+        candidate = str((BASE_DIR / s).resolve())
+        if os.path.exists(candidate):
+            return candidate
+    except Exception:
+        pass
+    return s
+
+
+def _parse_server_map_config(raw: Optional[str]) -> Dict[str, Optional[str]]:
+    try:
+        obj = json.loads(raw or "{}")
+    except Exception:
+        obj = {}
+    if not isinstance(obj, dict):
+        obj = {}
+    # 兼容字段：旧/新 key 都尝试读一下
+    nether_json = obj.get("nether_json") or obj.get("the_nether") or obj.get("the_overworld")
+    end_json = obj.get("end_json") or obj.get("the_end")
+    return {
+        "nether_json": _resolve_map_json_path(nether_json),
+        "end_json": _resolve_map_json_path(end_json),
+    }
+
+
+def _pick_map_config(
+    db: Session,
+    server_ids: List[int],
+    server_dir_name: Optional[str],
+    positions: Optional[List[models.PlayerPosition]],
+) -> Dict[str, Optional[str]]:
+    """根据在线服务器/最近坐标所属服务器，从 DB 里挑选最合适的 map json 配置。"""
+    candidates: List[int] = []
+
+    # 1) 最近一次坐标所属服务器（最贴近本次展示的 path/location）
+    if positions:
+        try:
+            sid = int(getattr(positions[-1], "server_id", 0) or 0)
+            if sid:
+                candidates.append(sid)
+        except Exception:
+            pass
+
+    # 2) 在线所在服务器（按目录名匹配）
+    if server_dir_name and server_ids:
+        for sid in server_ids:
+            srv = crud.get_server_by_id(db, sid)
+            if not srv:
+                continue
+            try:
+                if os.path.basename(str(srv.path)) == str(server_dir_name):
+                    candidates.append(int(sid))
+                    break
+            except Exception:
+                continue
+
+    # 3) 组内/数据源服务器兜底
+    if server_ids:
+        candidates.extend([int(s) for s in server_ids if s is not None])
+
+    # 去重保序
+    uniq: List[int] = []
+    seen = set()
+    for sid in candidates:
+        if sid in seen:
+            continue
+        seen.add(sid)
+        uniq.append(sid)
+
+    # 优先找“配置了且文件存在”的
+    for sid in uniq:
+        srv = crud.get_server_by_id(db, sid)
+        if not srv:
+            continue
+        cfg = _parse_server_map_config(getattr(srv, "map", None))
+        if (cfg.get("nether_json") and os.path.exists(cfg["nether_json"])) or (cfg.get("end_json") and os.path.exists(cfg["end_json"])):
+            return cfg
+
+    # 次选：有配置但文件可能是相对路径/尚未落盘（交给渲染层再处理）
+    for sid in uniq:
+        srv = crud.get_server_by_id(db, sid)
+        if not srv:
+            continue
+        cfg = _parse_server_map_config(getattr(srv, "map", None))
+        if cfg.get("nether_json") or cfg.get("end_json"):
+            return cfg
+
+    # 最后兜底：使用仓库根目录的示例文件（如果存在）
+    return {
+        "nether_json": _resolve_map_json_path(DEFAULT_MAP_CONFIG.get("nether_json")),
+        "end_json": _resolve_map_json_path(DEFAULT_MAP_CONFIG.get("end_json")),
+    }
 
 
 _TOOLS = [
@@ -504,8 +608,20 @@ def build_stats_picture(
     data["totals"] = _build_totals(player.uuid, tr, effective_server_ids)
     data["charts"] = _build_charts(player.uuid, tr, effective_server_ids)
     # 位置/路径
+    map_config = {
+        "nether_json": _resolve_map_json_path(DEFAULT_MAP_CONFIG.get("nether_json")),
+        "end_json": _resolve_map_json_path(DEFAULT_MAP_CONFIG.get("end_json")),
+    }
+    positions: List[models.PlayerPosition] = []
     with get_db_context() as db:
-        positions = crud.get_player_positions(db, player.id, tr.real_start.astimezone(timezone.utc), tr.real_end.astimezone(timezone.utc), effective_server_ids)
+        try:
+            positions = crud.get_player_positions(db, player.id, tr.real_start.astimezone(timezone.utc), tr.real_end.astimezone(timezone.utc), effective_server_ids)
+        except Exception:
+            positions = []
+        try:
+            map_config = _pick_map_config(db, effective_server_ids, server_name, positions)
+        except Exception:
+            pass
     if positions:
         def _dim_to_int(d: Optional[str]) -> int:
             if d is None:
@@ -526,7 +642,7 @@ def build_stats_picture(
             data["path"] = pts
         
 
-    img = render_combined_view(data, MAP_CONFIG)
+    img = render_combined_view(data, map_config)
     logger.debug(f"生成统计图成功 | player={player.player_name} uuid={player.uuid} range={tr.start}~{tr.end} path={'yes' if 'path' in data else 'no'}")
     return _image_to_base64(img)
 
