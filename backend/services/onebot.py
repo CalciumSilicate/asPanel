@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
+from sqlalchemy import select
 
 from backend.core import crud, models, schemas
 from backend.core.utils import to_local_dt
@@ -20,7 +21,7 @@ from backend.core.database import get_db_context
 from backend.core.logger import logger
 from backend.core.ws import sio
 from backend.core.dependencies import mcdr_manager
-from backend.services import qq_stats_command
+from backend.services import qq_stats_command, qq_player_list_command
 
 router = APIRouter()
 
@@ -651,17 +652,106 @@ async def _cmd_show_players(group_id: int, qq_group: str) -> None:
     meta = _GROUP_META.get(group_id)
     if not meta:
         return
-    current = await _compute_group_players(group_id)
-    total = len(current)
-    lines = [f"{meta.get('name', 'Group')} ({total}):"]
+
+    # 1. 获取实时在线玩家名单 (由插件/RCON提供，这是最准确的在线名单)
     players_map = _PLAYERS_PROVIDER() or {}
-    for srv in meta.get("servers", []):
-        dir_name = srv.get("dir")
-        display = srv.get("name") or dir_name or "-"
-        online = sorted(players_map.get(dir_name, set()))
-        if online:
-            lines.append(f"- {display} ({len(online)}): {' '.join(online)}")
-    await _send_group_text(qq_group, "\n".join(lines))
+    
+    group_name = meta.get('name', 'Server Group')
+    servers_data = []
+
+    # 2. 使用数据库查询补充详细信息 (UUID, 头像, 在线时长)
+    with get_db_context() as db:
+        for srv in meta.get("servers", []):
+            dir_name = srv.get("dir")
+            server_id = srv.get("id")
+            display_name = srv.get("name") or dir_name or "Server"
+            
+            # 获取该服务器当前在线的玩家名字集合
+            online_names = sorted(list(players_map.get(dir_name, set())))
+            
+            player_list = []
+            
+            if not online_names:
+                continue
+
+            # 3. 数据库查询：查找这些玩家在该服务器的活跃会话
+            # 条件：server_id 匹配 + logout_time 为空 + 名字在在线列表中
+            # 修正：使用 login_time 字段
+            try:
+                stmt = (
+                    select(
+                        models.Player.player_name,
+                        models.Player.uuid,
+                        models.PlayerSession.login_time  # <--- 已修正为 login_time
+                    )
+                    .join(models.PlayerSession, models.Player.uuid == models.PlayerSession.player_uuid)
+                    .where(
+                        models.PlayerSession.server_id == server_id,
+                        models.PlayerSession.logout_time.is_(None),  # 未登出 = 当前在线
+                        models.Player.player_name.in_(online_names)
+                    )
+                    # 如果有异常数据导致一个人有多个活跃session，取最近的一个
+                    .order_by(models.PlayerSession.login_time.desc())
+                )
+                
+                # 构建映射表: { "Steve": {"uuid": "...", "login": datetime} }
+                session_map = {}
+                results = db.execute(stmt).all()
+                for row in results:
+                    p_name, p_uuid, p_login = row
+                    # 字典覆盖机制保证了如果有多条，我们只保留(因为排序过)最近的一条
+                    if p_name not in session_map:
+                        session_map[p_name] = {
+                            "uuid": p_uuid,
+                            "login_time": to_local_dt(p_login) if p_login else None
+                        }
+            except Exception as e:
+                logger.error(f"查询玩家 Session 失败: {e}")
+                session_map = {}
+
+            # 4. 组装最终数据
+            for name in online_names:
+                info = session_map.get(name, {})
+                player_list.append({
+                    "name": name,
+                    # 如果数据库没查到(比如新玩家还没同步Player表)，就为None，渲染器会显示默认头像
+                    "uuid": info.get("uuid"),          
+                    # 如果查不到Session，就为None，渲染器会隐藏时间显示
+                    "login_time": info.get("login_time") 
+                })
+            
+            servers_data.append({
+                "name": display_name,
+                "players": player_list
+            })
+
+    # 5. 生成图片
+    import asyncio
+    from io import BytesIO
+    loop = asyncio.get_running_loop()
+    
+    def _generate():
+        try:
+            img = qq_player_list_command.render_player_list_image(group_name, servers_data)
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            return base64.b64encode(buf.getvalue()).decode()
+        except Exception as e:
+            logger.error(f"生成在线列表图片出错: {e}")
+            return None
+
+    b64_str = await loop.run_in_executor(None, _generate)
+    
+    if b64_str:
+        await _send_group_image(qq_group, b64_str)
+    else:
+        # 降级回退到文本
+        lines = [f"{group_name}:"]
+        for sdata in servers_data:
+            p_names = [p['name'] for p in sdata['players']]
+            if p_names:
+                lines.append(f"- {sdata['name']} ({len(p_names)}): {' '.join(p_names)}")
+        await _send_group_text(qq_group, "\n".join(lines))
 
 
 async def _cmd_restart_server(group_id: int, qq_group: str, body: str) -> None:
