@@ -22,3 +22,5 @@ async-cache
 mcdreforged
 websocket-client
 litemapy
+matplotlib
+scipy

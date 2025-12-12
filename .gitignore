@@ -30,3 +30,5 @@ storages/
 reference/
 openapi_endpoints
 list_openapi_endpoints.py
+
+the_*.json

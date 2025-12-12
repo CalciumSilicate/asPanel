@@ -22,10 +22,20 @@ except (ModuleNotFoundError, ImportError):
     _HAS_WS = False
 
 _SERVER_NAME = Path(".").resolve().name
+_SERVER_ID: Optional[int] = None
 _SERVER_GROUPS: List[str] = []
 _LOCAL_PLAYERS: set[str] = set()
+_HANDLER: str = ""
+_IS_PROXY_SERVER: bool = False
 _CQ_PATTERN = re.compile(r"\[CQ:[^\]]*\]")
 _JOINED_LOCAL_PATTERN = re.compile(r"\[local\]\s+logged in with entity id\b")
+
+_POS_THREAD: Optional[threading.Thread] = None
+_POS_STOP = threading.Event()
+
+# 命令输出解析：data get entity <player> Pos / Dimension
+_POS_PATTERN = re.compile(r"\[([\-0-9\.eE]+)d?,\s*([\-0-9\.eE]+)d?,\s*([\-0-9\.eE]+)d?\]")
+_DIM_PATTERN = re.compile(r"data:\s*\"?([A-Za-z0-9_:]+)\"?")
 
 # ----------------------------- 工具函数与配置 -----------------------------
 
@@ -78,6 +88,29 @@ def _safe_json_dumps(obj: Any) -> str:
         return json.dumps(str(obj), ensure_ascii=False)
 
 
+def _query_pos_by_command(server: ServerInterface, player: str) -> tuple[Optional[tuple[float, float, float]], Optional[str]]:
+    """通过 vanilla data 命令获取坐标与维度，运行在服务端线程，无需 Data API。"""
+    pos = None
+    dim = None
+    try:
+        out = server.rcon_query(f"data get entity {player} Pos")
+        m = _POS_PATTERN.search(str(out))
+        if m:
+            pos = (float(m.group(1)), float(m.group(2)), float(m.group(3)))
+    except Exception:
+        pos = None
+    try:
+        out = server.rcon_query(f"data get entity {player} Dimension")
+        m = _DIM_PATTERN.search(str(out))
+        if m:
+            dim = m.group(1)
+    except Exception:
+        dim = None
+    return pos, dim
+
+
+
+
 def _read_env_config() -> dict[str, Any]:
     def _int_env(name: str, default: int) -> int:
         v = os.getenv(name)
@@ -91,6 +124,24 @@ def _read_env_config() -> dict[str, Any]:
         "flush_interval_ms": _int_env("ASPANEL_WS_FLUSH_INTERVAL_MS", 200),
     }
     return cfg
+
+
+def _read_mcdr_handler() -> str:
+    """
+    读取 MCDR config.yml 中的 handler 字段。
+    为避免额外依赖，这里使用简单的正则扫描。
+    """
+    cfg_path = Path("config.yml")
+    if not cfg_path.exists():
+        return ""
+    try:
+        text = cfg_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return ""
+    m = re.search(r"^handler\\s*:\\s*([A-Za-z0-9_\\-]+)", text, flags=re.MULTILINE)
+    if m:
+        return m.group(1).strip()
+    return ""
 
 
 # ----------------------------- WS 发送后台线程 -----------------------------
@@ -201,6 +252,13 @@ class WsSender:
                                                 global _SERVER_GROUPS
                                                 _SERVER_GROUPS = [str(x) for x in groups]
                                                 try:
+                                                    sid = data.get("server_id")
+                                                    if isinstance(sid, int):
+                                                        global _SERVER_ID
+                                                        _SERVER_ID = sid
+                                                except Exception:
+                                                    pass
+                                                try:
                                                     if logger:
                                                         logger.info(f"[asPanel] 收到组更新：{_SERVER_GROUPS}")
                                                 except Exception:
@@ -288,6 +346,8 @@ def _send_event(server: ServerInterface, event: str, data: dict[str, Any]) -> No
             data = dict(data)
             data.setdefault("server", _SERVER_NAME)
             data.setdefault("server_groups", list(_SERVER_GROUPS))
+            if _SERVER_ID is not None:
+                data.setdefault("server_id", _SERVER_ID)
         except Exception:
             pass
         # 事件级别日志
@@ -305,6 +365,96 @@ def _send_event(server: ServerInterface, event: str, data: dict[str, Any]) -> No
             server.logger.debug(f"[asPanel] 事件入队失败: {event}")
         except Exception:
             pass
+
+
+# ----------------------------- 位置上报 -----------------------------
+
+def _collect_player_positions(server: ServerInterface) -> List[dict[str, Any]]:
+    """获取玩家坐标与维度：仅使用 data 命令 + RCON。"""
+    if _IS_PROXY_SERVER:
+        return []
+    try:
+        players = list(_LOCAL_PLAYERS)
+    except Exception:
+        players = []
+    if not players:
+        return []
+
+    res: List[dict[str, Any]] = []
+    done = threading.Event()
+
+    def _task():
+        try:
+            for p in players:
+                try:
+                    pos = None
+                    dim = None
+                    if pos is None or dim is None:
+                        cmd_pos, cmd_dim = _query_pos_by_command(server, p)
+                        if pos is None:
+                            pos = cmd_pos
+                        if dim is None:
+                            dim = cmd_dim
+                    if pos is None:
+                        continue
+                    x, y, z = pos
+                    res.append({
+                        "player": p,
+                        "position": {"x": float(x), "y": float(y), "z": float(z)},
+                        "dimension": dim,
+                    })
+                except Exception:
+                    continue
+        finally:
+            done.set()
+
+    # 始终在独立后台线程里调用，避免阻塞 MCDR 任务线程
+    try:
+        t = threading.Thread(target=_task, name="aspanel-pos-query", daemon=True)
+        t.start()
+    except Exception:
+        return []
+
+    t.join(timeout=2.0)
+    return res
+
+
+def _report_positions(server: ServerInterface, reason: str) -> None:
+    """上报当前位置列表。reason: tick/join/leave"""
+    payload = _collect_player_positions(server)
+    if not payload:
+        try:
+            server.logger.debug(f"[asPanel] 位置上报跳过：未获取到玩家位置 | reason={reason}")
+        except Exception:
+            pass
+        return
+    try:
+        server.logger.debug(f"[asPanel] 上报玩家位置：reason={reason} count={len(payload)}")
+    except Exception:
+        pass
+    _send_event(server, "mcdr.player_position", {
+        "reason": reason,
+        "positions": payload,
+    })
+
+
+def _position_loop(server: ServerInterface):
+    """每 10 整秒上报一次位置。"""
+    while not _POS_STOP.is_set():
+        now = time.time()
+        # sleep 到下一个 10 秒边界
+        sleep_sec = max(0.1, 5 - (now % 5))
+        _POS_STOP.wait(sleep_sec)
+        if _POS_STOP.is_set():
+            break
+        try:
+            _report_positions(server, "tick")
+        except Exception:
+            try:
+                server.logger.debug("[asPanel] 定时位置上报失败")
+            except Exception:
+                pass
+
 
 
 # ----------------------------- 远端事件处理（转发显示） -----------------------------
@@ -579,6 +729,14 @@ def on_load(server: ServerInterface, prev_module: Any):
         server.register_help_message("!!aspanel_link", "asPanel Server Link：WS 上报 & 组同步")
     except Exception:
         pass
+    # 读取 handler，确定是否为代理服
+    global _HANDLER, _IS_PROXY_SERVER
+    _HANDLER = _read_mcdr_handler()
+    _IS_PROXY_SERVER = _HANDLER in {"velocity_handler", "bungeecord_handler"}
+    try:
+        server.logger.info(f"[asPanel] 当前 handler={_HANDLER or '未设置'} proxy={_IS_PROXY_SERVER}")
+    except Exception:
+        pass
     cfg = _read_env_config()
     try:
         server.logger.info(f"[asPanel] 插件加载 | WS={cfg.get('ws_url')}")
@@ -586,6 +744,12 @@ def on_load(server: ServerInterface, prev_module: Any):
         pass
     _get_sender(server)
     _send_event(server, "mcdr.plugin_loaded", {"plugin": PLUGIN_METADATA, "reload": prev_module is not None})
+    # 启动位置上报线程（非代理服）
+    global _POS_THREAD
+    if not _IS_PROXY_SERVER:
+        _POS_STOP.clear()
+        _POS_THREAD = threading.Thread(target=_position_loop, args=(server,), name="aspanel-pos-reporter", daemon=True)
+        _POS_THREAD.start()
 
 
 def on_unload(server: ServerInterface):
@@ -596,10 +760,19 @@ def on_unload(server: ServerInterface):
             _SENDER.stop(wait_seconds=0.5)
     except Exception:
         pass
+    try:
+        _POS_STOP.set()
+        if _POS_THREAD and _POS_THREAD.is_alive():
+            _POS_THREAD.join(timeout=0.5)
+    except Exception:
+        pass
 
 
 # ---- General / User Info ----
 def on_user_info(server: ServerInterface, info: Info):
+    if info.content == '!test':
+        _report_positions(server, "test_command")
+        server.say("[asPanel] 测试位置上报已发送")
     _send_event(server, "mcdr.user_info", {"info": _info_to_dict(info)})
 
 
@@ -645,6 +818,12 @@ def on_mcdr_stop(server: ServerInterface):
             _SENDER.stop(wait_seconds=0.5)
     except Exception:
         pass
+    try:
+        _POS_STOP.set()
+        if _POS_THREAD and _POS_THREAD.is_alive():
+            _POS_THREAD.join(timeout=0.5)
+    except Exception:
+        pass
 
 
 # ---- Player events ----
@@ -652,14 +831,23 @@ def on_mcdr_stop(server: ServerInterface):
 def on_player_joined(server: ServerInterface, player: str, info: Info):
     if _is_bot_joined(info):
         return
+    if _IS_PROXY_SERVER:
+        return
     _send_event(server, "mcdr.player_joined", {"player": str(player), "info": _info_to_dict(info)})
     try:
         _LOCAL_PLAYERS.add(str(player))
     except Exception:
         pass
+    try:
+        _report_positions(server, "join")
+        server.logger.info(f"[asPanel] 玩家加入：{player}，上报位置")
+    except Exception:
+        pass
 
 
 def on_player_left(server: ServerInterface, player: str):
+    if _IS_PROXY_SERVER:
+        return
     if str(player) not in _LOCAL_PLAYERS:
         return
     _send_event(server, "mcdr.player_left", {"player": str(player)})

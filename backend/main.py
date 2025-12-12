@@ -148,20 +148,26 @@ app.include_router(players_router.router)
 app.include_router(stats_router.router)
 
 
+async def warmup_cache():
+    logger.debug(f"后台任务：开始获取版本列表...")
+    try:
+        # 这里依然可以使用 gather 来加速
+        await asyncio.gather(
+            get_minecraft_versions_raw(),
+            get_velocity_versions_raw(),
+            get_fabric_game_version_list(),
+            get_forge_game_version_list(),
+            get_mcdr_plugins_catalogue()
+        )
+        logger.info("后台任务：版本列表全部更新完毕")
+    except Exception as e:
+        logger.error(f"后台预热失败: {e}")
+
 @app.on_event("startup")
 async def startup_event():
     logger.warning(f"服务器启动中")
     asyncio.create_task(cpu_sampler())
-    logger.debug(f"正在获取Vanilla版本列表...")
-    await get_minecraft_versions_raw()
-    logger.debug(f"正在获取Velocity版本列表...")
-    await get_velocity_versions_raw()
-    logger.debug(f"正在获取Fabric支持版本列表...")
-    await get_fabric_game_version_list()
-    logger.debug(f"正在获取Forge支持版本列表...")
-    await get_forge_game_version_list()
-    logger.debug(f"正在获取MCDR插件列表...")
-    await get_mcdr_plugins_catalogue()
+    asyncio.create_task(warmup_cache())
     try:
         await onebot.startup_sync()
     except Exception:
