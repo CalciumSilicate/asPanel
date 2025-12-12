@@ -711,14 +711,76 @@
                         请从上方选择服务器作为初始登录点，并可拖拽标签来排序。
                       </p>
                     </div>
-                  </el-form-item>
-                </div>
-              </div>
-              <!-- 其他不支持的类型 -->
-              <div v-if="currentView === 'unsupported_type'">
-                <p>此服务器类型 ({{ configFormData.core_config.server_type }}) 的配置界面暂未支持。</p>
-              </div>
-            </el-form>
+	                  </el-form-item>
+	                </div>
+	              </div>
+	
+	              <el-divider>地图配置</el-divider>
+	              <el-form-item>
+	                <div class="form-item-wrapper">
+	                  <div class="form-item-label">
+	                    <span>位置地图 (主世界 + 下界)</span>
+	                    <small>the_nether.json</small>
+	                  </div>
+	                  <div class="form-item-control map-upload-control">
+	                    <div class="map-upload-row">
+	                      <el-upload
+	                          ref="netherMapUploaderRef"
+	                          v-model:file-list="netherMapFileList"
+	                          action="#"
+	                          :auto-upload="false"
+	                          :limit="1"
+	                          accept=".json"
+	                          :on-exceed="files => handleMapExceed('nether', files)"
+	                          :on-change="file => handleMapFileChange('nether', file)"
+	                      >
+	                        <el-button :icon="Upload">选择文件</el-button>
+	                      </el-upload>
+	                      <el-button type="primary" @click="handleUploadMapJson('nether')" :loading="isUploadingMap.nether">
+	                        上传
+	                      </el-button>
+	                      <el-tag v-if="currentConfigServer?.map?.nether_json" type="success" plain>已配置</el-tag>
+	                      <el-tag v-else type="info" plain>未配置</el-tag>
+	                    </div>
+	                    <div class="map-upload-hint">用于主世界 + 下界双维度路径渲染</div>
+	                  </div>
+	                </div>
+	              </el-form-item>
+	              <el-form-item>
+	                <div class="form-item-wrapper">
+	                  <div class="form-item-label">
+	                    <span>位置地图 (末地)</span>
+	                    <small>the_end.json</small>
+	                  </div>
+	                  <div class="form-item-control map-upload-control">
+	                    <div class="map-upload-row">
+	                      <el-upload
+	                          ref="endMapUploaderRef"
+	                          v-model:file-list="endMapFileList"
+	                          action="#"
+	                          :auto-upload="false"
+	                          :limit="1"
+	                          accept=".json"
+	                          :on-exceed="files => handleMapExceed('end', files)"
+	                          :on-change="file => handleMapFileChange('end', file)"
+	                      >
+	                        <el-button :icon="Upload">选择文件</el-button>
+	                      </el-upload>
+	                      <el-button type="primary" @click="handleUploadMapJson('end')" :loading="isUploadingMap.end">
+	                        上传
+	                      </el-button>
+	                      <el-tag v-if="currentConfigServer?.map?.end_json" type="success" plain>已配置</el-tag>
+	                      <el-tag v-else type="info" plain>未配置</el-tag>
+	                    </div>
+	                    <div class="map-upload-hint">用于末地单维度路径渲染</div>
+	                  </div>
+	                </div>
+	              </el-form-item>
+	              <!-- 其他不支持的类型 -->
+	              <div v-if="currentView === 'unsupported_type'">
+	                <p>此服务器类型 ({{ configFormData.core_config.server_type }}) 的配置界面暂未支持。</p>
+	              </div>
+	            </el-form>
           </div>
 
           <!-- 视图 4: 正在下载 -->
@@ -1102,15 +1164,15 @@
   </div>
 </template>
 
-<script setup>
-import {
-  Plus, VideoPlay, SwitchButton, Refresh, Monitor, ArrowDown, Promotion,
-  View, Hide, Setting, Cpu, Delete, Document, FolderAdd, FolderChecked, Rank, Loading, CircleClose, DocumentCopy
-} from '@element-plus/icons-vue';
-import {io} from 'socket.io-client';
-import apiClient from '@/api';
-import {ref, onMounted, onUnmounted, reactive, computed, nextTick, watch} from 'vue';
-import {useRouter} from 'vue-router';
+	<script setup>
+	import {
+	  Plus, VideoPlay, SwitchButton, Refresh, Monitor, ArrowDown, Promotion,
+	  View, Hide, Setting, Cpu, Delete, Document, FolderAdd, FolderChecked, Rank, Loading, CircleClose, DocumentCopy, Upload
+	} from '@element-plus/icons-vue';
+	import {io} from 'socket.io-client';
+	import apiClient from '@/api';
+	import {ref, onMounted, onUnmounted, reactive, computed, nextTick, watch} from 'vue';
+	import {useRouter} from 'vue-router';
 import {ElMessage, ElMessageBox, ElLoading, ElNotification} from 'element-plus';
 import ConfigEditor from '@/components/ConfigEditor.vue';
 import draggable from 'vuedraggable';
@@ -1150,11 +1212,11 @@ const createDialogVisible = ref(false);
 const importDialogVisible = ref(false);
 const copyDialogVisible = ref(false); // 新增
 const commandDialogVisible = ref(false);
-const configDialogVisible = ref(false);
-const formRef = ref(null);
-const newServerForm = ref({name: ''});
-const importFormRef = ref(null);
-const importServerForm = ref({name: '', path: ''});
+	const configDialogVisible = ref(false);
+	const formRef = ref(null);
+	const newServerForm = ref({name: ''});
+	const importFormRef = ref(null);
+	const importServerForm = ref({name: '', path: ''});
 const copyFormRef = ref(null); // 新增
 const copyServerForm = ref({name: ''}); // 新增
 const sourceServerToCopy = ref(null); // 新增
@@ -1178,8 +1240,17 @@ const showSnapshots = ref(false);
 const showExperiments = ref(false);
 const isDownloading = ref(false);
 const downloadProgress = ref(0);
-const currentView = ref('select_type');
-const dialogState = reactive({isNewSetup: false, coreFileExists: false, configFileExists: false});
+	const currentView = ref('select_type');
+	const dialogState = reactive({isNewSetup: false, coreFileExists: false, configFileExists: false});
+	
+	// --- 地图 JSON 上传状态 ---
+	const netherMapUploaderRef = ref(null);
+	const endMapUploaderRef = ref(null);
+	const netherMapFileList = ref([]);
+	const endMapFileList = ref([]);
+	const netherMapFile = ref(null);
+	const endMapFile = ref(null);
+	const isUploadingMap = reactive({nether: false, end: false});
 const editorDialog = reactive({
   visible: false,
   loading: false,
@@ -1414,26 +1485,32 @@ const fetchServers = async () => {
   }
 };
 
-const resetDialogState = () => {
-  if (pollInterval) clearInterval(pollInterval);
-  pollInterval = null;
-  configLoading.value = false;
-  isSavingConfig.value = false;
-  isDownloading.value = false;
-  downloadProgress.value = 0;
-  currentView.value = 'select_type';
-  configFormData.value = {};
-  selectedServerTypeForSetup.value = '';
-  // 重置 Velocity 相关状态
-  velocitySubServersList.value = [];
-  velocityTryOrderNames.value = [];
-  addSubServerDialogVisible.value = false;
-  selectedSubServersFromDialog.value = [];
+	const resetDialogState = () => {
+	  if (pollInterval) clearInterval(pollInterval);
+	  pollInterval = null;
+	  configLoading.value = false;
+	  isSavingConfig.value = false;
+	  isDownloading.value = false;
+	  downloadProgress.value = 0;
+	  currentView.value = 'select_type';
+	  configFormData.value = {};
+	  selectedServerTypeForSetup.value = '';
+	  netherMapFile.value = null;
+	  endMapFile.value = null;
+	  netherMapFileList.value = [];
+	  endMapFileList.value = [];
+	  isUploadingMap.nether = false;
+	  isUploadingMap.end = false;
+	  // 重置 Velocity 相关状态
+	  velocitySubServersList.value = [];
+	  velocityTryOrderNames.value = [];
+	  addSubServerDialogVisible.value = false;
+	  selectedSubServersFromDialog.value = [];
   Object.assign(dialogState, {isNewSetup: false, coreFileExists: false, configFileExists: false,});
 };
 
-const openConfigDialog = async (server) => {
-  resetDialogState();
+	const openConfigDialog = async (server) => {
+	  resetDialogState();
 
   currentConfigServer.value = server;
   configDialogVisible.value = true;
@@ -1493,8 +1570,53 @@ const openConfigDialog = async (server) => {
     configDialogVisible.value = false;
   } finally {
     configLoading.value = false;
-  }
-};
+	  }
+	};
+
+	const handleMapFileChange = (kind, uploadFile) => {
+	  const raw = uploadFile?.raw || null;
+	  if (kind === 'nether') netherMapFile.value = raw;
+	  if (kind === 'end') endMapFile.value = raw;
+	};
+
+	const handleMapExceed = (kind, files) => {
+	  const uploader = kind === 'nether' ? netherMapUploaderRef.value : endMapUploaderRef.value;
+	  uploader?.clearFiles?.();
+	  uploader?.handleStart?.(files?.[0]);
+	};
+
+	const handleUploadMapJson = async (kind) => {
+	  if (!currentConfigServer.value) return;
+	  if (kind !== 'nether' && kind !== 'end') return;
+	
+	  const file = kind === 'nether' ? netherMapFile.value : endMapFile.value;
+	  if (!file) {
+	    ElMessage.warning('请选择要上传的 JSON 文件');
+	    return;
+	  }
+	
+	  isUploadingMap[kind] = true;
+	  const formData = new FormData();
+	  formData.append('file', file);
+	  try {
+	    const {data} = await apiClient.post(`/api/servers/${currentConfigServer.value.id}/map-json/${kind}`, formData);
+	    ElMessage.success('地图 JSON 上传成功');
+	    currentConfigServer.value.map = {...(currentConfigServer.value.map || {}), ...(data.map || {})};
+	    if (kind === 'nether') {
+	      netherMapFile.value = null;
+	      netherMapFileList.value = [];
+	      netherMapUploaderRef.value?.clearFiles?.();
+	    } else {
+	      endMapFile.value = null;
+	      endMapFileList.value = [];
+	      endMapUploaderRef.value?.clearFiles?.();
+	    }
+	  } catch (error) {
+	    ElMessage.error(error.response?.data?.detail || '上传失败');
+	  } finally {
+	    isUploadingMap[kind] = false;
+	  }
+	};
 const confirmServerType = async () => {
   configFormData.value.core_config.server_type = selectedServerTypeForSetup.value;
   const type = configFormData.value.core_config.server_type;
@@ -2513,13 +2635,32 @@ onUnmounted(() => {
   line-height: 1.3;
 }
 
-.form-item-control {
-  flex: 0 1 55%;
-  display: flex;
-  justify-content: flex-start;
-  align-items: center;
-  gap: 10px;
-}
+	.form-item-control {
+	  flex: 0 1 55%;
+	  display: flex;
+	  justify-content: flex-start;
+	  align-items: center;
+	  gap: 10px;
+	}
+	
+	.map-upload-control {
+	  flex-direction: column;
+	  align-items: flex-start;
+	  gap: 6px;
+	}
+	
+	.map-upload-row {
+	  display: flex;
+	  align-items: center;
+	  gap: 10px;
+	  flex-wrap: wrap;
+	}
+	
+	.map-upload-hint {
+	  color: var(--el-text-color-secondary);
+	  font-size: 12px;
+	  line-height: 1.3;
+	}
 
 .config-dialog :deep(.input-short) {
   width: 120px;

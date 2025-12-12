@@ -4,6 +4,7 @@ import time
 import sys
 import asyncio
 import socketio
+from sqlalchemy import text
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -36,6 +37,32 @@ from backend.core.ws import sio
 from backend.core.logger import logger
 
 models.Base.metadata.create_all(bind=engine)
+
+def _ensure_db_schema():
+    """轻量级 Schema 迁移（SQLite）。
+
+    本项目未集成 Alembic，这里仅做向后兼容的 ADD COLUMN。
+    """
+    try:
+        with engine.begin() as conn:
+            cols = conn.execute(text("PRAGMA table_info(servers)")).fetchall()
+            names = set()
+            for row in cols:
+                try:
+                    names.add(row._mapping.get("name"))
+                except Exception:
+                    # PRAGMA: cid,name,type,notnull,dflt_value,pk
+                    names.add(row[1] if len(row) > 1 else None)
+            names.discard(None)
+
+            if "map" not in names:
+                conn.execute(text("ALTER TABLE servers ADD COLUMN map TEXT DEFAULT '{}'"))
+            conn.execute(text("UPDATE servers SET map='{}' WHERE map IS NULL"))
+    except Exception:
+        # 不阻塞启动；缺列时相关功能会不可用
+        pass
+
+_ensure_db_schema()
 
 app = FastAPI(title="AS Panel API")
 

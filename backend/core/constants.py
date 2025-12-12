@@ -46,6 +46,10 @@ AVATAR_MC_PATH = STORAGE_ROOT_PATH / "avatars" / "mc"
 AVATAR_MC_PATH.mkdir(exist_ok=True)
 AVATAR_URL_PREFIX = "/avatars/"
 
+# --- Directory that stores uploaded map jsons (nether/overworld, end) ---
+MAP_JSON_STORAGE_PATH = STORAGE_ROOT_PATH / "maps"
+MAP_JSON_STORAGE_PATH.mkdir(exist_ok=True)
+
 # --- Directory that stores All archives ---
 ARCHIVE_STORAGE_PATH = STORAGE_ROOT_PATH / "archives"
 ARCHIVE_STORAGE_PATH.mkdir(exist_ok=True)

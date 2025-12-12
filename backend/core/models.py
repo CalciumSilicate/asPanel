@@ -30,6 +30,7 @@ class Server(Base):
     name = Column(String, unique=True)
     path = Column(String)
     core_config = Column(String, default=json.dumps(DEFAULT_CORE_CONFIG))
+    map = Column(String, default="{}")
 
 
 class Download(Base):
