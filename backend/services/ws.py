@@ -3,6 +3,7 @@
 import json
 import asyncio
 import time
+import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from typing import Any, Dict, List, Optional, Set
@@ -12,7 +13,7 @@ from backend.core.ws import sio
 from backend.core.logger import logger
 from pathlib import Path
 from backend.core.database import get_db_context
-from backend.core import crud, models as _models, schemas
+from backend.core import crud, models as models, schemas
 from backend.core.dependencies import mcdr_manager
 from backend.services import onebot
 
@@ -37,6 +38,26 @@ def _get_server_path_by_name(server_name: str) -> Optional[str]:
     except Exception:
         return None
     return None
+
+
+def _is_proxy_server(server_name: str) -> bool:
+    """根据数据库记录判断该服务器是否为代理（velocity/bungeecord）。"""
+    try:
+        with get_db_context() as db:
+            for s in crud.get_all_servers(db):
+                try:
+                    if Path(s.path).name != server_name:
+                        continue
+                    import json as _json
+                    cfg = _json.loads(s.core_config or "{}")
+                    stype = (cfg.get("server_type") or "").lower()
+                    if stype in {"velocity", "bungeecord"}:
+                        return True
+                except Exception:
+                    continue
+    except Exception:
+        return False
+    return False
 
 
 async def _playtime_tick_loop():
@@ -372,7 +393,7 @@ async def _handle_single(payload: Dict[str, Any]):
                                 continue
                         if target is None:
                             continue
-                        row = _models.ChatMessage(
+                        row = models.ChatMessage(
                             group_id=g.id,
                             level="NORMAL",
                             source="game",
@@ -404,6 +425,86 @@ async def _handle_single(payload: Dict[str, Any]):
     try:
         from backend.services import player_manager as _pm
         _ensure_playtime_task()
+        if event in {"mcdr.player_joined", "mcdr.player_left", "mcdr.player_position"} and isinstance(data, dict):
+            server_name = str(data.get("server") or "")
+            if server_name and _is_proxy_server(server_name):
+                try:
+                    logger.debug(f"[MCDR-WS] 代理服务器事件已忽略 | server={server_name} event={event}")
+                except Exception:
+                    pass
+                return
+
+        if event == "mcdr.player_position" and isinstance(data, dict):
+            server_name = str(data.get("server") or "")
+            positions = data.get("positions") or []
+            server_id = data.get("server_id")
+            if not server_id and server_name:
+                try:
+                    with get_db_context() as db:
+                        for s in crud.get_all_servers(db):
+                            if Path(s.path).name == server_name:
+                                server_id = s.id
+                                break
+                except Exception:
+                    server_id = None
+            ts_now = datetime.datetime.now(datetime.timezone.utc)
+            if server_id:
+                try:
+                    with get_db_context() as db:
+                        for item in positions:
+                            try:
+                                player_name = item.get("player")
+                                pos = item.get("position") or {}
+                                x = pos.get("x")
+                                y = pos.get("y")
+                                z = pos.get("z")
+                                dim = item.get("dimension")
+                                if player_name is None or x is None or y is None or z is None:
+                                    continue
+                                p = crud.get_player_by_name(db, str(player_name))
+                                if not p:
+                                    continue
+                                # 去重：若与该服最后一条位置相同则跳过
+                                last_pos = (
+                                    db.query(models.PlayerPosition)
+                                    .filter(
+                                        models.PlayerPosition.player_id == p.id,
+                                        models.PlayerPosition.server_id == int(server_id),
+                                    )
+                                    .order_by(models.PlayerPosition.ts.desc())
+                                    .first()
+                                )
+                                same_as_last = (
+                                    last_pos
+                                    and last_pos.x == float(x)
+                                    and last_pos.y == float(y)
+                                    and last_pos.z == float(z)
+                                    and (str(dim) if dim is not None else None) == last_pos.dim
+                                )
+                                if same_as_last:
+                                    continue
+                                crud.add_player_position(
+                                    db,
+                                    p.id,
+                                    int(server_id),
+                                    ts_now,
+                                    float(x),
+                                    float(y),
+                                    float(z),
+                                    str(dim) if dim is not None else None,
+                                )
+                            except Exception:
+                                continue
+                        logger.debug(f"[MCDR-WS] 位置上报已落库 | server={server_name} id={server_id} count={len(positions)}")
+                except Exception:
+                    logger.exception("[MCDR-WS] 位置上报入库失败")
+            try:
+                logger.debug(f"[MCDR-WS] 收到位置上报 | server={server_name} id={server_id} count={len(positions)} reason={data.get('reason')}")
+            except Exception as e:
+                logger.error(f"[MCDR-WS] 位置上报日志记录失败: {e}")
+                pass
+            return
+
         if event == "mcdr.player_joined" and isinstance(data, dict):
             server_name = str(data.get("server") or "")
             player = str(data.get("player") or "")
@@ -429,6 +530,18 @@ async def _handle_single(payload: Dict[str, Any]):
                             _pm.ensure_play_time_if_empty()
                         except Exception:
                             pass
+                except Exception:
+                    pass
+                # 记录会话开始 (Session)
+                try:
+                    with get_db_context() as db:
+                        rec = crud.get_player_by_name(db, player)
+                        if rec and rec.uuid:
+                            server_path = _get_server_path_by_name(server_name)
+                            if server_path:
+                                srv = crud.get_server_by_path(db, server_path)
+                                if srv:
+                                    crud.create_player_session(db, srv.id, rec.uuid)
                 except Exception:
                     pass
                 try:
@@ -492,6 +605,18 @@ async def _handle_single(payload: Dict[str, Any]):
                         JOINED_TIME.get(server_name, {}).pop(player, None)
                     except Exception:
                         pass
+                except Exception:
+                    pass
+                # 记录会话结束 (Session)
+                try:
+                    with get_db_context() as db:
+                        rec = crud.get_player_by_name(db, player)
+                        if rec and rec.uuid:
+                            server_path = _get_server_path_by_name(server_name)
+                            if server_path:
+                                srv = crud.get_server_by_path(db, server_path)
+                                if srv:
+                                    crud.close_player_session(db, srv.id, rec.uuid)
                 except Exception:
                     pass
                 try:
@@ -693,11 +818,20 @@ async def broadcast_server_link_update(server_name: str, group_names: List[str])
         await onebot.refresh_bindings()
     except Exception:
         pass
+    server_id: Optional[int] = None
+    try:
+        with get_db_context() as db:
+            for s in crud.get_all_servers(db):
+                if Path(s.path).name == server_name:
+                    server_id = s.id
+                    break
+    except Exception:
+        server_id = None
     dead: List[WebSocket] = []
     msg = json.dumps({
         "event": "sl.group_update",
         "ts": "-",
-        "data": {"server": server_name, "server_groups": group_names}
+        "data": {"server": server_name, "server_groups": group_names, "server_id": server_id}
     }, ensure_ascii=False)
     sent = 0
     for ws, bound in list(_PLUGIN_CLIENTS.items()):

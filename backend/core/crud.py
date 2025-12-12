@@ -1,8 +1,10 @@
 # backend/core/crud.py
 
 import json
+from datetime import datetime
 from sqlalchemy.orm import Session
 from typing import Any, List, Optional, Type, Tuple
+import datetime
 
 from backend.core import models, models as _models, schemas
 from backend.core.models import Server
@@ -233,6 +235,10 @@ def create_server(db: Session, server: schemas.ServerCreateInternal, creator_id:
 def delete_server(db: Session, server_id: int) -> Optional[models.Server]:
     db_server = get_server_by_id(db, server_id)
     if db_server:
+        # Cleanup sessions
+        db.query(models.PlayerSession).filter(models.PlayerSession.server_id == server_id).delete()
+        # Cleanup player positions
+        db.query(models.PlayerPosition).filter(models.PlayerPosition.server_id == server_id).delete()
         db.delete(db_server)
         db.commit()
     return db_server
@@ -568,6 +574,7 @@ def create_server_link_group(db: Session, payload: schemas.ServerLinkGroupCreate
     rec = models.ServerLinkGroup(
         name=payload.name,
         server_ids=json.dumps(payload.server_ids or []),
+        data_source_ids=json.dumps(payload.data_source_ids or []),
         chat_bindings=json.dumps(_normalize_chat_bindings(payload.chat_bindings)),
     )
     db.add(rec)
@@ -589,6 +596,8 @@ def update_server_link_group(db: Session, group_id: int, payload: schemas.Server
         rec.name = payload.name
     if payload.server_ids is not None:
         rec.server_ids = json.dumps(payload.server_ids)
+    if payload.data_source_ids is not None:
+        rec.data_source_ids = json.dumps(payload.data_source_ids)
     if payload.chat_bindings is not None:
         rec.chat_bindings = json.dumps(_normalize_chat_bindings(payload.chat_bindings))
     db.add(rec)
@@ -622,6 +631,88 @@ def cleanup_server_link_groups_for_server(db: Session, server_id: int) -> int:
             continue
     db.commit()
     return updated
+
+
+# --- Player Session CRUD ---
+def create_player_session(db: Session, server_id: int, player_uuid: str) -> models.PlayerSession:
+    # 强制结束该玩家在该服可能存在的未关闭会话
+    close_player_session(db, server_id, player_uuid)
+    
+    sess = models.PlayerSession(
+        server_id=server_id,
+        player_uuid=player_uuid,
+        logout_time=None
+    )
+    # login_time 有 server_default，但也可用 python 传
+    db.add(sess)
+    db.commit()
+    db.refresh(sess)
+    return sess
+
+
+def close_player_session(db: Session, server_id: int, player_uuid: str):
+    from sqlalchemy.sql import func
+    # 查找所有未结束的会话并关闭（理论上应该只有一个，但为了稳健处理所有）
+    sessions = db.query(models.PlayerSession).filter(
+        models.PlayerSession.server_id == server_id,
+        models.PlayerSession.player_uuid == player_uuid,
+        models.PlayerSession.logout_time.is_(None)
+    ).all()
+    if sessions:
+        player = get_player_by_uuid(db, player_uuid)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        for s in sessions:
+            s.logout_time = func.now()
+            db.add(s)
+
+        db.commit()
+
+
+# --- Player Position CRUD ---
+def add_player_position(
+    db: Session,
+    player_id: int,
+    server_id: int,
+    ts: datetime,
+    x: float,
+    y: float,
+    z: float,
+    dim: Optional[str] = None,
+) -> models.PlayerPosition:
+    row = models.PlayerPosition(
+        player_id=player_id,
+        server_id=server_id,
+        ts=ts,
+        x=x,
+        y=y,
+        z=z,
+        dim=dim,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_player_positions(
+    db: Session,
+    player_id: int,
+    start: datetime,
+    end: datetime,
+    server_ids: Optional[List[int]] = None,
+) -> List[models.PlayerPosition]:
+    q = db.query(models.PlayerPosition).filter(
+        models.PlayerPosition.player_id == player_id,
+        models.PlayerPosition.ts >= start,
+        models.PlayerPosition.ts <= end,
+    )
+    if server_ids:
+        q = q.filter(models.PlayerPosition.server_id.in_(server_ids))
+    return q.order_by(models.PlayerPosition.ts.asc()).all()
+
+
+def delete_player_positions_for_server(db: Session, server_id: int) -> int:
+    return db.query(models.PlayerPosition).filter(models.PlayerPosition.server_id == server_id).delete()
 
 
 # --- System Settings CRUD ---

@@ -626,7 +626,7 @@ class PBRestorePayload(BaseModel):
 class ServerLinkGroupBase(BaseModel):
     name: str
     server_ids: List[int] = Field(default_factory=list)
-    # chat_bindings 留空待定：使用 Any 数组占位，便于后续扩展结构
+    data_source_ids: List[int] = Field(default_factory=list)
     chat_bindings: List[Any] = Field(default_factory=list)
 
 
@@ -637,6 +637,7 @@ class ServerLinkGroupCreate(ServerLinkGroupBase):
 class ServerLinkGroupUpdate(BaseModel):
     name: Optional[str] = None
     server_ids: Optional[List[int]] = None
+    data_source_ids: Optional[List[int]] = None
     chat_bindings: Optional[List[Any]] = None
 
 
@@ -648,7 +649,7 @@ class ServerLinkGroup(ServerLinkGroupBase):
         from_attributes = True
 
     # 解析数据库中的 JSON 字符串字段
-    @field_validator('server_ids', 'chat_bindings', mode='before')
+    @field_validator('server_ids', 'chat_bindings', 'data_source_ids', mode='before')
     @classmethod
     def parse_json_array(cls, v: Any):
         if isinstance(v, str):

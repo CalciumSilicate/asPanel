@@ -3,6 +3,7 @@
 import asyncio
 import fnmatch
 import json
+import time
 from typing import Iterable, List, Optional, Set, Tuple
 from pathlib import Path
 
@@ -16,6 +17,46 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 DEFAULT_NAMESPACE = "minecraft"
+
+
+
+_LAST_QUERY_INGEST_AT: float = 0.0
+
+
+def _ingest_for_query(granularity: str, server_ids: Optional[List[int]], metrics: List[str]) -> None:
+    """
+    查询前触发一次“对齐到下一颗粒度边界”的入库，覆盖之前同 ts 的记录。
+    """
+    step = _GRANULARITY_SECONDS.get(granularity)
+    if step is None:
+        return
+    now_float = time.time()
+    global _LAST_QUERY_INGEST_AT
+    if now_float - _LAST_QUERY_INGEST_AT < 10:
+        return
+    _LAST_QUERY_INGEST_AT = now_float
+    now = int(now_float)
+    target_ts = ((now + step - 1) // step) * step  # 向上取整到下一个边界
+
+    with SessionLocal() as db:
+        if server_ids:
+            servers = [crud.get_server_by_id(db, sid) for sid in server_ids]
+            servers = [s for s in servers if s]
+        else:
+            servers = crud.get_all_servers(db)
+        for srv in servers:
+            stats_dir = _server_stats_dir(srv.path)
+            if not stats_dir.exists():
+                continue
+            try:
+                # 查询前 save-all，单服 30 秒防抖
+                proc = mcdr_manager.processes.get(srv.id)
+                if proc and proc.returncode is None:
+                    _run_save_all_sync(srv, debounce_sec=30.0)
+                    time.sleep(1.0)
+                ingest_once_for_server(srv.id, stats_dir, metrics, target_ts=target_ts)
+            except Exception:
+                continue
 
 # ---------- 指标发现与过滤 ----------
 
@@ -102,9 +143,20 @@ def _server_stats_dir(server_path: str | Path) -> Path:
     base = Path(server_path)
     return base / "server" / "world" / "stats"
 
+# 防抖缓存
+_DISCOVER_CACHE_TS: float = 0.0
+_DISCOVER_CACHE: List[str] = []
+_DISCOVER_CACHE_WINDOW = 10  # 秒
+_SAVEALL_LAST_TS: dict[int, float] = {}
+
 
 def discover_metrics_from_all_servers() -> List[str]:
-    """从所有服务器的 stats 目录中发现可用指标并应用过滤。"""
+    """从所有服务器的 stats 目录中发现可用指标并应用过滤（带防抖）。"""
+    global _DISCOVER_CACHE_TS, _DISCOVER_CACHE
+    now = time.time()
+    if now - _DISCOVER_CACHE_TS < _DISCOVER_CACHE_WINDOW and _DISCOVER_CACHE:
+        return list(_DISCOVER_CACHE)
+
     db = SessionLocal()
     try:
         servers = crud.get_all_servers(db)
@@ -120,10 +172,41 @@ def discover_metrics_from_all_servers() -> List[str]:
     if not metrics:
         # 回退至少包含游玩时长（历史兼容）
         metrics = ["custom.play_one_minute"]
+    _DISCOVER_CACHE_TS = now
+    _DISCOVER_CACHE = list(metrics)
     return metrics
 
 
-def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], *, namespace: str = DEFAULT_NAMESPACE) -> int:
+def _run_save_all_sync(server: models.Server, debounce_sec: float) -> None:
+    """在同步上下文执行 save-all，带每服防抖。"""
+    now = time.time()
+    last = _SAVEALL_LAST_TS.get(server.id, 0.0)
+    if now - last < debounce_sec:
+        return
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # 已在事件循环中：安排异步任务执行，避免 asyncio.run 抛错导致协程未 awaited
+            loop.create_task(mcdr_manager.send_command(server, "save-all"))
+        else:
+            asyncio.run(mcdr_manager.send_command(server, "save-all"))
+    except Exception:
+        logger.exception("发送 save-all 命令失败")
+    _SAVEALL_LAST_TS[server.id] = now
+
+
+def ingest_once_for_server(
+    server_id: int,
+    stats_dir: Path,
+    metrics: List[str],
+    *,
+    namespace: str = DEFAULT_NAMESPACE,
+    target_ts: Optional[int] = None,
+) -> int:
     """对单个服务器执行一次入库（使用主库 models 定义），包含：
     - 跳过未修改的 JSON（基于 JsonDim.last_read_time 与文件 mtime）
     - 缓存 JSON 解析结果，避免重复读取
@@ -136,7 +219,10 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
     import time
     now = int(time.time())
     step = 600
-    ts = now - (now % step)
+    if target_ts is not None:
+        ts = int(target_ts)
+    else:
+        ts = now - (now % step)
 
     files = sorted(stats_dir.glob("*.json"))
     if not files:
@@ -186,13 +272,15 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
                 return 0, 1
             return int(curr_total - prev_total), 0
 
+        dropped = 0
         for fp in files:
             fn = fp.name
             mtime = int(fp.stat().st_mtime)
             last_read = json_dim_map.get(fn)
-            # 若文件未变化（mtime <= last_read_time），跳过
             if last_read is not None and mtime <= int(last_read or 0):
+                dropped += 1
                 continue
+            logger.debug(f"服务器 {server_id} 处理 stats 文件：{fn} | mtime={mtime} | last_read={last_read}")
 
             # 读取并解析 JSON（一次）
             try:
@@ -247,7 +335,8 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
                 curr_total = _read_metric_from_json(js, metric)
                 prev_total = prev_map.get(mid)
                 delta, new = _compute_delta(prev_total, curr_total)
-                if delta == 0 and not new:
+                # target_ts/force_update：即便 delta==0 也需要写入新桶
+                if delta == 0 and not new and target_ts is None:
                     continue
                 if curr_total == 0 and new:
                     continue
@@ -278,7 +367,7 @@ def ingest_once_for_server(server_id: int, stats_dir: Path, metrics: List[str], 
             crud.upsert_json_dim_last_read(db, server_id, fn, now)
 
             rows_written_total += updated_count + len(to_add)
-
+        logger.debug(f"服务器 {server_id} 处理 stats 文件完成：总文件数={len(files)} | 跳过未改动文件={dropped} | 写入行数={rows_written_total}")
         db.commit()
         logger.debug(f"服务器 {server_id} 入库完成 stats_dir={stats_dir} | rows_written={rows_written_total}")
         return rows_written_total
@@ -354,9 +443,13 @@ async def ingest_scheduler_loop():
                 try:
                     proc = mcdr_manager.processes.get(srv.id)
                     if proc and proc.returncode is None:
-                        logger.debug(f"服务器运行中，试发送命令save-all server_id={srv.id}")
-                        await mcdr_manager.send_command(srv, 'save-all')
-                        await asyncio.sleep(1.0)
+                        last_ts = _SAVEALL_LAST_TS.get(srv.id, 0.0)
+                        now_ts = time.time()
+                        if now_ts - last_ts >= 3.0:
+                            logger.debug(f"服务器运行中，试发送命令save-all server_id={srv.id}")
+                            await mcdr_manager.send_command(srv, 'save-all')
+                            _SAVEALL_LAST_TS[srv.id] = now_ts
+                            await asyncio.sleep(1.0)
                 except Exception:
                     pass
                 # 入库放到线程池中，避免阻塞事件循环
@@ -701,6 +794,13 @@ def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity
     start_ts = _parse_iso(start) if start else None
     end_ts = _parse_iso(end) if end else None
 
+    # 特殊处理：当 start == end 时，调用方通常期望获取“该边界前一个完整桶”的 delta。
+    # 例如 start=end=21:10 且粒度10min，应返回 (21:00,21:10] 的变更。
+    if start_ts is not None and end_ts is not None and start_ts == end_ts:
+        step = _GRANULARITY_SECONDS.get(granularity)
+        if step:
+            start_ts = start_ts - step
+
     # 输入指标按白名单/忽略进行过滤（支持通配符），并归一为 cat.item
     normed: List[str] = []
     for m in metrics:
@@ -713,6 +813,9 @@ def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity
     allowed = _filter_metrics(normed, namespace=namespace)
     if not allowed:
         return {uid: [] for uid in player_uuids}
+
+    # 查询前对齐一次入库，使用全局发现的 metrics（防抖）
+    _ingest_for_query(granularity, server_ids, discover_metrics_from_all_servers())
 
     pairs = _normalize_metrics(allowed, namespace)
     db = SessionLocal()
@@ -899,7 +1002,8 @@ def leaderboard_delta(*, metrics: List[str], start: Optional[str] = None, end: O
 def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity: str = "10min",
                      start: Optional[str] = None, end: Optional[str] = None,
                      namespace: str = DEFAULT_NAMESPACE,
-                     server_ids: Optional[List[int]] = None) -> Dict[str, List[Tuple[int, int]]]:
+                     server_ids: Optional[List[int]] = None,
+                     fill_missing: bool = False) -> Dict[str, List[Tuple[int, int]]]:
     if not player_uuids:
         raise ValueError("必须提供至少一个 player_uuid")
     if not metrics:
@@ -913,15 +1017,18 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
     # 输入指标按白名单/忽略进行过滤（支持通配符），并归一为 cat.item
     normed: List[str] = []
     for m in metrics:
-      nm = _normalize_metric(m)
-      try:
-          cat, item = nm.split('.', 1)
-          normed.append(f"{cat}.{item}")
-      except Exception:
-          continue
+        nm = _normalize_metric(m)
+        try:
+            cat, item = nm.split('.', 1)
+            normed.append(f"{cat}.{item}")
+        except Exception:
+            continue
     allowed = _filter_metrics(normed, namespace=namespace)
     if not allowed:
         return {uid: [] for uid in player_uuids}
+
+    # 查询前对齐一次入库，使用全局发现的 metrics（防抖）
+    _ingest_for_query(granularity, server_ids, discover_metrics_from_all_servers())
 
     pairs = _normalize_metrics(allowed, namespace)
 
@@ -932,15 +1039,13 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
             return {uid: [] for uid in player_uuids}
 
         result: Dict[str, List[Tuple[int, int]]] = {}
-        # 查询阶段参数：不补零桶；仅在值变化或首点时输出
-        fill_missing = False
         for uid in player_uuids:
             player_id = db.scalar(select(models.Player.id).where(models.Player.uuid == uid))
             if player_id is None:
                 result[uid] = []
                 continue
 
-            # 使用统一边界构建（仅用于锚点），total 使用 "<= boundary" 最新值
+            # 使用统一边界构建
             boundaries, _delta_by_ts, start_anchor, end_boundary = _build_boundaries_for_player(
                 db, player_id=player_id, metric_ids=metric_ids, granularity=granularity,
                 start_ts=start_ts, end_ts=end_ts, server_ids=server_ids,
@@ -949,10 +1054,8 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                 result[uid] = []
                 continue
 
-            first_b = boundaries[0]
-
-            # 1) 计算基线：在 first_b 时刻（含）之前，每个 (server, metric) 的最新 total 之和
-            # 修复：需要按 player_id 参与聚合与连接，否则会将不同玩家在同一时刻的记录混合
+            # --- 修正点 1: 基线计算应当在 start_anchor (整个时间窗口的左边界)，而不是 boundaries[0] ---
+            # 计算基线：在 start_anchor 时刻（含）之前，每个 (server, metric) 的最新 total 之和
             latest_baseline = (
                 select(
                     models.PlayerMetrics.server_id.label('server_id'),
@@ -963,7 +1066,7 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                 .where(
                     models.PlayerMetrics.player_id == player_id,
                     models.PlayerMetrics.metric_id.in_(metric_ids),
-                    models.PlayerMetrics.ts <= first_b,
+                    models.PlayerMetrics.ts <= start_anchor,  # 改为 start_anchor
                 )
                 .group_by(
                     models.PlayerMetrics.server_id,
@@ -999,7 +1102,7 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                 totals_by_key[key] = val
                 current_sum += val
 
-            # 2) 拉取 first_b..last_ts 期间的所有变更事件（按时间升序），逐边界推进最新值
+            # --- 修正点 2: 抓取 start_anchor 之后的所有事件 ---
             events_q = (
                 select(
                     models.PlayerMetrics.ts,
@@ -1010,7 +1113,7 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                 .where(
                     models.PlayerMetrics.player_id == player_id,
                     models.PlayerMetrics.metric_id.in_(metric_ids),
-                    models.PlayerMetrics.ts > first_b,
+                    models.PlayerMetrics.ts > start_anchor, # 改为 start_anchor
                     models.PlayerMetrics.ts <= end_boundary,
                 )
                 .order_by(models.PlayerMetrics.ts.asc())
@@ -1019,22 +1122,56 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                 events_q = events_q.where(models.PlayerMetrics.server_id.in_(server_ids))
             events = db.execute(events_q).all()
 
-            # 3) 沿边界推进，应用事件更新 current_sum，并记录 total 值
             out: List[Tuple[int, int]] = []
             idx = 0
-            # 首点：输出基线；若不补零桶，则保留首点作为锚点
             last_output_val = None
+
             def _maybe_append(point_ts: int, val: int):
                 nonlocal last_output_val
                 if fill_missing:
                     out.append((point_ts, int(val)))
                 else:
+                    # 仅当值变化或这是第一个点时输出，减少数据量
                     if last_output_val is None or int(val) != int(last_output_val):
                         out.append((point_ts, int(val)))
                         last_output_val = int(val)
 
-            _maybe_append(first_b, int(current_sum))
-            for b in boundaries[1:]:
+            # --- 修正点 3: 先输出起始点 (start_anchor) ---
+            _maybe_append(start_anchor, int(current_sum))
+
+            # 然后沿每个边界推进
+            fetched_future = False
+            for b in boundaries:
+                # 若遇到未来时间点（大于当前时间），尝试获取一次最新数据作为该点
+                if not fetched_future:
+                    try:
+                        now_ts = int(time.time())
+                        if b > now_ts:
+                            # 获取一次当前数据（不落库）
+                            # 复用 ingest_once_for_server 逻辑：聚合每个 server 的最新 totals
+                            with get_db_context() as tmp_db:
+                                live_sum = 0
+                                for mid in metric_ids:
+                                    for sid in server_ids or []:
+                                        latest = (
+                                            tmp_db.query(models.PlayerMetrics.total)
+                                            .filter(
+                                                models.PlayerMetrics.player_id == player_id,
+                                                models.PlayerMetrics.metric_id == mid,
+                                                models.PlayerMetrics.server_id == sid,
+                                            )
+                                            .order_by(models.PlayerMetrics.ts.desc())
+                                            .first()
+                                        )
+                                        if latest and latest[0] is not None:
+                                            live_sum += int(latest[0])
+                                current_sum = live_sum if live_sum else current_sum
+                                _maybe_append(b, int(current_sum))
+                            fetched_future = True
+                            continue
+                    except Exception:
+                        fetched_future = True  # 避免后续重复尝试
+                # 累加当前边界内的所有变更
                 while idx < len(events) and int(events[idx][0]) <= b:
                     _ts, sid, mid, tot = events[idx]
                     key = (int(sid), int(mid))
@@ -1044,6 +1181,7 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                         current_sum += (new_val - prev_val)
                         totals_by_key[key] = new_val
                     idx += 1
+                # 输出当前边界的状态
                 _maybe_append(b, int(current_sum))
 
             result[uid] = out

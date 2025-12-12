@@ -3,7 +3,7 @@
 import json
 import enum
 from sqlalchemy import Column, Integer, String, DateTime, Enum as SQLAlchemyEnum, Text, Boolean, PrimaryKeyConstraint, \
-    UniqueConstraint, ForeignKey, Index
+    UniqueConstraint, ForeignKey, Index, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from backend.core.constants import DEFAULT_CORE_CONFIG, DEFAULT_USER_ROLE
@@ -88,6 +88,7 @@ class ServerLinkGroup(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
     server_ids = Column(String, default="[]")
+    data_source_ids = Column(String, default="[]")
     chat_bindings = Column(String, default="[]")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -155,3 +156,28 @@ class JsonDim(Base):
         UniqueConstraint("server_id", "json_file_name", name="uq_json_dim_server_file"),
         Index("idx_json_dim_server", "server_id"),
     )
+
+
+class PlayerSession(Base):
+    __tablename__ = "player_sessions"
+    id = Column(Integer, primary_key=True, index=True)
+    player_uuid = Column(String, index=True, nullable=False)
+    server_id = Column(Integer, ForeignKey("servers.id"), nullable=False, index=True)
+    login_time = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    logout_time = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_player_sessions_lookup", "player_uuid", "server_id", "logout_time"),
+    )
+
+
+class PlayerPosition(Base):
+    __tablename__ = "player_positions"
+    id = Column(Integer, primary_key=True, index=True)
+    player_id = Column(Integer, ForeignKey("players.id"), nullable=False, index=True)
+    server_id = Column(Integer, ForeignKey("servers.id"), nullable=False, index=True)
+    ts = Column(DateTime(timezone=True), nullable=False, index=True)
+    x = Column(Float, nullable=True)
+    y = Column(Float, nullable=True)
+    z = Column(Float, nullable=True)
+    dim = Column(String, nullable=True)
