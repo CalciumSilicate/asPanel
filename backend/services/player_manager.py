@@ -139,12 +139,14 @@ async def refresh_missing_official_names() -> dict:
     return stats
 
 
-async def refresh_offline_names() -> dict:
+async def refresh_offline_names(player_uuids: Optional[list] = None) -> dict:
     """逻辑3：为所有 is_offline==True 的记录再次尝试获取官方玩家名；若获取成功且不同则更新，并将 is_offline=False。"""
     updated = 0
     tried = 0
     with get_db_context() as db:
         players = db.query(models.Player).filter(models.Player.is_offline == True).all()  # noqa: E712
+        if player_uuids is not None:
+            players = [p for p in players if p.uuid in player_uuids]
         for p in players:
             tried += 1
             name = await fetch_official_name(p.uuid)
@@ -162,6 +164,28 @@ async def refresh_offline_names() -> dict:
         pass
     return stats
 
+async def refresh_all_names() -> dict:
+    """逻辑4：为所有玩家再次尝试获取官方玩家名；若获取成功且不同则更新，并将 is_offline=False。"""
+    updated = 0
+    tried = 0
+    with get_db_context() as db:
+        players = db.query(models.Player).all()
+        for p in players:
+            tried += 1
+            name = await fetch_official_name(p.uuid)
+            if name and name != (p.player_name or None):
+                crud.update_player_name(db, p, name=name, is_offline=False)
+                updated += 1
+                try:
+                    logger.debug(f"[PlayerManager] 更名成功 | uuid={p.uuid} name={name}")
+                except Exception:
+                    pass
+    stats = {"updated": updated, "tried": tried}
+    try:
+        logger.info(f"[PlayerManager] 重试玩家名 | 成功={updated} 尝试={tried}")
+    except Exception:
+        pass
+    return stats
 
 def _read_ticks_from_stats(stats_file: Path) -> int:
     try:

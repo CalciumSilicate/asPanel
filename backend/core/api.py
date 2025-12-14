@@ -4,6 +4,7 @@ import httpx
 from typing import Any, Dict, List, Optional
 from cache import AsyncTTL
 from fastapi.exceptions import HTTPException
+import uuid
 
 from backend.core.constants import (
     MINECRAFT_VERSION_MANIFEST_URL,
@@ -152,3 +153,16 @@ async def get_forge_installer_meta(mc_version: str, forge_version: str) -> Dict[
 @AsyncTTL(time_to_live=3600, maxsize=1)
 async def get_mcdr_plugins_catalogue(_r=None) -> Dict:
     return await async_get_json(MCDR_PLUGINS_CATALOGUE_URL)
+
+
+@AsyncTTL(time_to_live=3600, maxsize=16384)
+async def get_uuid_by_name(player_name: str) -> Optional[str]:
+    url = f"https://api.mojang.com/users/profiles/minecraft/{player_name}"
+    try:
+        response = await async_get(url)
+        if response.status_code == 200:
+            data = response.json()
+            return str(uuid.UUID(data.get("id")))
+    except HTTPException:
+        return None
+    return None

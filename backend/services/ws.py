@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Set
 from backend.core.utils import to_local_dt
 from backend.core.ws import sio
 from backend.core.logger import logger
+from backend.core.api import get_uuid_by_name
 from pathlib import Path
 from backend.core.database import get_db_context
 from backend.core import crud, models as models, schemas
@@ -22,6 +23,7 @@ LAST_ADDED_TIME: Dict[str, Dict[str, float]] = {}
 JOINED_TIME: Dict[str, Dict[str, float]] = {}
 SERVER_LAST_BOUNDARY: Dict[str, float] = {}
 _PLAYTIME_TASK: Optional[asyncio.Task] = None
+_PLAYER_SYNC_LOCK = asyncio.Lock()
 
 onebot.set_players_provider(lambda: PLAYERS_BY_SERVER)
 
@@ -521,15 +523,34 @@ async def _handle_single(payload: Dict[str, Any]):
                     JOINED_TIME.setdefault(server_name, {})[player] = time.time()
                 except Exception:
                     pass
-                # 补齐可能新增的 UUID 记录
+                # 若数据库不存在该玩家记录，则补齐 UUID 并刷新玩家名（避免每次加入都全量扫描）
                 try:
-                    stats = _pm.ensure_players_from_worlds()
-                    if (stats or {}).get('added'):
-                        logger.info(f"[MCDR-WS] 新增玩家UUID记录 | 新增={stats.get('added')} 总计扫描={stats.get('found')}")
-                        try:
-                            _pm.ensure_play_time_if_empty()
-                        except Exception:
-                            pass
+                    need_sync = False
+                    with get_db_context() as db:
+                        need_sync = crud.get_player_by_name(db, player) is None
+                        need_identify_online = crud.get_player_by_name(db, player) is not None and crud.get_player_by_name(db, player).is_offline is False
+                    if need_sync:
+                        async with _PLAYER_SYNC_LOCK:
+                            stats = _pm.ensure_players_from_worlds()
+                            try:
+                                await _pm.refresh_missing_official_names()
+                            except Exception:
+                                pass
+                            if (stats or {}).get('added'):
+                                logger.info(
+                                    f"[MCDR-WS] 新增玩家UUID记录 | 新增={stats.get('added')} 总计扫描={stats.get('found')}"
+                                )
+                                try:
+                                    _pm.ensure_play_time_if_empty()
+                                except Exception:
+                                    pass
+                    elif need_identify_online:
+                        async with _PLAYER_SYNC_LOCK:
+                            try:
+                                uuid = await get_uuid_by_name(player)
+                                await _pm.refresh_offline_names([uuid] if uuid is not None else None)
+                            except Exception:
+                                pass
                 except Exception:
                     pass
                 # 记录会话开始 (Session)

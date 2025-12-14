@@ -61,6 +61,13 @@ async def refresh_playtime(background_tasks: BackgroundTasks,
     background_tasks.add_task(player_manager.recalc_all_play_time)
     return {"scheduled": True, "task": "refresh-playtime"}
 
+@router.post("/refresh-all-names")
+async def refresh_names_official(background_tasks: BackgroundTasks,
+                                 _user: models.User = Depends(require_role(Role.ADMIN))):
+    """逻辑2+3（触发）：为所有玩家尝试解析正版玩家名，失败则标记为离线玩家；为离线玩家再次尝试解析玩家名。"""
+    background_tasks.add_task(player_manager.refresh_all_names)
+    return {"scheduled": True, "task": "refresh-all-names"}
+
 
 @router.get("/whitelist-uuids", response_model=List[str])
 async def get_whitelist_uuids(db: Session = Depends(get_db),
