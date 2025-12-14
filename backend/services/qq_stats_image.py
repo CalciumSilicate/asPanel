@@ -238,8 +238,7 @@ def _cached_arrow_marker(angle_deg: float, size: int, color: Tuple[int, int, int
     return img.rotate(-angle_deg, resample=Image.BICUBIC)
 
 
-@functools.lru_cache(maxsize=4)
-def _load_json_cached(path: str) -> Dict:
+def _load_json(path: str) -> Dict:
     if not path or not os.path.exists(path):
         return {"nodes": {}, "edges": []}
     try:
@@ -385,9 +384,6 @@ def create_smooth_chart(width: int, height: int, x_labels: List[str], values: Li
 
 
 class PositionMapRenderer:
-    # 解析结果缓存，避免重复读盘/解析
-    _parsed_cache: Dict[str, Dict] = {}
-
     def __init__(self, nether_json_path: str, end_json_path: str):
         self.maps = {}
         self.maps[0] = self._load_single_json(nether_json_path)
@@ -400,10 +396,7 @@ class PositionMapRenderer:
         self.font_mark = load_font(20, True)
 
     def _load_single_json(self, path: str) -> Dict:
-        if path in self._parsed_cache:
-            return self._parsed_cache[path]
-
-        data = _load_json_cached(path)
+        data = _load_json(path)
 
         nodes = {}
         edges = []
@@ -442,9 +435,7 @@ class PositionMapRenderer:
                     "p2": (nodes[tgt]["x"], nodes[tgt]["z"]),
                     "color": hex_to_rgb(color_hex),
                 })
-        parsed = {"nodes": nodes, "edges": edges}
-        self._parsed_cache[path] = parsed
-        return parsed
+        return {"nodes": nodes, "edges": edges}
 
     def _extract_name(self, attrs):
         if attrs.get("type") == "shmetro-basic":
