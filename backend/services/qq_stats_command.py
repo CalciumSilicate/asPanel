@@ -753,7 +753,7 @@ def build_report_from_command(
         if not player:
             if tokens:
                  return False, f"未找到玩家 '{tokens[0]}'，且您尚未绑定无法查询自身。"
-            return False, "未找到玩家或尚未绑定（请前往：https://panel.assx.top/ 注册，注册时绑定QQ与游戏名）"
+            return False, "未找到玩家或尚未绑定（请前往：http://assx.top:5173/ 注册，注册时绑定QQ与游戏名）"
 
         # 设置用于生成头像的 QQ 号
         if target_qq:
