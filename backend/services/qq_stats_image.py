@@ -1058,17 +1058,58 @@ def render_combined_view(
             map_raw = renderer.generate_path_image(inner_w, inner_h, path_pts, data.get("mc_avatar", ""))
             map_img = map_raw
             title = "最近轨迹"
-            info_data = {"is_path": True}
+            # path 模式也显示一个信息卡片（取最后一个点）
+            info_data = {}
+            try:
+                last = path_pts[-1] if path_pts else None
+                if last and len(last) >= 3:
+                    last_x = float(last[0])
+                    last_z = float(last[1])
+                    last_dim = int(last[2])
+                    gid = 1 if last_dim == 1 else 0
+                    mx, mz = renderer._transform_coord(last_x, last_z, last_dim)
+                    sorted_stations = renderer._get_sorted_stations(mx, mz, gid)
+                    nearest = sorted_stations[0] if sorted_stations else (None, 0)
+
+                    # 判断是否为双图拼接（末地 + 其他）
+                    has_end = any((len(p) >= 3 and int(p[2]) == 1) for p in path_pts)
+                    has_other = any((len(p) >= 3 and int(p[2]) != 1) for p in path_pts)
+
+                    info_data = {
+                        "x": last_x,
+                        "z": last_z,
+                        "dim": last_dim,
+                        "nearest_name": nearest[0]["name"] if nearest[0] else None,
+                        "nearest_dist": nearest[1],
+                        "_split_path": bool(has_end and has_other),
+                    }
+            except Exception:
+                info_data = {}
 
         if map_img:
             container = Image.new("RGBA", (inner_w, inner_h), (0, 0, 0, 0))
             container.paste(map_img, (0, 0))
             img.paste(container, (bbox[0], bbox[1]), mask)
 
-            if info_data and "is_path" not in info_data:
+            if info_data and all(k in info_data for k in ["x", "z", "dim"]):
                 card_w, card_h = 500, 140
                 cx = bbox[0] + (inner_w - card_w) // 2
                 cy = bbox[1] + inner_h - card_h - 30
+                # path 且末地/其他混合时，把卡片放在“最后一个点所在的那一半”
+                if info_data.get("_split_path"):
+                    h1 = int(inner_h * 0.55)
+                    h2 = inner_h - h1
+                    # 用户体验：把卡片放在“最后一个点不在的那一半”，避免遮挡落点
+                    top_cy = bbox[1] + (h1 - card_h - 30)
+                    top_cy = max(top_cy, bbox[1] + 30)  # 防止贴顶
+
+                    bottom_cy = bbox[1] + h1 + (h2 - card_h - 30)
+                    bottom_cy = max(bottom_cy, bbox[1] + h1 + 30)  # 防止贴到分割线
+
+                    if int(info_data.get("dim", 0)) == 1:
+                        cy = top_cy
+                    else:
+                        cy = bottom_cy
 
                 overlay = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
                 od = ImageDraw.Draw(overlay)

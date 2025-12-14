@@ -39,7 +39,7 @@ async def refresh_uuids(_user: models.User = Depends(require_role(Role.ADMIN))):
 @router.post("/refresh-names-official")
 async def refresh_names_official(background_tasks: BackgroundTasks,
                                  _user: models.User = Depends(require_role(Role.ADMIN))):
-    """逻辑2（触发）：为 player_name 为空且 is_offline=False 的记录尝试解析正版玩家名；失败则标记 is_off线=True。
+    """逻辑2（触发）：为 player_name 为空且 is_offline=False 的记录尝试解析正版玩家名；失败则标记 is_offline=True。
     后台异步执行，避免阻塞请求。
     """
     background_tasks.add_task(player_manager.refresh_missing_official_names)
