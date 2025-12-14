@@ -743,6 +743,8 @@ def build_report_from_command(
             else:
                 # tokens[0] 不是玩家名 -> 假设是 ## [args] (查自己)
                 # 例如 ## last, ## 1d
+                if tokens[0] not in ['last', '1w', '1m', '1y', '1d', 'all']:
+                    return False, f"未找到玩家 '{possible_name}' 的数据"
                 if sender_qq:
                     user = db.query(models.User).filter(models.User.qq == str(sender_qq)).first()
                     if user and getattr(user, "bound_player_id", None):
