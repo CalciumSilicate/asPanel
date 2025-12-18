@@ -450,6 +450,7 @@ async def _handle_single(payload: Dict[str, Any]):
                 except Exception:
                     server_id = None
             ts_now = datetime.datetime.now(datetime.timezone.utc)
+            lens = 0
             if server_id:
                 try:
                     with get_db_context() as db:
@@ -485,6 +486,7 @@ async def _handle_single(payload: Dict[str, Any]):
                                 )
                                 if same_as_last:
                                     continue
+                                lens += 1
                                 crud.add_player_position(
                                     db,
                                     p.id,
@@ -497,11 +499,11 @@ async def _handle_single(payload: Dict[str, Any]):
                                 )
                             except Exception:
                                 continue
-                        logger.debug(f"[MCDR-WS] 位置上报已落库 | server={server_name} id={server_id} count={len(positions)}")
                 except Exception:
                     logger.exception("[MCDR-WS] 位置上报入库失败")
             try:
-                logger.debug(f"[MCDR-WS] 收到位置上报 | server={server_name} id={server_id} count={len(positions)} reason={data.get('reason')}")
+                if lens:
+                    logger.debug(f"[MCDR-WS] 收到位置上报 | server={server_name} id={server_id} count={lens} reason={data.get('reason')}")
             except Exception as e:
                 logger.error(f"[MCDR-WS] 位置上报日志记录失败: {e}")
                 pass

@@ -40,6 +40,14 @@ def _resolve_map_json_path(path: Optional[str]) -> Optional[str]:
         pass
     return s
 
+def _ceil_to_10min(dt: datetime) -> datetime:
+    minute = dt.minute % 10
+    return dt + timedelta(minutes=(10 - minute), seconds=-dt.second, microseconds=-dt.microsecond)
+
+def _floor_to_10min(dt: datetime) -> datetime:
+    minute = dt.minute % 10
+    return dt + timedelta(minutes=-minute, seconds=-dt.second, microseconds=-dt.microsecond)
+
 
 def _parse_server_map_config(raw: Optional[str]) -> Dict[str, Optional[str]]:
     try:
@@ -209,9 +217,9 @@ def _build_boundaries(tr: TimeRange) -> List[datetime]:
     if delta:
         pts = []
         cur = tr.start
-        while cur <= tr.end:
-            pts.append(cur)
+        while cur < tr.end:
             cur = cur + delta
+            pts.append(cur)
         if pts[-1] != tr.end:
             pts.append(tr.end)
         return pts
@@ -494,22 +502,18 @@ def _get_session_range_for_last(db: Session, player: models.Player, server_ids: 
     limit = idx + 1
     
     sessions = db.execute(stmt.limit(limit)).scalars().all()
-    
-    def ceil_to_10min(dt: datetime) -> datetime:
-        minute = dt.minute % 10
-        return dt + timedelta(minutes=(10 - minute) if minute != 0 else 0, seconds=-dt.second, microseconds=-dt.microsecond)
 
     if 0 <= idx < len(sessions):
         s = sessions[idx]
         start = s.login_time
         end = s.logout_time
         start = convert_to_tz(start)
+        if not end:
+            end = datetime.now(timezone.utc)
         end = convert_to_tz(end)
         label = f"上次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
-        c_start = ceil_to_10min(start)
-        if not end:
-            end = datetime.now()
-        c_end = ceil_to_10min(end) if end else None
+        c_start = _floor_to_10min(start)
+        c_end = _ceil_to_10min(end) if end else None
         
         return TimeRange(c_start, c_end, start, end, "10min", label, [])
     
@@ -545,13 +549,10 @@ def _calculate_time_range(tokens: List[str], player: models.Player, is_online: b
         start = db.scalar(stmt.order_by(models.PlayerSession.login_time.desc()).limit(1))
         if not start:
             start = now - timedelta(hours=1)
-        def ceil_to_10min(dt: datetime) -> datetime:
-            minute = dt.minute % 10
-            return dt + timedelta(minutes=10 - minute, seconds=-dt.second, microseconds=-dt.microsecond)
-        end = ceil_to_10min(get_now_tz())
+        end = _ceil_to_10min(get_now_tz())
         start = convert_to_tz(start)
         label = f"本次在线({start.strftime('%Y-%m-%d %H:%M')} ~ 现在)"
-        c_start = ceil_to_10min(start)
+        c_start = _floor_to_10min(start)
         return TimeRange(c_start, end, start, get_now_tz(), "10min", label, [])
     
     # Offline default or specific tokens

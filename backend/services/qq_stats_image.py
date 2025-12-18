@@ -323,7 +323,7 @@ def create_smooth_chart(width: int, height: int, x_labels: List[str], values: Li
         x_smooth, y_smooth = x, y
 
     is_zoomed = False
-    if y_min > 0 and y_spread < (y_min * 0.5):
+    if y_min < 0 or y_min > 0 and y_spread < (y_min * 0.5):
         is_zoomed = True
         padding = y_spread * 0.15
         if padding == 0:
