@@ -227,6 +227,15 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"启动统计入库任务失败：{e}")
 
+    # TaskManager：Socket.IO 实时任务推送
+    try:
+        from backend.core.dependencies import task_manager as _task_manager
+        _task_manager.attach_socketio(sio)
+        _task_manager.start_broadcaster()
+        logger.info("TaskManager 实时任务推送已启动")
+    except Exception as e:
+        logger.warning(f"TaskManager 实时推送启动失败：{e}")
+
 
 main_asgi_app = socketio.ASGIApp(sio, other_asgi_app=app, socketio_path='/ws/socket.io')
 

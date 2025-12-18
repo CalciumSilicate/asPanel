@@ -6,6 +6,8 @@ import socket
 import errno
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from typing import List
+from pydantic import BaseModel
 
 from backend.core import models, schemas
 from backend.core.constants import CPU_PERCENT_INTERVAL
@@ -57,9 +59,25 @@ def get_download_progress(task_id: str, _user=Depends(require_role(Role.USER))):
     task = task_manager.get_task(task_id)
     if not task:
         raise HTTPException(404, "任务未找到")
-    if task.status in [TaskStatus.SUCCESS, TaskStatus.FAILED]:
-        task_manager.clear_finished_task(task_id, 0 if task.type == TaskType.DOWNLOAD else 5)
     return task
+
+
+# --- Tasks (global background tasks) ---
+@router.get("/system/tasks", response_model=List[schemas.Task])
+def list_tasks(_user=Depends(require_role(Role.USER))):
+    return task_manager.list_tasks()
+
+
+class TaskClearRequest(BaseModel):
+    status: TaskStatus
+
+
+@router.post("/system/tasks/clear")
+def clear_tasks(payload: TaskClearRequest, _user=Depends(require_role(Role.USER))):
+    if payload.status not in (TaskStatus.FAILED, TaskStatus.SUCCESS):
+        raise HTTPException(400, "仅支持清理 FAILED / SUCCESS 任务")
+    cleared = task_manager.clear_tasks(statuses=[payload.status])
+    return {"cleared": cleared}
 
 
 # @router.get("/system/tasks/", response_model=List[schemas.Task])

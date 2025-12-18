@@ -1880,16 +1880,10 @@ const handleCreateServer = async () => {
   await formRef.value.validate(async (valid) => {
     if (valid) {
       try {
-        const {data: newServer} = await apiClient.post('/api/servers/create', newServerForm.value);
-        await fetchServers();
-        ElMessage.success('服务器已创建，请选择服务器类型。');
+        const {data} = await apiClient.post('/api/servers/create', newServerForm.value);
+        ElMessage.success(data?.message || '已提交创建服务器任务');
         createDialogVisible.value = false;
-        resetDialogState();
-        currentConfigServer.value = newServer;
-        dialogState.isNewSetup = true;
-        configFormData.value = {jvm: {min_memory: '128M', max_memory: '512M', extra_args: ''}};
-        currentView.value = 'select_type';
-        await await openConfigDialog(newServer);
+        // 服务器将由后台任务创建，ServerList 通过 socket 的 server_create 事件自动刷新
       } catch (e) {
         ElMessage.error(`创建失败: ${e.response?.data?.detail || e.message}`);
       }

@@ -41,6 +41,7 @@ class TaskType(str, enum.Enum):
     UPLOAD_ARCHIVE = "UPLOAD_ARCHIVE"
     RESTORE_ARCHIVE = "RESTORE_ARCHIVE"
     IMPORT = "IMPORT"
+    CREATE_SERVER = "CREATE_SERVER"
     COMBINED = "COMBINED"
 
 
@@ -238,11 +239,13 @@ class ServerImport(BaseModel):
 class Task(BaseModel):
     id: str
     ids: Optional[List[str]] = None
+    name: Optional[str] = None
     status: TaskStatus = "PENDING"  # pending, downloading, complete, failed
     progress: float = 0.0
     error: Optional[str] = None
     message: Optional[str] = None
     type: TaskType = None
+    created_at: Optional[float] = None
     total: Optional[int] = None
     done: Optional[int] = None
 
