@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Callable
 
 from PIL import Image
 from sqlalchemy import select, desc, func, and_
@@ -219,20 +219,47 @@ _WALK_METRICS = ['custom.sprint_one_cm','custom.walk_one_cm','custom.walk_under_
 _VEHICLE = ['boat','horse','minecart','pig','crouch']
 _VEHICLE_METRICS = [f'custom.{v}_one_cm' for v in _VEHICLE]
 
+def _TIME_FORMATTER(x: float) -> str:
+    try:
+        total_minutes = int(round(float(x) * 60))
+    except Exception:
+        return "0"
+    hours = total_minutes // 60
+    minutes = total_minutes % 60
+    parts = []
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0:
+        parts.append(f"{minutes}m")
+    return "".join(parts) if parts else "0"
+
+def _DISTANCE_FORMATTER(x: float) -> str:
+    try:
+        km = float(x)
+    except Exception:
+        return "0"
+    if km <= 0:
+        return "0"
+    if km >= 1:
+        s = f"{round(km, 3):.3f}".rstrip("0").rstrip(".")
+        return f"{s}km"
+    meters = km * 1000
+    return f"{meters:.2f}".rstrip("0").rstrip(".") + "m"
+
 TOTAL_ITEMS = [
-    ("上线次数", ["custom.leave_game"], 1, "count"),
-    ("在线时长(hr)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, "round1"),
+    ("上线次数", ["custom.leave_game"], 1, lambda x: x),
+    ("在线时长(hr)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, _TIME_FORMATTER),
     # ("击杀玩家", ["custom.player_kills"], 1, "count"),
     # ("被玩家击杀", ["killed_by.player"], 1, "count"),
-    ("挖掘方块", _BREAK_METRICS, 1, "count"),
-    ("死亡次数", ["custom.deaths"], 1, "count"),
-    ("鞘翅飞行(km)", ["custom.aviate_one_cm"], 0.00001, "round2"),
-    ("珍珠传送(km)", ["custom.ender_pearl_one_cm"], 0.00001, "round2"),
-    ("步行前进(km)", _WALK_METRICS, 0.00001, "round2"),
-    ("交通工具(km)", _VEHICLE_METRICS, 0.00001, "round2"),
-    ("使用烟花", ["custom.firework_boost", "used.firework_rocket"], 1, "count"),
-    ("消耗不死图腾", ["used.totem_of_undying"], 1, "count"),
-    ("破基岩", ["custom.break_bedrock"], 1, "count"),
+    ("挖掘方块", _BREAK_METRICS, 1, lambda x: int(x)),
+    ("死亡次数", ["custom.deaths"], 1, lambda x: int(x)),
+    ("鞘翅飞行", ["custom.aviate_one_cm"], 0.00001, _DISTANCE_FORMATTER),
+    ("珍珠传送", ["custom.ender_pearl_one_cm"], 0.00001, _DISTANCE_FORMATTER),
+    ("步行前进", _WALK_METRICS, 0.00001, _DISTANCE_FORMATTER),
+    ("交通工具", _VEHICLE_METRICS, 0.00001, _DISTANCE_FORMATTER),
+    ("使用烟花", ["custom.firework_boost", "used.firework_rocket"], 1, lambda x: int(x)),
+    ("消耗不死图腾", ["used.totem_of_undying"], 1, lambda x: int(x)),
+    ("破基岩", ["custom.break_bedrock"], 1, lambda x: int(x)),
 ]
 
 CHART_ITEMS = [
@@ -266,12 +293,8 @@ class TimeRange:
     x_labels: List[str]
 
 
-def _format_number(val: float, mode: str) -> float:
-    if mode == "round1":
-        return round(val, 1)
-    if mode == "round2":
-        return round(val, 2)
-    return int(val)
+def _format_number(val: float, formatter: Callable) -> Any:
+    return formatter(val)
 
 
 def _build_boundaries(tr: TimeRange) -> List[datetime]:
@@ -292,6 +315,9 @@ def _build_boundaries(tr: TimeRange) -> List[datetime]:
         while cur < tr.end:
             cur = cur + delta
             pts.append(cur)
+        if not pts:
+            logger.warning(f"No points generated in _build_boundaries | tr.start={tr.start} tr.end={tr.end} granularity={tr.granularity}")
+            pts.append(tr.start)
         if pts[-1] != tr.end:
             pts.append(tr.end)
         return pts
@@ -304,6 +330,9 @@ def _build_boundaries(tr: TimeRange) -> List[datetime]:
         year = cur.year + (1 if month > 12 else 0)
         month = month if month <= 12 else 1
         cur = cur.replace(year=year, month=month)
+    if not pts:
+        logger.warning(f"No points generated in _build_boundaries | tr.start={tr.start} tr.end={tr.end} granularity={tr.granularity}")
+        pts.append(tr.start)
     if pts[-1] != tr.end:
         pts.append(tr.end)
     return pts
@@ -469,7 +498,7 @@ def _metrics_sum(series: List[Tuple[int, int]]) -> Tuple[int, int]:
 
 def _build_totals(player_uuid: str, tr: TimeRange, server_ids: List[int]) -> List[Dict[str, object]]:
     out: List[Dict[str, object]] = []
-    for label, metrics, unit, mode in TOTAL_ITEMS:
+    for label, metrics, unit, formatter in TOTAL_ITEMS:
         series_map = stats_service.get_total_series(
             player_uuids=[player_uuid], metrics=metrics, granularity=tr.granularity,
             start=tr.start.isoformat(), end=tr.end.isoformat(), server_ids=server_ids
@@ -477,7 +506,7 @@ def _build_totals(player_uuid: str, tr: TimeRange, server_ids: List[int]) -> Lis
         series = series_map.get(player_uuid, [])
         total, delta = _metrics_sum(series)
         if total:
-            out.append({"label": label, "total": _format_number(total * unit, mode), "delta": _format_number(delta * unit, mode)})
+            out.append({"label": label, "total": total, "delta": delta, "label_total": _format_number(total * unit, formatter), "label_delta": _format_number(delta * unit, formatter)})
     return out
 
 

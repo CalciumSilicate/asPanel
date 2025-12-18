@@ -621,7 +621,8 @@ class PositionMapRenderer:
         target_radius = 500
         if len(sorted_stations) >= 2: target_radius = sorted_stations[1][1] * 1.2
         elif len(sorted_stations) == 1: target_radius = sorted_stations[0][1] * 2.5
-        view_radius = min(max(250, target_radius), 3000)
+        else: target_radius = 50
+        view_radius = min(max(50, target_radius), 3000)
         scale = width / 2 / view_radius
         player_info = {"x": mx, "z": mz, "dim": dim, "avatar": avatar_path, "yaw": yaw}
         img = self._render_layer(width, height, mx, mz, scale, [], group_id, markers=[], player_marker=player_info)
@@ -634,8 +635,12 @@ class PositionMapRenderer:
 
     def generate_path_image(self, width: int, height: int, points: List[Tuple[float, float, int]], avatar_path: str = "") -> Image.Image:
         if not points: return Image.new("RGBA", (width, height), Theme.BG_COLOR)
+        
+        # 分离末地和其他维度的点
         pts_end = [p for p in points if p[2] == 1]
         pts_other = [p for p in points if p[2] != 1]
+        
+        # 生成标记点逻辑保持不变...
         markers_other, markers_end = [], []
         marker_counter = 1
         for i in range(len(points) - 1):
@@ -649,15 +654,20 @@ class PositionMapRenderer:
                 m2 = {"pos": p2c, "label": str(marker_counter), "color": Theme.DIM_END_COLOR}
                 (markers_end if next_p[2] == 1 else markers_other).append(m2)
                 marker_counter += 1
+        
         last = points[-1]
         lp_conv = self._transform_coord(last[0], last[1], last[2])
         dest_pm = {"x": lp_conv[0], "z": lp_conv[1], "dim": last[2], "avatar": avatar_path}
+        
         has_end, has_other = len(pts_end) > 0, len(pts_other) > 0
         pm_other = dest_pm if (not has_end) or (last[2] != 1) else None
         pm_end = dest_pm if (last[2] == 1) else None
 
+        # === 核心修改在 _render_sub 函数内部 ===
         def _render_sub(pts, w_, h_, gid, mks, pm_):
             if not pts: return Image.new("RGBA", (w_, h_), Theme.BG_COLOR)
+            
+            # 整理轨迹段
             segments, curr_seg = [], []
             last_dim = pts[0][2]
             xs, zs = [], []
@@ -671,17 +681,47 @@ class PositionMapRenderer:
                     last_dim = d
                 curr_seg.append((mx, mz))
             if curr_seg: segments.append({"coords": curr_seg, "dim": last_dim})
+
+            # --- 优化后的比例尺计算逻辑 ---
             min_x, max_x, min_z, max_z = min(xs), max(xs), min(zs), max(zs)
-            pad = 200
-            span_x = max((max_x - min_x) + pad * 2, 400)
-            span_z = max((max_z - min_z) + pad * 2, 400)
-            scale_ = min(min(w_ / span_x, h_ / span_z), 2.0)
-            img_ = self._render_layer(w_, h_, (min_x + max_x) / 2, (min_z + max_z) / 2, scale_, segments, gid, mks, pm_)
+            
+            # 1. 计算实际物理跨度
+            geo_w = max_x - min_x
+            geo_h = max_z - min_z
+            
+            # 2. 设定最小视窗跨度 (Block单位)
+            # 即使只移动了1格，地图也会显示至少 600x600 的区域，以便展示周围站点
+            MIN_VIEW_SPAN = 600
+            
+            effective_w = max(geo_w, MIN_VIEW_SPAN)
+            effective_h = max(geo_h, MIN_VIEW_SPAN)
+            
+            # 3. 计算中心点
+            center_x = (min_x + max_x) / 2
+            center_z = (min_z + max_z) / 2
+            
+            # 4. 计算缩放比例 (Scale)
+            # PADDING_FACTOR = 0.8 表示内容占据画布长宽的 80% (预留 20% 边距)
+            PADDING_FACTOR = 0.8
+            
+            # 分别计算宽度适应和高度适应的比例，取较小值以确保全部内容可见
+            scale_x = (w_ * PADDING_FACTOR) / effective_w
+            scale_z = (h_ * PADDING_FACTOR) / effective_h
+            
+            scale_ = min(scale_x, scale_z)
+            
+            # 5. 限制最大缩放 (可选)
+            # 防止在极大分辨率下对极小区域过度放大
+            scale_ = min(scale_, 5.0)
+            # ---------------------------
+
+            img_ = self._render_layer(w_, h_, center_x, center_z, scale_, segments, gid, mks, pm_)
             d_ = ImageDraw.Draw(img_)
             lbl = "THE END" if gid == 1 else "NETHER & OVERWORLD"
             d_.text((w_ - 20, h_ - 20), lbl, fill=Theme.TEXT_SECONDARY, font=load_font(24, True), anchor="rb")
             return img_
 
+        # 布局逻辑保持不变
         if has_end and has_other:
             h1 = int(height * 0.55)
             h2 = height - h1
@@ -814,7 +854,8 @@ def render_combined_view(
         
         # Value
         val_raw = item.get("total", 0)
-        val_str = f"{val_raw:,}" if isinstance(val_raw, (int, float)) else str(val_raw)
+        label_total = item.get("label_total", 0)
+        val_str = f"{label_total:,}" if isinstance(label_total, (int, float)) else str(label_total)
         
         # 动态字体大小防止溢出
         curr_font_val = font_h2
@@ -825,8 +866,9 @@ def render_combined_view(
 
         # Delta
         delta = item.get("delta", 0)
+        label_delta = item.get("label_delta", 0)
         if delta != 0:
-            delta_str = f"{'+' if delta > 0 else ''}{delta}"
+            delta_str = f"{'+' if delta > 0 else ''}{label_delta}"
             c = Theme.POSITIVE if delta > 0 else Theme.NEGATIVE
             draw.text((cx + stats_card_w - 20, cy + 65), delta_str, fill=c, font=font_delta, anchor="rm")
 
@@ -904,12 +946,12 @@ def render_combined_view(
                 right_w, right_h, loc["x"], loc["z"], loc["dim"], data.get("mc_avatar", ""), loc.get("yaw", 0)
             )
             map_img = map_raw
-            title = "Current Location"
+            title = "Location"
         elif "path" in data:
             path_pts = data["path"]
             map_raw = renderer.generate_path_image(right_w, right_h, path_pts, data.get("mc_avatar", ""))
             map_img = map_raw
-            title = "Recent Path"
+            title = "Path"
             try:
                 # 获取最后一个点的信息用于显示
                 last = path_pts[-1] if path_pts else None
@@ -940,7 +982,7 @@ def render_combined_view(
 
             # 地图信息卡片 (悬浮在右侧地图的底部)
             if info_data and all(k in info_data for k in ["x", "z", "dim"]):
-                card_w, card_h = 360, 140
+                card_w, card_h = 700, 140
                 
                 # 悬浮位置：右侧面板的底部居中
                 cx = right_x + (right_w - card_w) // 2
@@ -962,7 +1004,7 @@ def render_combined_view(
                 # 最近站点
                 if info_data.get("nearest_name"):
                     n_name = info_data['nearest_name']
-                    n_name = truncate_text(od, n_name, load_font(22, True), 140)
+                    n_name = truncate_text(od, n_name, load_font(22, True), 350)
                     
                     od.text((card_w - 25, 20), "Nearest Station", fill=Theme.TEXT_SECONDARY, font=font_info, anchor="rt")
                     od.text((card_w - 25, 45), n_name, fill=Theme.TEXT_PRIMARY, font=load_font(22, True), anchor="rt")
