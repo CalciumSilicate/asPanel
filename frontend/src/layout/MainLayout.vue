@@ -10,12 +10,12 @@
         <span class="brand" v-show="!isCollapse">AS Panel</span>
       </div>
       <div class="header-right">
-        <!-- 后台任务下拉（示例数据，后端接入后替换） -->
         <el-dropdown
           trigger="click"
           class="tasks-dropdown"
           placement="bottom-end"
           :popper-options="dropdownPopperOptions"
+          :hide-on-click="false"
         >
           <el-badge
             :value="activeTasksCount"
@@ -38,18 +38,31 @@
           </el-badge>
           <template #dropdown>
             <el-dropdown-menu class="tasks-menu">
+              <el-dropdown-item class="tasks-menu-actions-item">
+                <div class="tasks-menu-actions">
+                  <span class="tasks-menu-header">后台任务</span>
+                  <el-button
+                    size="small"
+                    text
+                    :disabled="clearTasksDisabled"
+                    @click.stop="handleClearTasks"
+                  >
+                    {{ clearTasksText }}
+                  </el-button>
+                </div>
+              </el-dropdown-item>
               <el-dropdown-item v-for="t in tasks" :key="t.id" disabled>
                 <div class="task-row">
                   <div class="task-row-header">
-                    <span class="task-name">{{ t.name }}</span>
+                    <span class="task-name">{{ taskTitle(t) }}</span>
                     <span class="task-state">{{ statusLabel(t.status) }}</span>
                     <span class="task-percent">{{ displayPercent(t) }}%</span>
                   </div>
-                  <div class="task-row-desc" :title="t.desc">{{ t.desc }}</div>
+                  <div class="task-row-desc" :title="taskDesc(t)">{{ taskDesc(t) }}</div>
                   <el-progress
                     v-if="t.status !== 'PENDING'"
                     class="task-progress"
-                    :class="t.status"
+                    :class="(t.status || '').toLowerCase()"
                     :percentage="progressPercent(t)"
                     :stroke-width="4"
                     :show-text="false"
@@ -352,9 +365,10 @@
 </template>
 
 <script setup>
-import {ref, computed, onMounted} from 'vue';
+import {ref, computed, onMounted, onUnmounted} from 'vue';
 import {useRoute, useRouter} from 'vue-router';
 import { asideCollapsed as isCollapse, asideCollapsing as isCollapsing, toggleAside as toggleCollapse } from '@/store/ui';
+import { ElMessage, ElNotification } from 'element-plus'
 import {
   // Original Icons
   UserFilled, Fold, Expand, DataAnalysis, Tickets, TrendCharts,
@@ -369,6 +383,17 @@ import {
 import {user, fullAvatarUrl, fetchUser, clearUser, refreshAvatar, hasRole} from '@/store/user';
 import { isDark, toggleTheme } from '@/store/theme'
 import AvatarUploader from '@/components/AvatarUploader.vue';
+import {
+  tasks,
+  activeTasksCount,
+  failedTasksCount,
+  successTasksCount,
+  fetchTasks,
+  connectTasksSocket,
+  disconnectTasksSocket,
+  onTaskEvent,
+  clearTasks,
+} from '@/store/tasks'
 
 
 // 折叠状态由全局 ui store 提供
@@ -378,15 +403,19 @@ const route = useRoute();
 const router = useRouter();
 const avatarDialogVisible = ref(false);
 
-// 后台任务（示例数据，后端接入后替换）
-const tasks = ref([
-  { id: 1, name: '备份世界存档', progress: 42, status: 'RUNNING', desc: '世界A 2.1GB，目标：NAS/Backups' },
-  { id: 2, name: '日志归档', progress: 100, status: 'SUCCESS', desc: '2024-10-23 ~ 2024-10-24' },
-  { id: 3, name: '插件更新检查', progress: 0, status: 'PENDING', desc: '检查 23 个插件版本' },
-  { id: 4, name: '插件更新检查', progress: 0, status: 'FAILED', desc: '检查 23 个插件版本' }
-]);
-// 仅统计 PENDING / RUNNING 两类任务
-const activeTasksCount = computed(() => tasks.value.filter(t => t.status === 'PENDING' || t.status === 'RUNNING').length);
+const TASK_TYPE_LABELS = {
+  DOWNLOAD: '下载',
+  CREATE_ARCHIVE: '创建存档',
+  UPLOAD_ARCHIVE: '上传存档',
+  RESTORE_ARCHIVE: '恢复存档',
+  IMPORT: '导入服务器',
+  CREATE_SERVER: '创建服务器',
+  COMBINED: '组合任务',
+}
+
+const taskTitle = (t) => t?.name || TASK_TYPE_LABELS[t?.type] || '任务'
+const taskDesc = (t) => t?.error || t?.message || ''
+
 // 进度条颜色：RUNNING 蓝色、FAILED 红色、SUCCESS 绿色、其他信息色
 const progressColor = (status) => {
   if (status === 'RUNNING') return 'var(--el-color-primary)';
@@ -414,6 +443,63 @@ const displayPercent = (t) => (t.status === 'SUCCESS' || t.status === 'FAILED') 
 // 实际进度条渲染百分比
 const progressPercent = (t) => (t.status === 'SUCCESS' || t.status === 'FAILED') ? 100 : t.progress;
 
+const clearTasksText = computed(() => (failedTasksCount.value > 0 ? '清除失败任务' : '清除已完成任务'))
+const clearTasksDisabled = computed(() => failedTasksCount.value === 0 && successTasksCount.value === 0)
+const handleClearTasks = async () => {
+  if (clearTasksDisabled.value) return
+  const status = failedTasksCount.value > 0 ? 'FAILED' : 'SUCCESS'
+  try {
+    const cleared = await clearTasks(status)
+    ElMessage.success(`已清理 ${cleared} 个任务`)
+  } catch (e) {
+    ElMessage.error(`清理失败: ${e.response?.data?.detail || e.message}`)
+  }
+}
+
+// 右上角合并通知：新增/完成/失败
+const NOTIFY_WINDOW_MS = 4500
+const toastBuckets = {
+  created: { count: 0, version: 0, handle: null, timer: null },
+  success: { count: 0, version: 0, handle: null, timer: null },
+  failed: { count: 0, version: 0, handle: null, timer: null },
+}
+
+const bumpToast = (bucketKey, opts) => {
+  const b = toastBuckets[bucketKey]
+  b.count += 1
+  b.version += 1
+  const v = b.version
+
+  if (b.timer) clearTimeout(b.timer)
+  if (b.handle) b.handle.close()
+
+  const message = b.count === 1 ? opts.single : opts.multi(b.count)
+  b.handle = ElNotification({
+    title: opts.title,
+    message,
+    type: opts.type,
+    duration: 0,
+    onClose: () => {
+      if (b.version !== v) return
+      if (b.timer) clearTimeout(b.timer)
+      b.timer = null
+      b.handle = null
+      b.count = 0
+    },
+  })
+  b.timer = setTimeout(() => {
+    if (b.version !== v) return
+    try {
+      b.handle?.close()
+    } catch (e) {
+      // ignore
+    }
+    b.handle = null
+    b.timer = null
+    b.count = 0
+  }, NOTIFY_WINDOW_MS)
+}
+
 const activeMenu = computed(() => {
   const {meta, path} = route;
   // 如果路由的 meta 中有 activeMenu 字段，则用它来高亮父菜单
@@ -440,10 +526,51 @@ const handleAvatarSuccess = async () => {
   refreshAvatar();
 };
 
+let offTaskEvents = null
+
 onMounted(() => {
   fetchUser();
-  // fetchPlayers();
+  fetchTasks().catch(() => {})
+  connectTasksSocket()
+
+  offTaskEvents = onTaskEvent((evt) => {
+    if (evt.action === 'created') {
+      bumpToast('created', {
+        title: '新增任务',
+        type: 'info',
+        single: `新增 ${taskTitle(evt.task)} 任务：${taskDesc(evt.task)}`,
+        multi: (n) => `新增 ${n} 个任务`,
+      })
+      return
+    }
+    if (evt.action === 'finished' && evt.task?.status === 'SUCCESS') {
+      bumpToast('success', {
+        title: '任务完成',
+        type: 'success',
+        single: `${taskTitle(evt.task)}：${taskDesc(evt.task)} 已完成`,
+        multi: (n) => `完成 ${n} 个任务`,
+      })
+      return
+    }
+    if (evt.action === 'finished' && evt.task?.status === 'FAILED') {
+      bumpToast('failed', {
+        title: '任务失败',
+        type: 'error',
+        single: `${taskTitle(evt.task)}：${taskDesc(evt.task)} 失败`,
+        multi: (n) => `失败 ${n} 个任务`,
+      })
+    }
+  })
 });
+
+onUnmounted(() => {
+  try {
+    offTaskEvents?.()
+  } catch (e) {
+    // ignore
+  }
+  disconnectTasksSocket()
+})
 </script>
 
 <style scoped>
@@ -614,6 +741,9 @@ onMounted(() => {
   display: block !important;
   align-items: initial !important;
 }
+.tasks-menu-actions { padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; }
+.tasks-menu-actions-item { cursor: default; }
+.tasks-menu-actions-item:hover { background-color: transparent !important; }
 .tasks-menu .tasks-menu-header { font-weight: 600; color: var(--color-text); }
 .task-row { padding: 10px 14px; display: block; width: 100%; box-sizing: border-box; }
 .task-row-header { display: grid; grid-template-columns: 1fr auto auto; column-gap: 12px; align-items: baseline; margin-bottom: 4px; }

@@ -1,54 +1,274 @@
 # backend/services/task_manager.py
 
-import threading
-import uuid
-from typing import Dict, Optional
+from __future__ import annotations
 
-from backend.core.schemas import Task, TaskType, TaskStatus
+import asyncio
+import threading
+import time
+import uuid
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
 from backend.core.logger import logger
+from backend.core.schemas import Task, TaskStatus, TaskType
 
 
 class TaskManager:
-    def __init__(self):
+    """In-memory task tracker with optional Socket.IO broadcast.
+
+    - Tasks are stored in-process (not persisted).
+    - Callers may mutate returned Task objects directly (progress/status/message/etc).
+    - A background broadcaster (polling diff) can emit task changes via Socket.IO.
+    """
+
+    def __init__(self, *, max_tasks: int = 300, broadcast_interval: float = 0.5):
+        self._lock = threading.RLock()
         self.tasks: Dict[str, Task] = {}
 
-    def create_task(self, _type: TaskType) -> Task:
-        task_id = str(uuid.uuid4())
-        self.tasks[task_id] = Task(status=TaskStatus.PENDING, type=_type, id=task_id)
-        return self.tasks[task_id]
+        self._max_tasks = int(max_tasks)
+        self._broadcast_interval = float(broadcast_interval)
 
-    def get_task(self, task_id: str) -> Task | None:
-        _: Task = self.tasks.get(task_id, None)
-        if _.type == TaskType.COMBINED:
-            _.progress = self._calculate_combined_task(*(self.get_task(task_id) for task_id in _.ids))
-            if all(self.get_task(task_id).status == TaskStatus.SUCCESS for task_id in _.ids):
-                _.status = TaskStatus.SUCCESS
-                self.clear_finished_task(_.id)
-        return _
+        self._sio: Any = None
+        self._broadcast_task: Optional[asyncio.Task] = None
+        self._last_snapshot: Dict[str, Dict[str, Any]] = {}
+
+    # -------------------------
+    # Basic CRUD
+    # -------------------------
+    def create_task(
+        self,
+        _type: TaskType,
+        *,
+        name: Optional[str] = None,
+        message: Optional[str] = None,
+        total: Optional[int] = None,
+    ) -> Task:
+        task_id = str(uuid.uuid4())
+        task = Task(
+            id=task_id,
+            type=_type,
+            name=name,
+            message=message,
+            status=TaskStatus.PENDING,
+            progress=0.0,
+            created_at=time.time(),
+            total=total,
+            done=0 if total is not None else None,
+        )
+        with self._lock:
+            self.tasks[task_id] = task
+            self._prune_locked()
+        return task
+
+    def get_task(self, task_id: str) -> Optional[Task]:
+        with self._lock:
+            task = self.tasks.get(task_id)
+            if task is None:
+                return None
+            return self._derive_combined_task_locked(task_id, task)
+
+    def get_tasks(self, *_types: Optional[TaskType]) -> Dict[str, Task]:
+        with self._lock:
+            if not _types or _types == (None,):
+                return {tid: self._derive_combined_task_locked(tid, t) for tid, t in self.tasks.items()}
+
+            types = {t for t in _types if t is not None}
+            return {
+                tid: self._derive_combined_task_locked(tid, t)
+                for tid, t in self.tasks.items()
+                if t.type in types
+            }
+
+    def list_tasks(self, *_types: Optional[TaskType]) -> List[Task]:
+        items = list(self.get_tasks(*_types).values())
+        items.sort(key=lambda t: float(t.created_at or 0), reverse=True)
+        return items
+
+    def clear_tasks(self, *, statuses: Iterable[TaskStatus]) -> int:
+        status_set = set(statuses)
+        with self._lock:
+            to_delete = [tid for tid, t in self.tasks.items() if t.status in status_set]
+            for tid in to_delete:
+                self.tasks.pop(tid, None)
+            return len(to_delete)
+
+    def clear_task(self, task_id: str) -> bool:
+        with self._lock:
+            return self.tasks.pop(task_id, None) is not None
+
+    # -------------------------
+    # Cleanup policy
+    # -------------------------
+    def clear_finished_task(self, task_id: str, delay_seconds: int = 3600) -> None:
+        """Schedule cleanup for a finished task.
+
+        By default, only SUCCESS tasks are auto-removed (FAILED tasks stay for manual clearing).
+        """
+
+        def remove_task() -> None:
+            try:
+                with self._lock:
+                    task = self.tasks.get(task_id)
+                    if task is None:
+                        return
+                    if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+                        return
+                    # Keep failed tasks until user clears them.
+                    if task.status == TaskStatus.FAILED:
+                        return
+
+                    self.tasks.pop(task_id, None)
+            except Exception:
+                logger.exception(f"清理任务失败: {task_id}")
+
+        try:
+            delay = max(0, int(delay_seconds))
+        except Exception:
+            delay = 3600
+
+        timer = threading.Timer(delay, remove_task)
+        timer.daemon = True
+        timer.start()
+
+    def _prune_locked(self) -> None:
+        """Prune old tasks when exceeding max_tasks (prefer removing finished ones)."""
+        if self._max_tasks <= 0:
+            return
+        if len(self.tasks) <= self._max_tasks:
+            return
+
+        tasks_sorted: List[Tuple[str, Task]] = sorted(
+            self.tasks.items(), key=lambda kv: float((kv[1].created_at or 0))
+        )
+
+        def is_finished(t: Task) -> bool:
+            return t.status in (TaskStatus.SUCCESS, TaskStatus.FAILED)
+
+        # 1) Drop oldest finished tasks first
+        for tid, t in tasks_sorted:
+            if len(self.tasks) <= self._max_tasks:
+                return
+            if is_finished(t):
+                self.tasks.pop(tid, None)
+
+        # 2) If still too many, drop oldest (best-effort)
+        for tid, _t in tasks_sorted:
+            if len(self.tasks) <= self._max_tasks:
+                return
+            self.tasks.pop(tid, None)
+
+    # -------------------------
+    # Combined tasks
+    # -------------------------
+    def _derive_combined_task_locked(self, task_id: str, task: Task) -> Task:
+        if task.type != TaskType.COMBINED:
+            return task
+
+        ids = list(task.ids or [])
+        if not ids:
+            return task
+
+        children = [self.tasks.get(cid) for cid in ids]
+        existing = [c for c in children if c is not None]
+        if not existing:
+            task.status = TaskStatus.FAILED
+            task.error = task.error or "Combined task has no valid sub-tasks"
+            task.progress = 0.0
+            return task
+
+        # progress: average over provided ids, missing treated as 0
+        progress_values = [(c.progress or 0.0) if c is not None else 0.0 for c in children]
+        task.progress = round(sum(progress_values) / max(len(progress_values), 1), 2)
+
+        statuses = [c.status for c in existing]
+        if any(s == TaskStatus.FAILED for s in statuses):
+            task.status = TaskStatus.FAILED
+        elif all(s == TaskStatus.SUCCESS for s in statuses) and len(existing) == len(ids):
+            task.status = TaskStatus.SUCCESS
+        elif any(s == TaskStatus.RUNNING for s in statuses):
+            task.status = TaskStatus.RUNNING
+        else:
+            task.status = TaskStatus.PENDING
+        return task
+
+    # -------------------------
+    # Socket.IO broadcasting (poll + diff)
+    # -------------------------
+    def attach_socketio(self, sio: Any) -> None:
+        self._sio = sio
+
+    def start_broadcaster(self) -> None:
+        """Start background broadcaster (idempotent). Must be called within an event loop."""
+        if self._sio is None:
+            logger.warning("TaskManager: sio 未绑定，跳过任务广播启动")
+            return
+        if self._broadcast_task is not None and not self._broadcast_task.done():
+            return
+        self._broadcast_task = asyncio.create_task(self._broadcast_loop())
+
+    async def _broadcast_loop(self) -> None:
+        while True:
+            try:
+                await asyncio.sleep(self._broadcast_interval)
+
+                current = self._snapshot_public()
+                if self._sio is None:
+                    self._last_snapshot = current
+                    continue
+
+                # created / updated / finished
+                for tid, cur in current.items():
+                    prev = self._last_snapshot.get(tid)
+                    if prev is None:
+                        await self._emit_task_event("created", cur)
+                        continue
+                    if prev == cur:
+                        continue
+
+                    prev_status = prev.get("status")
+                    cur_status = cur.get("status")
+                    if prev_status != cur_status and cur_status in (TaskStatus.SUCCESS, TaskStatus.FAILED):
+                        await self._emit_task_event("finished", cur)
+                    else:
+                        await self._emit_task_event("updated", cur)
+
+                # deleted
+                for tid in set(self._last_snapshot.keys()) - set(current.keys()):
+                    await self._emit_task_event("deleted", {"id": tid})
+
+                self._last_snapshot = current
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("TaskManager 广播循环异常")
+
+    def _snapshot_public(self) -> Dict[str, Dict[str, Any]]:
+        with self._lock:
+            out: Dict[str, Dict[str, Any]] = {}
+            for tid, t in self.tasks.items():
+                t2 = self._derive_combined_task_locked(tid, t)
+                out[tid] = self._serialize_task_public(t2)
+            return out
 
     @staticmethod
-    def _calculate_combined_task(*tasks: Task) -> float:
-        return round(sum(x.progress for x in tasks) / len(tasks), 2)
+    def _serialize_task_public(task: Task) -> Dict[str, Any]:
+        # Keep payload stable; avoid sending huge/complex objects.
+        return {
+            "id": task.id,
+            "ids": list(task.ids or []) or None,
+            "name": task.name,
+            "status": task.status,
+            "progress": round(float(task.progress or 0.0), 2),
+            "message": task.message,
+            "error": task.error,
+            "type": task.type,
+            "created_at": float(task.created_at or 0.0) or None,
+            "total": task.total,
+            "done": task.done,
+        }
 
-    def get_tasks(self, *_type: Optional[TaskType]) -> Dict[str, Task]:
-        if _type is None:
-            return self.tasks
-        _ = {}
-        for task_id in self.tasks:
-            if self.get_task(task_id).type in _type:
-                _[task_id] = self.tasks.get(task_id)
-        return _
+    async def _emit_task_event(self, action: str, task: Dict[str, Any]) -> None:
+        try:
+            await self._sio.emit("task_update", {"action": action, "task": task})
+        except Exception:
+            logger.exception(f"TaskManager emit 失败: action={action} task_id={task.get('id')}")
 
-    def clear_finished_task(self, task_id: str, delay_seconds: int = 60):
-        def remove_task():
-            if task_id in self.tasks and self.tasks[task_id].status not in [
-                TaskStatus.PENDING, TaskStatus.RUNNING
-            ]:
-                task = self.tasks[task_id]
-                if task.error:
-                    logger.error(f"任务 {task_id} 出错：{task.error}")
-                del self.tasks[task_id]
-                logger.info(f"已清理完成的归档任务：{task_id}")
-
-        timer = threading.Timer(delay_seconds, remove_task)
-        timer.start()

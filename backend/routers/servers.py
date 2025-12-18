@@ -9,16 +9,16 @@ import psutil
 import shutil
 from fastapi import APIRouter, Depends, HTTPException, status, Response, BackgroundTasks, UploadFile
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from pathlib import Path
 
 from backend.tools import server_parser
 from backend.core import crud, models, schemas
 from backend.core.auth import require_role
-from backend.core.database import get_db
+from backend.core.database import get_db, get_db_context
 from backend.core.dependencies import mcdr_manager, server_service
 from backend.core.dependencies import task_manager
-from backend.core.schemas import TaskType, Role, PaperBuild, PaperBuildDownload, ServerCoreConfig
+from backend.core.schemas import TaskType, TaskStatus, Role, PaperBuild, PaperBuildDownload, ServerCoreConfig
 from backend.tasks.background import background_download_jar, background_install_fabric, background_install_forge
 from backend.core.constants import DEFAULT_SERVER_PROPERTIES_CONFIG, PUBLIC_PLUGINS_DIRECTORIES, MAP_JSON_STORAGE_PATH
 from backend.core.utils import get_file_sha1, get_file_sha256, get_fabric_jar_version, get_forge_jar_version
@@ -41,11 +41,93 @@ async def get_servers(db: Session = Depends(get_db), _user: models.User = Depend
     return await server_service.get_servers_with_details(db)
 
 
-@router.post('/servers/create', response_model=schemas.Server, status_code=status.HTTP_201_CREATED)
+@router.post('/servers/create', status_code=status.HTTP_202_ACCEPTED)
 async def create_server(server: schemas.ServerCreate, db: Session = Depends(get_db),
                         user: models.User = Depends(require_role(Role.ADMIN))):
     # PERMISSION: ADMIN
-    return await server_service.create_server(server, db, user)
+    # 先做快速校验，避免无意义的后台任务
+    if crud.get_server_by_name(db, server.name):
+        raise HTTPException(status_code=409, detail="A server with this name already exists.")
+
+    task = task_manager.create_task(
+        TaskType.CREATE_SERVER,
+        name="创建服务器",
+        message=f"服务器：{server.name}",
+    )
+
+    async def _run_create_server() -> None:
+        server_path: Optional[Path] = None
+        db_server: Optional[models.Server] = None
+        try:
+            task.status = TaskStatus.RUNNING
+            task.progress = 5
+            task.message = f"服务器：{server.name} | 创建中..."
+
+            # 使用独立 DB session，避免依赖请求生命周期
+            with get_db_context() as _db:
+                # 再校验一次，防止并发创建
+                if crud.get_server_by_name(_db, server.name):
+                    raise HTTPException(status_code=409, detail="A server with this name already exists.")
+
+                server_path = server_service._generate_server_path(server.name)
+                if server_path.exists():
+                    raise HTTPException(status_code=409, detail=f"The directory '{server_path}' already exists.")
+
+                internal_server_model = schemas.ServerCreateInternal(
+                    name=server.name,
+                    path=str(server_path),
+                    creator_id=user.id,
+                )
+                db_server = crud.create_server(_db, internal_server_model, creator_id=user.id)
+
+            task.progress = 20
+            task.message = f"服务器：{server.name} | 初始化 MCDR..."
+            server_path.mkdir(parents=True, exist_ok=True)
+
+            success, message = await mcdr_manager.initialize_server_files(db_server)
+            if not success:
+                raise RuntimeError(f"Failed to initialize server files: {message}")
+
+            task.progress = 80
+            task.message = f"服务器：{server.name} | 同步面板状态..."
+            await mcdr_manager.notify_server_list_update(db_server, is_adding=True)
+
+            try:
+                from backend.services import player_manager
+                player_manager.on_server_created(Path(db_server.path).name, db_server.path)
+            except Exception:
+                pass
+
+            task.status = TaskStatus.SUCCESS
+            task.progress = 100
+            task.message = f"服务器：{server.name}"
+        except Exception as e:
+            task.status = TaskStatus.FAILED
+            task.error = str(getattr(e, "detail", e))
+            task.message = f"服务器：{server.name}"
+
+            # 与旧逻辑一致：创建失败时回滚 DB + 文件夹
+            try:
+                if db_server is not None:
+                    with get_db_context() as _db:
+                        crud.delete_server(_db, db_server.id)
+            except Exception:
+                pass
+            try:
+                if server_path is not None:
+                    shutil.rmtree(server_path, ignore_errors=True)
+            except Exception:
+                pass
+        finally:
+            # 成功任务可延迟自动清理；失败任务默认保留，供前端“清除失败任务”
+            try:
+                task_manager.clear_finished_task(task.id)
+            except Exception:
+                pass
+
+    asyncio.create_task(_run_create_server())
+    # 后台创建：客户端通过 TaskManager 实时获取进度
+    return {"task_id": task.id, "message": "已开始创建服务器任务"}
 
 
 @router.delete("/servers/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
