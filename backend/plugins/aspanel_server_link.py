@@ -98,6 +98,7 @@ def _query_pos_by_command(server: ServerInterface, player: str) -> tuple[Optiona
         if m:
             pos = (float(m.group(1)), float(m.group(2)), float(m.group(3)))
     except Exception:
+        server.logger.warning(f"Failed to query position for player {player}")
         pos = None
     try:
         out = server.rcon_query(f"data get entity {player} Dimension")
