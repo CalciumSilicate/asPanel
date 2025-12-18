@@ -10,7 +10,7 @@
     @close="resetDialogState"
   >
     <div v-loading="configLoading" element-loading-text="正在加载配置...">
-      <el-scrollbar max-height="65vh" class="config-form-scrollbar">
+      <el-scrollbar max-height="65vh" class="config-form-scrollbar" always>
         <!-- 视图 1: 选择服务器类型 -->
         <SelectTypeView v-if="currentView === 'select_type'" v-model="selectedServerTypeForSetup"/>
 

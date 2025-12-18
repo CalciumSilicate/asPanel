@@ -20,7 +20,7 @@
           </template>
         </el-input>
 
-        <el-table :data="filteredServers" size="small" stripe @row-click="handleSelectServer" row-key="id">
+        <el-table :data="filteredServers" size="small" stripe height="100%" @row-click="handleSelectServer" row-key="id">
           <el-table-column label="服务器" min-width="160">
             <template #default="{ row }">
               <div class="flex items-center justify-between w-full">
@@ -765,11 +765,10 @@ onMounted(initialLoad)
 
 <style scoped>
 .mods-manager-layout { display: flex; gap: 12px; height: calc(100vh - 64px); overflow: hidden; }
-.left-panel { width: 280px; max-width: 280px; flex-shrink: 0; align-self: flex-start; transition: width 0.32s cubic-bezier(.34,1.56,.64,1); will-change: width; overflow-x: hidden; overflow-y: auto; }
+.left-panel { width: 280px; max-width: 280px; flex-shrink: 0; align-self: stretch; height: 100%; min-height: 0; transition: width 0.32s cubic-bezier(.34,1.56,.64,1); will-change: width; overflow: hidden; }
 .is-collapsed .left-panel, .is-collapsing .left-panel { width: 0 !important; }
 .is-collapsing .left-panel :deep(.el-card__body), .is-collapsing .left-panel :deep(.el-card__header) { display: none !important; }
-.mods-content-area { padding: 0 20px 20px; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; -ms-overflow-style: none; }
-.mods-content-area::-webkit-scrollbar { width: 0; height: 0; }
+.mods-content-area { padding: 0 20px 20px; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; }
 .main-placeholder { display: flex; justify-content: center; align-items: center; height: 100%; }
 
 .mb-3 { margin-bottom: 12px; }
@@ -788,12 +787,13 @@ onMounted(initialLoad)
 .muted { font-size: 12px; color: #909399; }
 
 /* 左侧面板内部元素宽度与溢出控制，避免横向滚动 */
-.left-panel :deep(.el-card) { display: block; }
-.left-panel :deep(.el-card__body) { padding: 8px; }
+.left-panel :deep(.el-card) { height: 100%; display: flex; flex-direction: column; }
+.left-panel :deep(.el-card__body) { padding: 8px; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .left-panel :deep(.el-input),
 .left-panel :deep(.el-input__wrapper) { width: 100%; }
 .left-panel :deep(.el-table),
 .left-panel :deep(.el-table__inner-wrapper) { width: 100%; }
+.left-panel :deep(.el-table) { flex: 1 1 auto; min-height: 0; }
 .left-panel :deep(.el-scrollbar__wrap) { overflow-x: hidden !important; }
 
 /* 对话框底部布局：左下角兼容开关，右下角分页 */

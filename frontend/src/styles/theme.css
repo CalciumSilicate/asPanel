@@ -291,3 +291,21 @@ h1, h2, h3, h4, h5, h6 { color: var(--color-text); }
 .el-table__body-wrapper::-webkit-scrollbar-thumb { background: rgba(0,0,0,.18); border-radius: 3px; }
 .el-table__body-wrapper::-webkit-scrollbar-track { background: transparent; }
 .el-table__body-wrapper::-webkit-scrollbar-button { display: none; }
+
+/* 无障碍：减少动效 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 无障碍：键盘焦点可见 */
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid rgba(119, 181, 254, 0.6);
+  outline-offset: 2px;
+}

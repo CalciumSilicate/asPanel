@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
+    "typecheck": "vue-tsc -b",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview"
   },
@@ -28,6 +29,7 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.0",
     "@vue/tsconfig": "^0.7.0",
+    "@types/node": "^24.3.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
     "vue-tsc": "^2.2.12"

@@ -668,38 +668,10 @@ onMounted(() => {
   height: calc(100vh - var(--el-header-height));
   overflow: auto; /* 允许内部滚动 */
   box-sizing: border-box;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
-
-/* 隐藏本页内所有滚动条（保留滚动功能） */
-.db-plugin-manager {
-  scrollbar-width: none;      /* Firefox */
-  -ms-overflow-style: none;   /* IE 10+ */
-}
-.db-plugin-manager::-webkit-scrollbar { width: 0; height: 0; }
-
-/* 隐藏 Element Plus 自定义滚动条 */
-.db-plugin-manager :deep(.el-scrollbar__bar) { display: none !important; }
-.db-plugin-manager :deep(.el-scrollbar__wrap) {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.db-plugin-manager :deep(.el-scrollbar__wrap::-webkit-scrollbar) { width: 0; height: 0; }
-
-/* 隐藏表格主体区域的滚动条（横/纵） */
-.db-plugin-manager :deep(.el-table__body-wrapper) {
-  overflow: auto; /* 保持可滚动 */
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.db-plugin-manager :deep(.el-table__body-wrapper::-webkit-scrollbar) { width: 0; height: 0; }
-
-/* 隐藏弹窗内容区域滚动条 */
-.db-plugin-manager :deep(.el-dialog__body) {
-  max-height: 70vh; /* 控制高度避免外层出现页面滚动条 */
-  overflow: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.db-plugin-manager :deep(.el-dialog__body::-webkit-scrollbar) { width: 0; height: 0; }
+.db-plugin-manager :deep(.el-scrollbar__bar) { opacity: 0.9; }
+.db-plugin-manager :deep(.el-dialog__body) { max-height: 70vh; overflow: auto; }
 
 </style>

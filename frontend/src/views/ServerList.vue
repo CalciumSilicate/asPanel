@@ -215,7 +215,7 @@
         @close="resetDialogState"
     >
       <div v-loading="configLoading" element-loading-text="正在加载配置...">
-        <el-scrollbar max-height="65vh" class="config-form-scrollbar">
+        <el-scrollbar max-height="65vh" class="config-form-scrollbar" always>
           <!-- 视图 1: 选择服务器类型 -->
           <div v-if="currentView === 'select_type'">
             <el-form label-position="top">
@@ -2514,23 +2514,29 @@ onUnmounted(() => {
 <style scoped>
 /* 服务器列表主容器：占满可用高度，内卡片和表格自适应填充 */
 .server-list-container {
-  height: 100%;
+  height: calc(100vh - var(--el-header-height) - 48px);
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 .server-list-container > .el-card {
   flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   width: 100%;
 }
 .server-list-container > .el-card :deep(.el-card__body) {
   flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 0; /* 去掉卡片内边距，让表格占满宽度 */
 }
 .server-list-container > .el-card :deep(.el-table) {
+  flex: 1 1 auto;
+  min-height: 0;
   height: 100%;
   width: 100%;
 }

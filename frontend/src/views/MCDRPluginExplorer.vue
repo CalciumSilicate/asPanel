@@ -181,18 +181,18 @@
         <el-divider>依赖信息 (最新版本)</el-divider>
         <div class="table-card" style="margin-bottom: 20px;">
           <el-descriptions :column="1" border size="small">
-          <el-descriptions-item label="插件依赖" v-if="detail.latest?.meta?.dependencies">
-            <el-space wrap v-if="Object.keys(detail.latest.meta.dependencies).length > 0">
-              <el-tag v-for="(version, name) in detail.latest.meta.dependencies" :key="name" size="small"
+          <el-descriptions-item label="插件依赖" v-if="detail?.latest?.meta?.dependencies">
+            <el-space wrap v-if="Object.keys(detail?.latest?.meta?.dependencies || {}).length > 0">
+              <el-tag v-for="(version, name) in (detail?.latest?.meta?.dependencies || {})" :key="name" size="small"
                       type="primary" effect="dark">
                 {{ name }}: {{ version }}
               </el-tag>
             </el-space>
             <span v-else>无</span>
           </el-descriptions-item>
-          <el-descriptions-item label="Python库依赖" v-if="detail.latest?.meta?.requirements">
-            <el-space wrap v-if="detail.latest.meta.requirements.length > 0">
-              <el-tag v-for="req in detail.latest.meta.requirements" :key="req" size="small" type="success"
+          <el-descriptions-item label="Python库依赖" v-if="detail?.latest?.meta?.requirements">
+            <el-space wrap v-if="(detail?.latest?.meta?.requirements || []).length > 0">
+              <el-tag v-for="req in (detail?.latest?.meta?.requirements || [])" :key="req" size="small" type="success"
                       effect="plain">
                 {{ req }}
               </el-tag>
@@ -218,7 +218,7 @@
                            @click="go(r.asset.browser_download_url)">下载
                 </el-button>
                 <el-button v-if="r.url" size="small" @click="go(r.url)">发布页</el-button>
-                <el-button size="small" type="success" :icon="Upload" @click="handleInstallClick(detail, r)">
+                <el-button size="small" type="success" :icon="Upload" @click="detail && handleInstallClick(detail, r)">
                   为服务器安装
                 </el-button>
               </el-button-group>
@@ -805,33 +805,10 @@ onMounted(() => {
   height: calc(100vh - var(--el-header-height) - 48px); /* 减去头部与 el-main 内边距 */
   overflow: auto;
   box-sizing: border-box;
-  scrollbar-width: none;      /* Firefox */
-  -ms-overflow-style: none;   /* IE 10+ */
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
-.mcdr-explorer::-webkit-scrollbar { width: 0; height: 0; }
-
-/* 隐藏表格主体滚动条（仍可滚动） */
-.mcdr-explorer :deep(.el-table__body-wrapper) {
-  overflow: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.mcdr-explorer :deep(.el-table__body-wrapper::-webkit-scrollbar) { width: 0; height: 0; }
-
-/* 隐藏 Drawer 内容区域滚动条（仍可滚动） */
-.mcdr-explorer :deep(.el-drawer__body) {
-  overflow: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.mcdr-explorer :deep(.el-drawer__body::-webkit-scrollbar) { width: 0; height: 0; }
-
-/* 兜底：隐藏 Element Plus 自定义滚动条（若本页有使用 el-scrollbar 时生效） */
-.mcdr-explorer :deep(.el-scrollbar__bar) { display: none !important; }
-.mcdr-explorer :deep(.el-scrollbar__wrap) {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.mcdr-explorer :deep(.el-scrollbar__wrap::-webkit-scrollbar) { width: 0; height: 0; }
+/* Element Plus 自定义滚动条保持可见 */
+.mcdr-explorer :deep(.el-scrollbar__bar) { opacity: 0.9; }
 
 </style>

@@ -645,10 +645,9 @@ const buildMessageSegments = (content) => {
 .chat-wrapper { display: grid; grid-template-columns: 1fr 240px; gap: 12px; align-items: start; flex: 1 1 auto; min-height: 0; }
 .chat-left { display: flex; flex-direction: column; min-height: 0; height: 100%; }
 .chat-main { position: relative; background: transparent; padding: 6px 4px; overflow: auto; flex: 0 1 auto; margin-top: auto; max-height: 100%; }
-/* 自定义滚动条：白灰色，默认隐藏，hover 显示 */
-.chat-main { scrollbar-width: thin; scrollbar-color: rgba(200,200,200,.6) transparent; }
-.chat-main::-webkit-scrollbar { width: 0; height: 0; }
-.chat-main:hover::-webkit-scrollbar { width: 8px; height: 8px; }
+/* 自定义滚动条：白灰色（保持可见） */
+.chat-main { scrollbar-width: thin; scrollbar-color: rgba(200,200,200,.7) transparent; scrollbar-gutter: stable; }
+.chat-main::-webkit-scrollbar { width: 8px; height: 8px; }
 .chat-main::-webkit-scrollbar-thumb { background: rgba(200,200,200,.7); border-radius: 4px; }
 .chat-main::-webkit-scrollbar-track { background: transparent; }
 .load-older { display: flex; justify-content: center; align-items: center; padding: 6px 0; color: var(--el-text-color-secondary); }

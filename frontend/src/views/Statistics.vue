@@ -153,7 +153,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import apiClient from '@/api'
-import { fetchDeltaSeries, fetchTotalSeries, fetchMetrics, fetchLeaderboardTotal, fetchLeaderboardDelta } from '@/api/stats'
+import { fetchDeltaSeries, fetchTotalSeries, fetchMetrics, fetchLeaderboardTotal } from '@/api/stats'
 import { loadECharts } from '@/utils/echartsLoader'
 
 const players = ref<any[]>([])
@@ -185,7 +185,6 @@ const granularityOptions = computed(() => granularities.map(g => ({
   label: (g==='10min' || g==='20min' || g==='30min' || g==='1h') ? `${g}（数据量大时易卡，慎选）` : g,
 })))
 const granularity = ref<string>('24h')
-const range = ref<[Date, Date] | null>(null)
 
 // 指标预设
 const metricPresets = [
@@ -268,7 +267,7 @@ function rerenderFromCache() {
 }
 
 // 换算单位配置
-const convertEnabled = ref<'boolean'>(true)
+const convertEnabled = ref<boolean>(true)
 const convertFrom = ref<'gt'|'cm'>('gt')
 const convertTo = ref<'sec'|'min'|'hour'|'day'|'km'>('hour')
 
@@ -658,11 +657,6 @@ function fmtKpi(val: number): string {
   return String(Math.round(Number(val || 0)))
 }
 
-function valueForChart(val: number): number {
-  if (!percentEnabled.value) return Number(val || 0)
-  return Number(toPercent(val))
-}
-
 function computeSelectedServerIds() {
   const nameToId = new Map<string, number>()
   servers.value.forEach((s:any) => nameToId.set((s.path?.split('/').pop()) || s.name, Number(s.id)))
@@ -683,7 +677,6 @@ async function searchMetrics(query: string) {
   } finally { metricsLoading.value = false }
 }
 
-let rankRefreshTimer: any = null
 const rankItems = ref<any[]>([])
 
 

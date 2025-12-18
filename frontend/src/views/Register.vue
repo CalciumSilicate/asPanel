@@ -10,19 +10,19 @@
       </template>
       <el-form :model="form" @submit.prevent="handleRegister" label-position="top">
         <el-form-item label="用户名">
-          <el-input v-model="form.username" placeholder="请输入用户名" size="large" :prefix-icon="User"></el-input>
+          <el-input v-model="form.username" placeholder="请输入用户名" size="large" :prefix-icon="User" autocomplete="username"></el-input>
         </el-form-item>
         <el-form-item label="密码">
-          <el-input v-model="form.password" type="password" placeholder="请输入密码" show-password size="large" :prefix-icon="Lock"></el-input>
+          <el-input v-model="form.password" type="password" placeholder="请输入密码" show-password size="large" :prefix-icon="Lock" autocomplete="new-password"></el-input>
         </el-form-item>
         <el-form-item label="确认密码">
-          <el-input v-model="form.confirmPassword" type="password" placeholder="请再次输入密码" show-password size="large" :prefix-icon="Lock"></el-input>
+          <el-input v-model="form.confirmPassword" type="password" placeholder="请再次输入密码" show-password size="large" :prefix-icon="Lock" autocomplete="new-password"></el-input>
         </el-form-item>
         <el-form-item label="QQ（必填）">
           <el-input v-model="form.qq" placeholder="请输入 QQ 号（纯数字）" size="large"></el-input>
         </el-form-item>
         <el-form-item label="邮箱（可选）">
-          <el-input v-model="form.email" placeholder="请输入邮箱" size="large"></el-input>
+          <el-input v-model="form.email" placeholder="请输入邮箱" size="large" autocomplete="email"></el-input>
         </el-form-item>
         <el-form-item label="玩家名（可选，便于绑定 MC 身份）">
           <el-input v-model="form.player_name" placeholder="绑定已有玩家名（可选）" size="large"></el-input>
@@ -105,12 +105,22 @@ const handleRegister = async () => {
   justify-content: center;
   align-items: center;
   height: 100vh;
-  background-image: linear-gradient(to top, #cfd9df 0%, #e2ebf0 100%);
+  background: radial-gradient(1200px 600px at 10% 10%, var(--brand-soft) 0%, transparent 50%),
+              radial-gradient(1200px 600px at 90% 90%, var(--brand-accent) 0%, transparent 55%),
+              var(--color-bg);
+  padding: 24px;
 }
 
 .auth-card {
-  width: 400px;
-  border-radius: 8px;
+  width: 420px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  animation: card-in .5s var(--ease-standard) both;
+}
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(12px) scale(.98); }
+  to   { opacity: 1; transform: translateY(0)     scale(1); }
 }
 .card-title {
   text-align: center;
@@ -120,7 +130,7 @@ const handleRegister = async () => {
 }
 .card-title span {
   font-size: 14px;
-  color: #999;
+  color: var(--color-text-secondary);
 }
 
 .footer-link {
@@ -130,7 +140,7 @@ const handleRegister = async () => {
 }
 
 .footer-link a {
-  color: #409eff;
+  color: var(--brand-primary);
   text-decoration: none;
 }
 </style>

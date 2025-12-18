@@ -19,7 +19,7 @@
             <template #prefix><el-icon><Search/></el-icon></template>
           </el-input>
 
-          <el-table :data="filteredServers" size="small" stripe v-loading="loadingServers" @row-click="selectServer">
+          <el-table :data="filteredServers" size="small" stripe height="100%" v-loading="loadingServers" @row-click="selectServer">
             <el-table-column label="服务器" min-width="180">
               <template #default="{ row }">
                 <div class="flex items-center justify-between w-full">
@@ -458,19 +458,18 @@ onMounted(() => {
 <style scoped>
 .pb-page { }
 .left-wrap { display: flex; gap: 16px; align-items: stretch; height: calc(100vh - var(--el-header-height) - 48px); overflow: hidden; min-height: 0; }
-.left-panel { width: 320px; flex-shrink: 0; align-self: flex-start; }
+.left-panel { width: 320px; flex-shrink: 0; align-self: stretch; height: 100%; min-height: 0; }
 .left-panel { transition: width 0.32s cubic-bezier(.34,1.56,.64,1); will-change: width; overflow: hidden; }
 .is-collapsed .left-panel, .is-collapsing .left-panel { width: 0 !important; }
 .is-collapsing .left-panel :deep(.el-card__body), .is-collapsing .left-panel :deep(.el-card__header) { display: none !important; }
-.left-panel :deep(.el-card) { display: block; }
-.left-panel :deep(.el-card__body) { padding: 8px; }
+.left-panel :deep(.el-card) { height: 100%; display: flex; flex-direction: column; }
+.left-panel :deep(.el-card__body) { padding: 8px; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .left-panel :deep(.el-input), .left-panel :deep(.el-input__wrapper) { width: 100%; }
 .left-panel :deep(.el-table__inner-wrapper) { width: 100%; }
+.left-panel :deep(.el-table) { flex: 1 1 auto; min-height: 0; }
 .right-panel { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .right-panel :deep(.el-descriptions) { border-radius: 8px; overflow: hidden; }
-/* 隐藏右侧滚动条但保留滚动 */
-.right-panel::-webkit-scrollbar { width: 0; height: 0; }
-.right-panel { scrollbar-width: none; -ms-overflow-style: none; }
+.right-panel { scrollbar-gutter: stable; scrollbar-width: thin; }
 /* 工具类 */
 .mb-2 { margin-bottom: 8px; }
 .mb-3 { margin-bottom: 12px; }
@@ -487,4 +486,3 @@ onMounted(() => {
 .server-cell .name { line-height: 18px; }
 .pre-like { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 </style>
-

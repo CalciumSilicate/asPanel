@@ -13,6 +13,19 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(__dirname, './src')
       }
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return
+            const inNode = (pkg: string) => new RegExp(`/node_modules/${pkg}/`).test(id)
+            if (inNode('vue') || inNode('vue-router')) return 'vendor-vue'
+            if (inNode('element-plus') || inNode('@element-plus')) return 'vendor-element-plus'
+            if (inNode('@formkit')) return 'vendor-formkit'
+          },
+        },
+      },
+    },
     server: {
       // 开发环境通过 Vite 代理到后端，目标由 VITE_API_URL 指定
       host: true,

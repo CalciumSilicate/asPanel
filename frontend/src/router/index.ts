@@ -2,7 +2,7 @@
 
 import { createRouter, createWebHistory } from 'vue-router';
 import MainLayout from '../layout/MainLayout.vue';
-import { hasRole, fetchUser } from '@/store/user';
+import { hasRole, fetchUser, type UserRole } from '@/store/user';
 import { ElMessage } from 'element-plus';
 
 const routes = [
@@ -182,7 +182,7 @@ router.beforeEach(async (to, from, next) => {
     }
 
     // 角色不足：提示并回到上一个页面；若无来源（直达），回到仪表盘
-    const requiredRole = (to.meta as any)?.requiredRole as string | undefined;
+    const requiredRole = (to.meta as any)?.requiredRole as UserRole | undefined;
     if (requiredRole && !hasRole(requiredRole)) {
         ElMessage.error('无权限访问该页面');
         if (from && from.name) {
