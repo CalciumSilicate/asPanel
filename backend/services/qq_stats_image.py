@@ -30,37 +30,40 @@ FONT_BOLD_PATH = BASE_DIR / "backend/resources/fonts/MapleMono-NF-CN-Bold.ttf"
 # ========= 配置与主题 =========
 
 class Theme:
+    # 颜色配置保持不变
     BG_COLOR = (248, 249, 252)
     CARD_BG = (255, 255, 255)
     SHADOW_COLOR = (20, 30, 60, 20)
-
+    
     TEXT_PRIMARY = (30, 35, 50)
     TEXT_SECONDARY = (130, 140, 160)
     TEXT_ACCENT = (100, 100, 255)
     ONLINE_COLOR = (34, 197, 94)
-
     POSITIVE = (16, 185, 129)
     NEGATIVE = (239, 68, 68)
 
+    # 图表颜色
     CHART_LINE_COLOR = "#6366f1"
     CHART_FILL_COLOR = "#818cf8"
-
+    
+    # 地图相关颜色保持不变...
     DIM_NETHER_COLOR = (239, 68, 68)
     DIM_OVERWORLD_COLOR = (16, 185, 129)
     DIM_END_COLOR = (168, 85, 247)
     PATH_DEFAULT_COLOR = (96, 165, 250)
-
     ARROW_NETHER = (127, 29, 29)
     ARROW_OVERWORLD = (6, 78, 59)
     ARROW_END = (88, 28, 135)
     ARROW_DEFAULT = (30, 58, 138)
-
     MAP_LINE_COLOR = (203, 213, 225)
     MAP_NODE_BG = (255, 255, 255)
     MAP_NODE_BORDER = (148, 163, 184)
 
-    WIDTH = 1080
-    PADDING = 50
+    # === [核心修改] 布局常量 ===
+    WIDTH = 1800          # 总宽度拉宽
+    PADDING = 50          # 边距
+    LEFT_PANEL_WIDTH = 650  # 左侧数据栏宽度
+    COLUMN_GAP = 40       # 左右栏间距
     CARD_RADIUS = 24
 
 # ========= 字体管理 =========
@@ -696,217 +699,219 @@ def render_combined_view(
         data: Dict,
         map_config: Any = None,
 ):
-    # === 1. 布局参数计算 ===
+    # === 1. 数据准备与高度预计算 ===
     totals = data.get("totals", [])
     charts = data.get("charts", [])
     is_online = data.get("is_online", True)
     in_server = data.get("in_server", "Survival")
 
-    # [优化点1] 统计卡片改为 3 列 (原为 2 列)
-    stats_cols = 3 
+    # 左侧栏配置
+    # 统计卡片：在左侧栏内，使用双列布局比较合适
+    stats_cols = 2
     stats_gap = 20
     stats_card_h = 100
-    # 计算统计区域总行数
     stats_rows = (len(totals) + stats_cols - 1) // stats_cols
     
-    # [优化点2] 图表改为 2 列 (原为 1 列)
-    chart_cols = 2
+    # 图表：在左侧栏内，使用单列垂直堆叠，显示更清晰
+    chart_cols = 1
     chart_gap = 30
-    chart_card_h = 280 #稍微减小高度
-    # 计算图表区域总行数
-    chart_rows = (len(charts) + chart_cols - 1) // chart_cols
+    chart_card_h = 260
+    chart_rows = len(charts)
 
     # 头像区高度
-    avatar_size = 160 # 稍微减小
+    avatar_size = 140
     header_height = Theme.PADDING + 20 + avatar_size + 60
 
-    # 各区域高度计算
+    # 各区域高度
     stats_area_height = stats_rows * (stats_card_h + stats_gap) + 20
     charts_area_height = chart_rows * (chart_card_h + chart_gap) + 20
     
-    # [优化点3] 地图高度压缩 (原为 800)
-    has_map = "location" in data or "path" in data
-    map_height = 550 if has_map else 0
+    # 计算左侧内容总高度
+    left_content_height = header_height + stats_area_height + charts_area_height + 50 # +Footer buffer
+    
+    # 决定画布总高度：至少要有 900px，否则以内容为准
+    total_height = max(left_content_height, 900)
 
-    # 预估总高度
-    total_height = header_height + stats_area_height + charts_area_height + map_height + 100
-    # 保证最小高度
-    total_height = max(total_height, 800)
-
-    # === 开始绘图 ===
+    # === 2. 初始化画布 ===
     img = Image.new("RGBA", (Theme.WIDTH, total_height), Theme.BG_COLOR)
     draw = ImageDraw.Draw(img)
 
     # 字体加载
-    font_h1 = load_font(56, is_bold=True) # 稍微调小标题
-    font_h2 = load_font(32, is_bold=True)
-    font_label = load_font(22, is_bold=False) # 调小 Label
-    font_sub = load_font(24, is_bold=False)
-    font_info = load_font(20, is_bold=False)
-    font_delta = load_font(20, is_bold=True)
-    font_chart_title = load_font(28, is_bold=True)
+    font_h1 = load_font(48, is_bold=True)
+    font_h2 = load_font(30, is_bold=True)
+    font_label = load_font(20, is_bold=False)
+    font_sub = load_font(22, is_bold=False)
+    font_info = load_font(18, is_bold=False)
+    font_delta = load_font(18, is_bold=True)
+    font_chart_title = load_font(26, is_bold=True)
 
+    # === 3. 绘制左侧栏 (Left Panel) ===
+    # 左侧栏的 X 范围: [Theme.PADDING, Theme.PADDING + Theme.LEFT_PANEL_WIDTH]
     cursor_y = Theme.PADDING + 20
-
-    # --- 2. 头部区域 (Header) ---
-    # 布局逻辑不变，只是尺寸微调
+    left_x = Theme.PADDING
+    
+    # --- Header (Avatar + Info) ---
     qq_avatar = crop_circle_avatar(data.get("qq_avatar", ""), avatar_size)
     
-    # 生成时间放在右上角，节省空间
-    gen_time = data.get("generated_at", "")
-    if gen_time:
-        draw.text((Theme.WIDTH - Theme.PADDING, 20), f"{gen_time}", fill=Theme.TEXT_SECONDARY, font=font_info, anchor="rt")
-
     # 绘制头像
-    draw.ellipse((Theme.PADDING, cursor_y, Theme.PADDING + avatar_size, cursor_y + avatar_size), fill=Theme.SHADOW_COLOR)
-    border_w = 6
+    draw.ellipse((left_x, cursor_y, left_x + avatar_size, cursor_y + avatar_size), fill=Theme.SHADOW_COLOR)
     draw.ellipse(
-        (Theme.PADDING - border_w, cursor_y - border_w, Theme.PADDING + avatar_size + border_w, cursor_y + avatar_size + border_w),
+        (left_x - 4, cursor_y - 4, left_x + avatar_size + 4, cursor_y + avatar_size + 4),
         fill=Theme.CARD_BG,
     )
-    img.paste(qq_avatar, (Theme.PADDING, cursor_y), qq_avatar)
+    img.paste(qq_avatar, (left_x, cursor_y), qq_avatar)
 
-    # MC 头像角标
-    mc_size = 60
+    # MC 角标
+    mc_size = 50
     mc_avatar = crop_circle_avatar(data.get("mc_avatar", ""), mc_size)
-    badge_x = Theme.PADDING + avatar_size - mc_size + 5
+    badge_x = left_x + avatar_size - mc_size + 5
     badge_y = cursor_y + avatar_size - mc_size + 5
-    draw.ellipse((badge_x - 4, badge_y - 4, badge_x + mc_size + 4, badge_y + mc_size + 4), fill=Theme.CARD_BG)
+    draw.ellipse((badge_x - 3, badge_y - 3, badge_x + mc_size + 3, badge_y + mc_size + 3), fill=Theme.CARD_BG)
     img.paste(mc_avatar, (badge_x, badge_y), mc_avatar)
 
-    # 文本信息
-    text_x = Theme.PADDING + avatar_size + 40
-    limit_w = Theme.WIDTH - text_x - Theme.PADDING # 文本最大宽度
+    # 个人信息文本
+    text_x = left_x + avatar_size + 30
+    info_limit_w = Theme.LEFT_PANEL_WIDTH - (avatar_size + 30)
 
-    date_text = data.get("time_range_label", "")
-    draw.text((text_x, cursor_y + 10), date_text, fill=Theme.TEXT_SECONDARY, font=font_sub, anchor="lt")
+    # 生成时间
+    gen_time = data.get("generated_at", "")
+    draw.text((text_x, cursor_y + 5), f"Generated: {gen_time}", fill=Theme.TEXT_SECONDARY, font=font_info, anchor="lt")
 
+    # 玩家名字
     name_text = data.get("player_name", "Player")
-    name_text = truncate_text(draw, name_text, font_h1, limit_w) # 防止名字过长
-    draw.text((text_x, cursor_y + 40), name_text, fill=Theme.TEXT_PRIMARY, font=font_h1, anchor="lt")
+    name_text = truncate_text(draw, name_text, font_h1, info_limit_w)
+    draw.text((text_x, cursor_y + 30), name_text, fill=Theme.TEXT_PRIMARY, font=font_h1, anchor="lt")
 
+    # UUID & Status
     uuid_str = data.get("uuid", "N/A")
-    draw.text((text_x, cursor_y + 110), f"{uuid_str}", fill=Theme.TEXT_SECONDARY, font=font_info, anchor="lt")
-
-    status_text = f"当前在线 - {in_server}" if is_online else f"最后在线: {data.get('last_seen', 'N/A')}"
+    draw.text((text_x, cursor_y + 85), f"{uuid_str}", fill=Theme.TEXT_SECONDARY, font=font_info, anchor="lt")
+    
+    status_text = f"● Online in {in_server}" if is_online else f"● Last seen: {data.get('last_seen', 'N/A')}"
     status_color = Theme.ONLINE_COLOR if is_online else Theme.TEXT_SECONDARY
-    draw.text((text_x, cursor_y + 140), status_text, fill=status_color, font=font_info, anchor="lt")
+    draw.text((text_x, cursor_y + 110), status_text, fill=status_color, font=font_info, anchor="lt")
 
-    cursor_y += avatar_size + 60
+    cursor_y += avatar_size + 40
 
-    # --- 3. 统计网格 (3列布局) ---
-    # 计算每个卡片的宽度
-    stats_card_w = (Theme.WIDTH - 2 * Theme.PADDING - (stats_cols - 1) * stats_gap) // stats_cols
+    # --- Stats Grid (Left Column) ---
+    draw.text((left_x, cursor_y - 10), "Statistics", fill=Theme.TEXT_SECONDARY, font=font_sub, anchor="lb")
+    
+    stats_card_w = (Theme.LEFT_PANEL_WIDTH - (stats_cols - 1) * stats_gap) // stats_cols
 
     for idx, item in enumerate(totals):
         row = idx // stats_cols
         col = idx % stats_cols
         
-        cx = Theme.PADDING + col * (stats_card_w + stats_gap)
+        cx = left_x + col * (stats_card_w + stats_gap)
         cy = cursor_y + row * (stats_card_h + stats_gap)
         bbox = (cx, cy, cx + stats_card_w, cy + stats_card_h)
 
-        draw_shadow(img, bbox, radius=Theme.CARD_RADIUS, blur=15, offset=(0, 4))
+        draw_shadow(img, bbox, radius=Theme.CARD_RADIUS, blur=10, offset=(0, 4))
         draw.rounded_rectangle(bbox, radius=Theme.CARD_RADIUS, fill=Theme.CARD_BG)
 
-        # 内部布局
-        y_label = cy + 25
-        y_val = cy + 60
+        # Label
+        label = truncate_text(draw, item.get("label", "Stat"), font_label, stats_card_w - 30)
+        draw.text((cx + 20, cy + 25), label, fill=Theme.TEXT_SECONDARY, font=font_label, anchor="lt")
         
-        # Label (左上)
-        label = item.get("label", "Stat")
-        label = truncate_text(draw, label, font_label, stats_card_w - 40)
-        draw.text((cx + 20, y_label), label, fill=Theme.TEXT_SECONDARY, font=font_label, anchor="lt")
-
-        # Value (左下，数字加大)
+        # Value
         val_raw = item.get("total", 0)
         val_str = f"{val_raw:,}" if isinstance(val_raw, (int, float)) else str(val_raw)
         
-        # Delta (右下)
+        # 动态字体大小防止溢出
+        curr_font_val = font_h2
+        if draw.textlength(val_str, font_h2) > stats_card_w * 0.65:
+            curr_font_val = load_font(24, True)
+            
+        draw.text((cx + 20, cy + 65), val_str, fill=Theme.TEXT_PRIMARY, font=curr_font_val, anchor="lm")
+
+        # Delta
         delta = item.get("delta", 0)
-        
-        # 简单防重叠：如果数字太长，缩小字体 (可选优化)
-        current_font_val = font_h2
-        if draw.textlength(val_str, font_h2) > stats_card_w * 0.6:
-             current_font_val = load_font(26, True)
-
-        draw.text((cx + 20, y_val), val_str, fill=Theme.TEXT_PRIMARY, font=current_font_val, anchor="lm")
-
         if delta != 0:
             delta_str = f"{'+' if delta > 0 else ''}{delta}"
-            delta_color = Theme.POSITIVE if delta > 0 else Theme.NEGATIVE
-            draw.text((cx + stats_card_w - 20, y_val), delta_str, fill=delta_color, font=font_delta, anchor="rm")
+            c = Theme.POSITIVE if delta > 0 else Theme.NEGATIVE
+            draw.text((cx + stats_card_w - 20, cy + 65), delta_str, fill=c, font=font_delta, anchor="rm")
 
     cursor_y += stats_rows * (stats_card_h + stats_gap) + 30
 
-    # --- 4. 图表区域 (2列布局) ---
-    chart_card_w = (Theme.WIDTH - 2 * Theme.PADDING - (chart_cols - 1) * chart_gap) // chart_cols
+    # --- Charts (Left Column) ---
+    if charts:
+        draw.text((left_x, cursor_y - 10), "Activity Trends", fill=Theme.TEXT_SECONDARY, font=font_sub, anchor="lb")
+        
+        chart_card_w = Theme.LEFT_PANEL_WIDTH # 全宽
+
+        for chart in charts:
+            cx = left_x
+            cy = cursor_y
+            bbox = (cx, cy, cx + chart_card_w, cy + chart_card_h)
+
+            draw_shadow(img, bbox, radius=Theme.CARD_RADIUS, blur=15)
+            draw.rounded_rectangle(bbox, radius=Theme.CARD_RADIUS, fill=Theme.CARD_BG)
+
+            title = chart.get("label", "Trend")
+            draw.text((cx + 20, cy + 20), title, fill=Theme.TEXT_PRIMARY, font=font_chart_title, anchor="lt")
+            
+            total_v = chart.get("total", 0)
+            t_str = f"Total: {total_v:,}" if isinstance(total_v, (int, float)) else str(total_v)
+            draw.text((cx + chart_card_w - 20, cy + 24), t_str, fill=Theme.TEXT_SECONDARY, font=font_info, anchor="rt")
+
+            # 绘制图表
+            c_w = chart_card_w - 40
+            c_h = chart_card_h - 70
+            chart_img = create_smooth_chart(c_w, c_h, chart.get("x", []), chart.get("y", []), title)
+            img.paste(chart_img, (cx + 20, cy + 60), chart_img)
+
+            cursor_y += chart_card_h + chart_gap
+
+    # Footer Info
+    data_source = data.get("data_source_text", "")
+    if data_source:
+        ds_font = load_font(16, is_bold=False)
+        data_source = truncate_text(draw, data_source, ds_font, Theme.LEFT_PANEL_WIDTH)
+        draw.text((left_x, total_height - 30), data_source, fill=Theme.TEXT_SECONDARY, font=ds_font, anchor="lm")
+
+
+    # === 4. 绘制右侧栏 (Map Panel) ===
+    has_map = "location" in data or "path" in data
     
-    for idx, chart in enumerate(charts):
-        row = idx // chart_cols
-        col = idx % chart_cols
+    # 计算右侧栏位置
+    right_x = Theme.PADDING + Theme.LEFT_PANEL_WIDTH + Theme.COLUMN_GAP
+    right_w = Theme.WIDTH - right_x - Theme.PADDING
+    right_h = total_height - 2 * Theme.PADDING # 上下对齐
+    right_y = Theme.PADDING
 
-        cx = Theme.PADDING + col * (chart_card_w + chart_gap)
-        cy = cursor_y + row * (chart_card_h + chart_gap)
-        bbox = (cx, cy, cx + chart_card_w, cy + chart_card_h)
-
-        draw_shadow(img, bbox, radius=Theme.CARD_RADIUS, blur=20)
-        draw.rounded_rectangle(bbox, radius=Theme.CARD_RADIUS, fill=Theme.CARD_BG)
-
-        title = chart.get("label", "Trend")
-        # 标题栏
-        draw.text((cx + 20, cy + 20), title, fill=Theme.TEXT_PRIMARY, font=font_chart_title, anchor="lt")
-        
-        # 总数放右上角
-        total_v = chart.get("total", 0)
-        if isinstance(total_v, (int, float)):
-             total_str = f"{total_v:,}"
-        else:
-             total_str = str(total_v)
-             
-        draw.text((cx + chart_card_w - 20, cy + 24), total_str, fill=Theme.TEXT_SECONDARY, font=font_sub, anchor="rt")
-
-        # 绘图区域
-        chart_content_w = chart_card_w - 40
-        chart_content_h = chart_card_h - 70
-        chart_img = create_smooth_chart(chart_content_w, chart_content_h, chart.get("x", []), chart.get("y", []), title)
-        img.paste(chart_img, (cx + 20, cy + 60), chart_img)
-
-    if len(charts) > 0:
-        cursor_y += chart_rows * (chart_card_h + chart_gap) + 30
-
-    # --- 5. 地图区域 (宽幅横条) ---
     if has_map:
-        bbox = (Theme.PADDING, cursor_y, Theme.WIDTH - Theme.PADDING, cursor_y + map_height)
+        bbox = (right_x, right_y, right_x + right_w, right_y + right_h)
         
+        # 阴影与背景
         draw_shadow(img, bbox, radius=Theme.CARD_RADIUS, blur=20)
-        mask = Image.new("L", (bbox[2] - bbox[0], bbox[3] - bbox[1]), 0)
-        ImageDraw.Draw(mask).rounded_rectangle((0, 0, bbox[2] - bbox[0], bbox[3] - bbox[1]), radius=Theme.CARD_RADIUS, fill=255)
+        # 创建遮罩以裁剪圆角
+        mask = Image.new("L", (right_w, right_h), 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, right_w, right_h), radius=Theme.CARD_RADIUS, fill=255)
 
         nether_json, end_json = _extract_map_json_paths(map_config)
         nether_json = _resolve_map_json_path(nether_json)
         end_json = _resolve_map_json_path(end_json)
         renderer = PositionMapRenderer(nether_json, end_json)
-        
-        inner_w, inner_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
         map_img = None
         info_data = {}
-        title = "Map"
+        title = "Position"
 
+        # 生成地图图片
         if "location" in data:
             loc = data["location"]
+            # 注意：这里我们传入了 right_w 和 right_h，地图会自动适应这个长宽比
             map_raw, info_data = renderer.generate_location_image(
-                inner_w, inner_h, loc["x"], loc["z"], loc["dim"], data.get("mc_avatar", ""), loc.get("yaw", 0)
+                right_w, right_h, loc["x"], loc["z"], loc["dim"], data.get("mc_avatar", ""), loc.get("yaw", 0)
             )
             map_img = map_raw
-            title = "最近位置"
+            title = "Current Location"
         elif "path" in data:
             path_pts = data["path"]
-            map_raw = renderer.generate_path_image(inner_w, inner_h, path_pts, data.get("mc_avatar", ""))
+            map_raw = renderer.generate_path_image(right_w, right_h, path_pts, data.get("mc_avatar", ""))
             map_img = map_raw
-            title = "行动轨迹"
-            # ... (Path info logic same as before) ...
+            title = "Recent Path"
             try:
+                # 获取最后一个点的信息用于显示
                 last = path_pts[-1] if path_pts else None
                 if last and len(last) >= 3:
                     last_x, last_z, last_dim = float(last[0]), float(last[1]), int(last[2])
@@ -914,78 +919,66 @@ def render_combined_view(
                     mx, mz = renderer._transform_coord(last_x, last_z, last_dim)
                     sorted_stations = renderer._get_sorted_stations(mx, mz, gid)
                     nearest = sorted_stations[0] if sorted_stations else (None, 0)
-                    has_end = any((len(p) >= 3 and int(p[2]) == 1) for p in path_pts)
-                    has_other = any((len(p) >= 3 and int(p[2]) != 1) for p in path_pts)
                     info_data = {
                         "x": last_x, "z": last_z, "dim": last_dim,
                         "nearest_name": nearest[0]["name"] if nearest[0] else None,
                         "nearest_dist": nearest[1],
-                        "_split_path": bool(has_end and has_other),
                     }
             except Exception: pass
 
         if map_img:
-            container = Image.new("RGBA", (inner_w, inner_h), (0, 0, 0, 0))
+            container = Image.new("RGBA", (right_w, right_h), (0, 0, 0, 0))
             container.paste(map_img, (0, 0))
-            img.paste(container, (bbox[0], bbox[1]), mask)
+            img.paste(container, (right_x, right_y), mask)
 
-            # 信息卡片 (改为紧凑型，放在右下角或左下角浮动)
-            if info_data and all(k in info_data for k in ["x", "z", "dim"]):
-                # 缩小信息卡片尺寸
-                card_w, card_h = 400, 110
-                
-                # 默认位置：右下角
-                cx = bbox[0] + inner_w - card_w - 20
-                cy = bbox[1] + inner_h - card_h - 20
-
-                # Path模式下的特殊位置逻辑 (保持原逻辑但调整坐标)
-                if info_data.get("_split_path"):
-                     # 简单处理：如果是在 path 模式，固定放在中间偏下，避免遮挡上下两界的极端位置
-                     cx = bbox[0] + (inner_w - card_w) // 2
-                     cy = bbox[1] + (inner_h // 2) - (card_h // 2)
-
-                overlay = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
-                od = ImageDraw.Draw(overlay)
-                od.rounded_rectangle((0, 0, card_w, card_h), radius=16, fill=(255, 255, 255, 240))
-                od.rounded_rectangle((0, 0, card_w, card_h), radius=16, outline=Theme.MAP_LINE_COLOR, width=2)
-                
-                # 绘制内容 (更紧凑)
-                dim_str = "The End" if info_data["dim"] == 1 else ("Nether" if info_data["dim"] == -1 else "Overworld")
-                dim_color = renderer._get_dim_color(info_data["dim"])
-                
-                od.text((20, 15), f"{int(info_data['x'])}, {int(info_data['z'])}", fill=Theme.TEXT_PRIMARY, font=load_font(30, True))
-                od.text((20, 55), dim_str, fill=dim_color, font=load_font(20, True))
-
-                if info_data.get("nearest_name"):
-                    n_name = info_data['nearest_name']
-                    n_name = truncate_text(od, n_name, load_font(22, True), 180)
-                    od.text((card_w - 20, 15), "Nearest", fill=Theme.TEXT_SECONDARY, font=load_font(18, False), anchor="rt")
-                    od.text((card_w - 20, 40), n_name, fill=Theme.TEXT_PRIMARY, font=load_font(22, True), anchor="rt")
-                    od.text((card_w - 20, 70), f"{int(info_data['nearest_dist'])}m", fill=Theme.TEXT_SECONDARY, font=load_font(18, False), anchor="rt")
-                
-                img.alpha_composite(overlay.convert("RGBA"), (cx, cy))
-
-            # 地图标题 (带描边，浮在左上角)
+            # 地图左上角的标题
             draw.text(
-                (bbox[0] + 25, bbox[1] + 20), title,
-                fill=Theme.TEXT_PRIMARY, font=font_chart_title,
+                (right_x + 30, right_y + 30), title,
+                fill=Theme.TEXT_PRIMARY, font=font_h2,
                 stroke_fill=(255, 255, 255), stroke_width=4
             )
 
-        cursor_y += map_height
+            # 地图信息卡片 (悬浮在右侧地图的底部)
+            if info_data and all(k in info_data for k in ["x", "z", "dim"]):
+                card_w, card_h = 360, 140
+                
+                # 悬浮位置：右侧面板的底部居中
+                cx = right_x + (right_w - card_w) // 2
+                cy = right_y + right_h - card_h - 30
 
-    # --- 6. 底部 Footer ---
-    # 数据源信息
-    data_source = data.get("data_source_text", "")
-    if data_source:
-        cursor_y += 10
-        ds_font = load_font(18, is_bold=False)
-        data_source = truncate_text(draw, data_source, ds_font, Theme.WIDTH - 2 * Theme.PADDING)
-        draw.text((Theme.WIDTH // 2, cursor_y), data_source, fill=Theme.TEXT_SECONDARY, font=ds_font, anchor="mt")
-        cursor_y += 30
+                overlay = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
+                od = ImageDraw.Draw(overlay)
+                od.rounded_rectangle((0, 0, card_w, card_h), radius=20, fill=(255, 255, 255, 245))
+                od.rounded_rectangle((0, 0, card_w, card_h), radius=20, outline=Theme.MAP_LINE_COLOR, width=1)
+                
+                dim_str = "The End" if info_data["dim"] == 1 else ("Nether" if info_data["dim"] == -1 else "Overworld")
+                dim_color = renderer._get_dim_color(info_data["dim"])
 
-    # 裁剪底部空白
-    return img.crop((0, 0, Theme.WIDTH, cursor_y + 30))
+                # 坐标
+                od.text((25, 20), "Coordinate", fill=Theme.TEXT_SECONDARY, font=font_info, anchor="lt")
+                od.text((25, 45), f"{int(info_data['x'])}, {int(info_data['z'])}", fill=Theme.TEXT_PRIMARY, font=load_font(28, True), anchor="lt")
+                od.text((25, 85), dim_str, fill=dim_color, font=load_font(20, True), anchor="lt")
+
+                # 最近站点
+                if info_data.get("nearest_name"):
+                    n_name = info_data['nearest_name']
+                    n_name = truncate_text(od, n_name, load_font(22, True), 140)
+                    
+                    od.text((card_w - 25, 20), "Nearest Station", fill=Theme.TEXT_SECONDARY, font=font_info, anchor="rt")
+                    od.text((card_w - 25, 45), n_name, fill=Theme.TEXT_PRIMARY, font=load_font(22, True), anchor="rt")
+                    od.text((card_w - 25, 80), f"{int(info_data['nearest_dist'])}m away", fill=Theme.TEXT_SECONDARY, font=font_info, anchor="rt")
+
+                img.alpha_composite(overlay.convert("RGBA"), (cx, cy))
+
+    else:
+        # 如果没有地图，右侧显示一个占位图或空白
+        # 这里选择画一个简单的虚线框表示无数据
+        bbox = (right_x, right_y, right_x + right_w, right_y + right_h)
+        draw.rounded_rectangle(bbox, radius=Theme.CARD_RADIUS, fill=(240, 242, 245))
+        draw.text((right_x + right_w/2, right_y + right_h/2), "No Location Data", fill=Theme.TEXT_SECONDARY, font=font_h2, anchor="mm")
+
+    return img
+
 if __name__ == "__main__":
     # 测试用例
     MAP_CONFIG = {
