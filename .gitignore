@@ -32,3 +32,5 @@ openapi_endpoints
 list_openapi_endpoints.py
 
 the_*.json
+
+test_output.png
