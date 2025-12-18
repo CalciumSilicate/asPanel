@@ -5,22 +5,24 @@ import 'element-plus/dist/index.css';
 import 'element-plus/theme-chalk/dark/css-vars.css';
 // 覆盖 Element Plus 变量与全局浅色主题
 import './styles/theme.css'
-import * as ElementPlusIconsVue from '@element-plus/icons-vue';
 import { plugin, defaultConfig } from '@formkit/vue'
 import formKitConfig from './formkit.config' // 推荐将配置分离到单独文件
 import '@formkit/themes/genesis'
+import { registerIcons } from './icons'
+import { initTheme } from './store/theme'
 
 import App from './App.vue';
 import router from './router';
 
 const app = createApp(App);
 
+// 尽早应用主题，避免页面闪烁
+initTheme()
+
 // 预加载系统设置（时区、java命令等）
 import('./store/settings').then(m => m.loadSettings()).catch(() => {})
 
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-    app.component(key, component);
-}
+registerIcons(app)
 
 app.use(router);
 app.use(ElementPlus);

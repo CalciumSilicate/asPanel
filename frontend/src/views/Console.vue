@@ -74,6 +74,13 @@ let socket = null;
 const serverName = ref('加载中...');
 const serverStatus = ref('loading');
 
+// 防止日志无限增长导致页面卡顿/内存暴涨
+const MAX_LOG_LINES = 2000;
+const trimLogs = () => {
+  const extra = logs.value.length - MAX_LOG_LINES;
+  if (extra > 0) logs.value.splice(0, extra);
+};
+
 // --- 计算属性保持不变 ---
 const statusText = computed(() => {
   switch (serverStatus.value) {
@@ -190,6 +197,7 @@ const setupSocketListeners = () => {
     // 例如: await sio.enter_room(sid, f'server_console_{server_id}')
     socket.emit('join_console_room', {server_id: parseInt(serverId.value, 10)});
     logs.value.push('--- [系统] 已连接到服务器控制台，开始接收实时日志 ---');
+    trimLogs();
   });
 
   // [修改] 移除旧的 'console_log' 监听器，或将其作为备用
@@ -199,6 +207,7 @@ const setupSocketListeners = () => {
   socket.on('console_log_batch', (data) => {
     if (data && Array.isArray(data.logs) && data.logs.length > 0) {
       logs.value.push(...data.logs);
+      trimLogs();
     }
   });
 
@@ -213,6 +222,7 @@ const setupSocketListeners = () => {
       // 只有在状态真正改变时才打印日志，避免不必要的信息
       if (oldStatus !== serverDetails.status) {
         logs.value.push(`--- [系统] 服务器状态更新: ${statusText.value} ---`);
+        trimLogs();
       }
     }
   });
@@ -220,16 +230,19 @@ const setupSocketListeners = () => {
   socket.on('server_delete', (serverDetails) => {
     if (serverDetails && serverDetails.id == serverId.value) {
       logs.value.push(`--- [系统] 服务器已被删除，请退出该页面 ---`);
+      trimLogs();
     }
   });
 
   socket.on('disconnect', () => {
     isConnected.value = false;
     logs.value.push('--- [系统] 已从服务器断开连接 ---');
+    trimLogs();
   });
 
   socket.on('connect_error', (error) => {
     logs.value.push(`--- [系统] 连接错误: ${error.message} ---`);
+    trimLogs();
   });
 };
 
@@ -244,6 +257,8 @@ const fetchHistoricalLogs = async () => {
     }
   } catch (error) {
     logs.value = ['--- [系统] 加载历史日志失败 ---'];
+  } finally {
+    trimLogs();
   }
 };
 
@@ -272,7 +287,7 @@ onUnmounted(() => {
   }
 });
 
-watch(logs, scrollToBottom, {deep: true});
+watch(() => logs.value.length, scrollToBottom);
 </script>
 
 <style scoped>

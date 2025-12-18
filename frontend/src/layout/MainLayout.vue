@@ -62,6 +62,20 @@
           </template>
         </el-dropdown>
 
+        <el-button
+          class="theme-toggle"
+          aria-label="切换主题"
+          :title="isDark ? '浅色模式' : '深色模式'"
+          circle
+          text
+          @click="toggleTheme"
+        >
+          <el-icon :size="18">
+            <Sunny v-if="isDark" />
+            <Moon v-else />
+          </el-icon>
+        </el-button>
+
         <el-dropdown @command="handleCommand">
           <span class="user-info">
             <el-avatar size="small" :src="fullAvatarUrl" :icon="UserFilled"/>
@@ -82,7 +96,7 @@
       <!-- 侧边栏 -->
       <el-aside :width="isCollapse ? '64px' : '220px'" class="app-aside" :class="{ 'is-collapsed': isCollapse, 'is-collapsing': isCollapsing }">
         <div class="sidebar-logo"></div>
-        <el-scrollbar>
+        <el-scrollbar always>
           <el-menu
             :default-active="activeMenu"
             class="el-menu-vertical-demo"
@@ -349,9 +363,11 @@ import {
   Cpu, Grid, Umbrella, Tools, Promotion, MapLocation, Connection, User, Printer,
   // Icons for Server Configuration
   SetUp, Link, Refresh, VideoPlay, Key,
-  LocationInformation, Place, List, RefreshRight, Comment, DocumentCopy, Operation
+  LocationInformation, Place, List, RefreshRight, Comment, DocumentCopy, Operation,
+  Moon, Sunny
 } from '@element-plus/icons-vue';
 import {user, fullAvatarUrl, fetchUser, clearUser, refreshAvatar, hasRole} from '@/store/user';
+import { isDark, toggleTheme } from '@/store/theme'
 import AvatarUploader from '@/components/AvatarUploader.vue';
 
 
@@ -543,19 +559,8 @@ onMounted(() => {
   height: 100%;
 }
 
-/* 隐藏侧边栏滚动条（保留滚动功能） */
-.app-aside :deep(.el-scrollbar__bar) {
-  display: none !important; /* 隐藏 Element Plus 自定义滚动条 */
-}
-.app-aside :deep(.el-scrollbar__wrap) {
-  /* 隐藏各浏览器的原生滚动条，但仍可滚动 */
-  scrollbar-width: none;           /* Firefox */
-  -ms-overflow-style: none;        /* IE 10+ */
-}
-.app-aside :deep(.el-scrollbar__wrap::-webkit-scrollbar) {
-  width: 0;                        /* Chrome/Safari */
-  height: 0;
-}
+/* 侧边栏滚动条保持可见（便于定位当前位置） */
+.app-aside :deep(.el-scrollbar__bar) { opacity: 0.9; }
 
 .content-wrapper {
   /* 让父级(main-layout)的统一渐变贯穿到主区域，避免与侧边栏分割处突兀 */
@@ -579,6 +584,7 @@ onMounted(() => {
 }
 
 .header-left { display: flex; align-items: center; height: var(--el-header-height); }
+.header-right { display: flex; align-items: center; }
 .brand { margin-left: 8px; font-size: 18px; font-weight: 600; color: var(--color-text); line-height: var(--el-header-height); height: var(--el-header-height); display: inline-flex; align-items: center; transition: none; }
 
 .collapse-icon {
@@ -595,6 +601,7 @@ onMounted(() => {
 
 /* 任务按钮样式（小圆按钮） */
 .tasks-dropdown { margin-right: 8px; }
+.theme-toggle { margin-right: 8px; }
 
 /* 任务下拉菜单内容样式 */
 .tasks-menu { width: 460px; max-width: min(560px, 92vw); padding: 6px 0; overflow-x: hidden; box-sizing: border-box; }

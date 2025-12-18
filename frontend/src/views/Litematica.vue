@@ -84,8 +84,8 @@
           :page-size="pageSize"
           :current-page="page"
           :total="items.length"
-          @current-change="p => page = p"
-          @size-change="s => { pageSize = s; page = 1 }"
+          @current-change="onPageChange"
+          @size-change="onPageSizeChange"
         />
       </div>
     </el-card>
@@ -119,6 +119,11 @@ const pagedItems = computed(() => {
   return items.value.slice(start, start + pageSize.value)
 })
 const onSelectionChange = (rows: LtmRow[]) => { multipleSelection.value = rows }
+const onPageChange = (p: number) => { page.value = p }
+const onPageSizeChange = (s: number) => {
+  pageSize.value = s
+  page.value = 1
+}
 
 const fetchList = async () => {
   loading.value = true

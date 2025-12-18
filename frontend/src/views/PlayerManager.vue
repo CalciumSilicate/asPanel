@@ -72,19 +72,19 @@
     </el-card>
 
     <!-- 外部分页，置于右下角 -->
-    <div class="pm-pagination">
-      <el-pagination
-          background
-          layout="prev, pager, next, sizes, total"
-          :page-sizes="[10, 20, 50, 100]"
-          :page-size="pageSize"
-          :current-page="page"
-          :total="filteredRows.length"
-          @current-change="p => page = p"
-          @size-change="s => { pageSize = s; page = 1; }"
-      />
-    </div>
-  </div>
+	    <div class="pm-pagination">
+	      <el-pagination
+	          background
+	          layout="prev, pager, next, sizes, total"
+	          :page-sizes="[10, 20, 50, 100]"
+	          :page-size="pageSize"
+	          :current-page="page"
+	          :total="filteredRows.length"
+	          @current-change="onPageChange"
+	          @size-change="onPageSizeChange"
+	      />
+	    </div>
+	  </div>
   
 </template>
 
@@ -120,8 +120,13 @@ const whitelistSet = computed(() => new Set(whitelistUUIDs.value))
 const busyTicks = ref(false)
 const busyNames = ref(false)
 
-const page = ref(1)
-const pageSize = ref(20)
+	const page = ref(1)
+	const pageSize = ref(20)
+	const onPageChange = (p: number) => { page.value = p }
+	const onPageSizeChange = (s: number) => {
+	  pageSize.value = s
+	  page.value = 1
+	}
 
 // 游玩时长排序：'desc' 或 'none'
 const playtimeSort = ref<'none' | 'desc'>('none')
@@ -304,4 +309,3 @@ onMounted(async () => {
 .pm-pagination { display: flex; justify-content: flex-end; margin-top: 8px; }
 
 </style>
-

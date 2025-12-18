@@ -19,7 +19,7 @@
           <template #prefix><el-icon><Search/></el-icon></template>
         </el-input>
 
-        <el-table :data="filteredServers" size="small" stripe @row-click="row => selectServer(row.id)">
+        <el-table :data="filteredServers" size="small" stripe height="100%" @row-click="row => selectServer(row.id)">
           <el-table-column label="服务器" min-width="180">
             <template #default="{ row }">
               <div class="flex items-center justify-between w-full">
@@ -848,29 +848,23 @@ onMounted(() => {
   flex: 1 1 auto;
   min-height: 0; /* 允许在父 flex 容器内收缩，避免溢出 */
   overflow: auto; /* 内部滚动 */
-  /* 隐藏滚动条但保留滚动功能 */
-  scrollbar-width: none;      /* Firefox */
-  -ms-overflow-style: none;   /* IE 10+ */
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
-.plugin-content-area::-webkit-scrollbar { width: 0; height: 0; }
 
 /* 左侧面板（与 PB 对齐） */
-.left-panel { width: 320px; flex-shrink: 0; align-self: flex-start; }
+.left-panel { width: 320px; flex-shrink: 0; align-self: stretch; height: 100%; min-height: 0; }
 .left-panel { transition: width 0.32s cubic-bezier(.34,1.56,.64,1); will-change: width; overflow: hidden; }
-.left-panel :deep(.el-card) { display: block; }
-.left-panel :deep(.el-card__body) { padding: 8px; }
+.left-panel :deep(.el-card) { height: 100%; display: flex; flex-direction: column; }
+.left-panel :deep(.el-card__body) { padding: 8px; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .left-panel :deep(.el-input), .left-panel :deep(.el-input__wrapper) { width: 100%; }
 .left-panel :deep(.el-table__inner-wrapper) { width: 100%; }
+.left-panel :deep(.el-table) { flex: 1 1 auto; min-height: 0; }
 .is-collapsed .left-panel, .is-collapsing .left-panel { width: 0 !important; }
 .is-collapsing .left-panel :deep(.el-card__body), .is-collapsing .left-panel :deep(.el-card__header) { display: none !important; }
 
-/* 隐藏 Element Plus 自定义滚动条（左侧 el-scrollbar） */
-.server-plugin-manager-layout :deep(.el-scrollbar__bar) { display: none !important; }
-.server-plugin-manager-layout :deep(.el-scrollbar__wrap) {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.server-plugin-manager-layout :deep(.el-scrollbar__wrap::-webkit-scrollbar) { width: 0; height: 0; }
+/* Element Plus 自定义滚动条保持可见 */
+.server-plugin-manager-layout :deep(.el-scrollbar__bar) { opacity: 0.9; }
 
 .main-placeholder {
   display: flex;

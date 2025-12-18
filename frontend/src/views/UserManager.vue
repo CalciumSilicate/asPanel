@@ -96,7 +96,7 @@
           </el-table-column>
           <el-table-column label="权限" width="150" align="center">
             <template #default="{ row }">
-              <el-dropdown trigger="click" @command="(r)=>changeRole(row, r)">
+              <el-dropdown trigger="click" @command="changeRoleForRow(row)">
                 <el-tag :type="roleTagType(row.role)" class="clickable">{{ row.role }}</el-tag>
                 <template #dropdown>
                   <el-dropdown-menu>
@@ -125,8 +125,8 @@
           :page-size="pageSize"
           :current-page="page"
           :total="filteredRows.length"
-          @current-change="p => page = p"
-          @size-change="s => { pageSize = s; page = 1; }"
+          @current-change="onPageChange"
+          @size-change="onPageSizeChange"
         />
       </div>
     </el-card>
@@ -166,6 +166,11 @@ const query = ref('')
 const roleFilter = ref<string|undefined>()
 const page = ref(1)
 const pageSize = ref(20)
+const onPageChange = (p: number) => { page.value = p }
+const onPageSizeChange = (s: number) => {
+  pageSize.value = s
+  page.value = 1
+}
 const selection = ref<UserRow[]>([])
 
 const load = async () => {
@@ -241,13 +246,17 @@ const openAvatar = (row:UserRow) => {
 }
 
 // 权限
-const changeRole = async (row:UserRow, r: string) => {
+const changeRole = async (row:UserRow, r: UserRow['role']) => {
   try {
     await api.patch(`/api/users/${row.id}`, { role: r })
     await load()
   } catch (e:any) {
     ElMessage.error(e?.response?.data?.detail || '修改权限失败')
   }
+}
+
+const changeRoleForRow = (row: UserRow) => async (r: UserRow['role']) => {
+  await changeRole(row, r)
 }
 
 // 操作
@@ -310,4 +319,3 @@ onMounted(async () => {
 .avatar-wrap { display: inline-flex; align-items:center; justify-content:center; width:36px; height:36px; margin: 2px auto; }
 .um-pagination { display: flex; justify-content: flex-end; margin-top: 8px; }
 </style>
-
