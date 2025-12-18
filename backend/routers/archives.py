@@ -6,7 +6,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, status, Response, BackgroundTasks, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from pathlib import Path
 
 from backend.core import crud, schemas
@@ -57,9 +57,9 @@ async def create_archive_from_server(
 
 @router.post("/archives/create/from-upload", status_code=status.HTTP_202_ACCEPTED)
 async def upload_archive(
-        mc_version: str,
         file: UploadFile,
         background_tasks: BackgroundTasks,
+        mc_version: Optional[str] = None,
         db: Session = Depends(get_db),
         _user=Depends(require_role(Role.HELPER))
 ):

@@ -406,7 +406,7 @@ const addTaskAndStartPolling = (task) => {
   pollTaskStatus(task.id);
 };
 
-// --- 上传逻辑 (无变化) ---
+// --- 上传逻辑 ---
 const isUploading = ref(false);
 const uploadFormRef = ref(null);
 const uploaderRef = ref(null);
@@ -428,24 +428,28 @@ const resetUploadForm = () => {
   uploadFormRef.value?.resetFields();
 };
 const handleUpload = async () => {
-  await uploadFormRef.value.validate(async (valid) => {
-    if (valid) {
-      isUploading.value = true;
-      const formData = new FormData();
-      formData.append('file', uploadForm.value.file);
-      const url = `/api/archives/create/from-upload?mc_version=${uploadForm.value.mc_version || ''}`;
-      try {
-        const {data} = await apiClient.post(url, formData);
-        ElMessage.info('文件上传成功，正在后台处理...');
-        isUploading.value = false;
-        uploadDialogVisible.value = false;
-        addTaskAndStartPolling({id: data.task_id, status: 'PENDING', progress: 0});
-      } catch (error) {
-        isUploading.value = false;
-        ElMessage.error(error.response?.data?.detail || '上传失败');
-      }
-    }
-  });
+  if (!uploadFormRef.value) return;
+  const valid = await uploadFormRef.value.validate().catch(() => false);
+  if (!valid) {
+    return;
+  }
+
+  isUploading.value = true;
+  const formData = new FormData();
+  formData.append('file', uploadForm.value.file);
+  try {
+    const {data} = await apiClient.post('/api/archives/create/from-upload', formData, {
+      params: uploadForm.value.mc_version ? {mc_version: uploadForm.value.mc_version} : undefined,
+      timeout: 0,
+    });
+    ElMessage.info('文件上传成功，正在后台处理...');
+    uploadDialogVisible.value = false;
+    addTaskAndStartPolling({id: data.task_id, status: 'PENDING', progress: 0});
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || error.message || '上传失败');
+  } finally {
+    isUploading.value = false;
+  }
 };
 
 // --- [新增] 恢复功能 ---

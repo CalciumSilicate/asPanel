@@ -142,8 +142,8 @@ _VEHICLE_METRICS = [f'custom.{v}_one_cm' for v in _VEHICLE]
 TOTAL_ITEMS = [
     ("上线次数", ["custom.leave_game"], 1, "count"),
     ("在线时长(hr)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, "round1"),
-    ("击杀玩家", ["custom.player_kills"], 1, "count"),
-    ("被玩家击杀", ["killed_by.player"], 1, "count"),
+    # ("击杀玩家", ["custom.player_kills"], 1, "count"),
+    # ("被玩家击杀", ["killed_by.player"], 1, "count"),
     ("挖掘方块", _BREAK_METRICS, 1, "count"),
     ("死亡次数", ["custom.deaths"], 1, "count"),
     ("鞘翅飞行(km)", ["custom.aviate_one_cm"], 0.00001, "round2"),
@@ -157,7 +157,7 @@ TOTAL_ITEMS = [
 
 CHART_ITEMS = [
     ("上线时长 (min)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 60, True),
-    ("上线次数", ["custom.leave_game"], 1, True),
+    # ("上线次数", ["custom.leave_game"], 1, True),
     ("移动 (m)", ['custom.aviate_one_cm', 'custom.ender_pearl_one_cm', *_WALK_METRICS, *_VEHICLE_METRICS], 0.01, True),
     ("挖掘方块", _BREAK_METRICS, 1, True),
     ("破基岩", ["custom.break_bedrock"], 1, True),

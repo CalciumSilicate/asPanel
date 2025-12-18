@@ -230,7 +230,7 @@ def background_create_archive(db: Session, server_id: int, task: Task):
         task_manager.clear_finished_task(task.id)
 
 
-def background_process_upload(db: Session, file_path: Path, archive_name: str, mc_version: str, task: Task):
+def background_process_upload(db: Session, file_path: Path, archive_name: str, mc_version: Optional[str], task: Task):
     task.status = TaskStatus.RUNNING
     try:
         final_path = archive_manager.process_uploaded_archive(file_path, archive_name)
