@@ -2,6 +2,7 @@ import json
 import base64
 import io
 import os
+from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -23,6 +24,77 @@ DEFAULT_MAP_CONFIG = {
     "nether_json": str(BASE_DIR / "the_nether.json"),
     "end_json": str(BASE_DIR / "the_end.json"),
 }
+
+def _uuid_to_hyphenated(uuid_str: str) -> str:
+    s = str(uuid_str or "").strip()
+    if "-" in s:
+        return s
+    if len(s) == 32:
+        # 8-4-4-4-12
+        return f"{s[0:8]}-{s[8:12]}-{s[12:16]}-{s[16:20]}-{s[20:32]}"
+    return s
+
+
+def _dim_to_int(d: Optional[str]) -> int:
+    if d is None:
+        return 0
+    s = str(d).lower()
+    if "nether" in s:
+        return -1
+    if "end" in s:
+        return 1
+    try:
+        return int(s)
+    except Exception:
+        return 0
+
+
+def _read_location_from_playerdata(server_path: str, player_uuid: str) -> Optional[Dict[str, Any]]:
+    """从 <server_path>/server/world/playerdata/<UUIDhyphen>.dat 读取玩家位置（NBT）。"""
+    try:
+        import nbtlib  # local import: optional dependency
+    except Exception:
+        return None
+
+    try:
+        uuid_hyphen = _uuid_to_hyphenated(player_uuid)
+        fp = Path(str(server_path)) / "server" / "world" / "playerdata" / f"{uuid_hyphen}.dat"
+        if not fp.exists():
+            return None
+
+        nbt_obj = nbtlib.load(str(fp))  # type: ignore[attr-defined]
+        root = getattr(nbt_obj, "root", nbt_obj)
+
+        pos = root.get("Pos") if hasattr(root, "get") else None
+        if not pos or len(pos) < 3:
+            return None
+
+        x = float(pos[0])
+        z = float(pos[2])
+
+        dim = None
+        try:
+            dim_tag = root.get("Dimension")
+            if dim_tag is not None:
+                dim = str(dim_tag)
+        except Exception:
+            dim = None
+
+        yaw = None
+        try:
+            rot = root.get("Rotation")
+            if rot and len(rot) >= 1:
+                yaw = float(rot[0])
+        except Exception:
+            yaw = None
+
+        out: Dict[str, Any] = {"x": x, "z": z, "dim": dim}
+        if yaw is not None:
+            out["yaw"] = yaw
+        return out
+    except Exception:
+        logger.opt(exception=True).debug(f"读取 playerdata 位置失败 | server_path={server_path} uuid={player_uuid}")
+        return None
 
 
 def _resolve_map_json_path(path: Optional[str]) -> Optional[str]:
@@ -614,33 +686,54 @@ def build_stats_picture(
         "end_json": _resolve_map_json_path(DEFAULT_MAP_CONFIG.get("end_json")),
     }
     positions: List[models.PlayerPosition] = []
+    fallback_location: Optional[Dict[str, Any]] = None
     with get_db_context() as db:
         try:
             positions = crud.get_player_positions(db, player.id, tr.real_start.astimezone(timezone.utc), tr.real_end.astimezone(timezone.utc), effective_server_ids)
         except Exception:
             positions = []
+        # 若该时段无轨迹，则回退到该数据源服务器内“最后一次”位置（避免玩家未移动导致无轨迹）
+        if not positions:
+            try:
+                q = db.query(models.PlayerPosition).filter(models.PlayerPosition.player_id == player.id)
+                if effective_server_ids:
+                    q = q.filter(models.PlayerPosition.server_id.in_(effective_server_ids))
+                last_pos = q.order_by(models.PlayerPosition.ts.desc()).first()
+                if last_pos:
+                    positions = [last_pos]
+            except Exception:
+                positions = positions or []
+        # 若数据库仍无位置数据，则从首个数据源服务器的 playerdata 文件读取
+        if not positions:
+            try:
+                sid0 = int(effective_server_ids[0]) if effective_server_ids else None
+                srv = crud.get_server_by_id(db, sid0) if sid0 else None
+                if srv and getattr(srv, "path", None):
+                    fallback_location = _read_location_from_playerdata(str(srv.path), player.uuid)
+            except Exception:
+                fallback_location = fallback_location
         try:
             map_config = _pick_map_config(db, effective_server_ids, server_name, positions)
         except Exception:
             pass
     if positions:
-        def _dim_to_int(d: Optional[str]) -> int:
-            if d is None:
-                return 0
-            s = str(d).lower()
-            if "nether" in s:
-                return -1
-            if "end" in s:
-                return 1
-            try:
-                return int(s)
-            except Exception:
-                return 0
         pts = [(float(p.x), float(p.z), _dim_to_int(p.dim)) for p in positions if p.x is not None and p.z is not None]
         if len(pts) == 1:
             data["location"] = {"x": pts[0][0], "z": pts[0][1], "dim": pts[0][2]}
         elif len(pts) > 1:
             data["path"] = pts
+    elif fallback_location and fallback_location.get("x") is not None and fallback_location.get("z") is not None:
+        loc = {
+            "x": float(fallback_location["x"]),
+            "z": float(fallback_location["z"]),
+            "dim": _dim_to_int(fallback_location.get("dim")),
+        }
+        if fallback_location.get("yaw") is not None:
+            try:
+                loc["yaw"] = float(fallback_location["yaw"])
+            except Exception:
+                pass
+        data["location"] = loc
         
 
     img = render_combined_view(data, map_config)
