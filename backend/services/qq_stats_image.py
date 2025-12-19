@@ -505,7 +505,7 @@ class PositionMapRenderer:
             screen_pts = [self._world_to_screen(wx, wz, center_x, center_z, s_scale, w, h) for wx, wz in coords]
 
             if len(screen_pts) > 1:
-                draw.line(screen_pts, fill=seg_color, width=round(0.5 * ss), joint="curve")
+                draw.line(screen_pts, fill=seg_color, width=1 * ss, joint="curve")
                 dist_accum = 0
                 for i in range(len(screen_pts) - 1):
                     p1, p2 = screen_pts[i], screen_pts[i + 1]

@@ -338,6 +338,8 @@ def ingest_once_for_server(
                 # target_ts/force_update：即便 delta==0 也需要写入新桶
                 if delta == 0 and not new:
                     continue
+                if curr_total == 0 and new:
+                    continue
                 # 查找是否已存在同(ts, server, player, metric)记录
                 existing = db.execute(
                     select(models.PlayerMetrics)
