@@ -133,7 +133,7 @@
 </template>
 <script setup>
 // 前端页面：表单与占位调用后端 API（下载与应用暂未实现）
-import {ref, computed, onMounted} from 'vue'
+import {ref, computed, onMounted, watch} from 'vue'
 import {ElMessage, ElMessageBox, ElNotification} from 'element-plus'
 import draggable from 'vuedraggable'
 import { Plus, Refresh, Delete, Rank } from '@element-plus/icons-vue'
@@ -223,6 +223,16 @@ const applyDialogVisible = ref(false)
 const apply = ref({ serverId: '', forceOverwrite: false })
 const servers = ref([])
 const isFetchingServers = ref(false)
+
+watch(() => apply.value.serverId, (id) => {
+  if (!id) return
+  const s = servers.value.find(x => String(x?.id) === String(id))
+  const serverVer = s?.core_config?.core_version
+  if (serverVer && form.value.versionName !== serverVer) {
+    form.value.versionName = serverVer
+    ElMessage.info(`已自动切换游戏版本为服务器版本：${serverVer}`)
+  }
+})
 
 const openApplyDialog = async () => {
   applyDialogVisible.value = true
