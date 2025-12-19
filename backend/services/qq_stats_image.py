@@ -663,7 +663,7 @@ class PositionMapRenderer:
         pm_other = dest_pm if (not has_end) or (last[2] != 1) else None
         pm_end = dest_pm if (last[2] == 1) else None
 
-        # === 核心修改在 _render_sub 函数内部 ===
+        # === 修改后的 _render_sub 函数 ===
         def _render_sub(pts, w_, h_, gid, mks, pm_):
             if not pts: return Image.new("RGBA", (w_, h_), Theme.BG_COLOR)
             
@@ -682,7 +682,7 @@ class PositionMapRenderer:
                 curr_seg.append((mx, mz))
             if curr_seg: segments.append({"coords": curr_seg, "dim": last_dim})
 
-            # --- 优化后的比例尺计算逻辑 ---
+            # --- 核心修改开始：极简紧凑的比例尺逻辑 ---
             min_x, max_x, min_z, max_z = min(xs), max(xs), min(zs), max(zs)
             
             # 1. 计算实际物理跨度
@@ -690,8 +690,9 @@ class PositionMapRenderer:
             geo_h = max_z - min_z
             
             # 2. 设定最小视窗跨度 (Block单位)
-            # 即使只移动了1格，地图也会显示至少 600x600 的区域，以便展示周围站点
-            MIN_VIEW_SPAN = 600
+            # 以前是 600，现在改为 20。
+            # 只要不是原地不动(0跨度)，基本都能撑满。保留20是为了防止单点时计算出错，以及给线宽留一点余地。
+            MIN_VIEW_SPAN = 20
             
             effective_w = max(geo_w, MIN_VIEW_SPAN)
             effective_h = max(geo_h, MIN_VIEW_SPAN)
@@ -701,24 +702,23 @@ class PositionMapRenderer:
             center_z = (min_z + max_z) / 2
             
             # 4. 计算缩放比例 (Scale)
-            # PADDING_FACTOR = 0.8 表示内容占据画布长宽的 80% (预留 20% 边距)
-            PADDING_FACTOR = 0.8
+            # 改为 0.95，意味着路径会占据画布 95% 的空间，非常紧凑
+            PADDING_FACTOR = 0.95
             
-            # 分别计算宽度适应和高度适应的比例，取较小值以确保全部内容可见
             scale_x = (w_ * PADDING_FACTOR) / effective_w
             scale_z = (h_ * PADDING_FACTOR) / effective_h
             
             scale_ = min(scale_x, scale_z)
             
-            # 5. 限制最大缩放 (可选)
-            # 防止在极大分辨率下对极小区域过度放大
-            scale_ = min(scale_, 5.0)
+            # 5. 移除最大缩放限制
+            # scale_ = min(scale_, 5.0)  <-- 这行代码删掉，允许无限放大
             # ---------------------------
 
             img_ = self._render_layer(w_, h_, center_x, center_z, scale_, segments, gid, mks, pm_)
             d_ = ImageDraw.Draw(img_)
             lbl = "THE END" if gid == 1 else "NETHER & OVERWORLD"
-            d_.text((w_ - 20, h_ - 20), lbl, fill=Theme.TEXT_SECONDARY, font=load_font(24, True), anchor="rb")
+            # 调整一下标签位置，稍微往里缩一点，防止贴边太近
+            d_.text((w_ - 30, h_ - 30), lbl, fill=Theme.TEXT_SECONDARY, font=load_font(24, True), anchor="rb")
             return img_
 
         # 布局逻辑保持不变

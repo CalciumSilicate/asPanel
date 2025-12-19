@@ -231,6 +231,8 @@ def _TIME_FORMATTER(x: float) -> str:
         parts.append(f"{hours:,}h")
     if minutes > 0:
         parts.append(f"{minutes}m")
+    if hours == 0 and minutes == 0:
+        parts.append("<1m")
     return "".join(parts) if parts else "0"
 
 def _DISTANCE_FORMATTER(x: float) -> str:
@@ -267,7 +269,7 @@ TOTAL_ITEMS = [
 CHART_ITEMS = [
     ("上线时长 (min)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 60, True),
     # ("上线次数", ["custom.leave_game"], 1, True),
-    ("移动 (m)", ['custom.aviate_one_cm', 'custom.ender_pearl_one_cm', *_WALK_METRICS, *_VEHICLE_METRICS], 0.01, True),
+    ("移动 (m)", ['custom.aviate_one_cm', 'custom.ender_pearl_one_cm', 'custom.fly_one_cm', *_WALK_METRICS, *_VEHICLE_METRICS], 0.01, True),
     ("挖掘方块", _BREAK_METRICS, 1, True),
     ("破基岩", ["custom.break_bedrock"], 1, True),
     ("死亡次数", ["custom.deaths"], 1, True),

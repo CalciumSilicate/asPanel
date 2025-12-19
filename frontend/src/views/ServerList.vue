@@ -75,7 +75,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="core_config.core_version" label="核心版本" width="180" align="center" sortable/>
+        <el-table-column prop="core_config.core_version" label="核心版本" min-width="180" align="center" sortable/>
         <el-table-column label="自动启动" width="120" align="center" v-if="hasRole('ADMIN')">
           <template #default="scope">
             <el-tooltip effect="dark" content="ASPanel 启动时自动启动该服务器" placement="top" :show-after="400">
@@ -88,10 +88,10 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="size_mb" label="服务器大小 (MB)" width="160" align="center" sortable>
+        <el-table-column prop="size_mb" label="服务器大小" width="160" align="center" sortable>
           <template #default="scope">
             <span v-if="scope.row.size_calc_state === 'ok' && scope.row.size_mb != null">
-              {{ scope.row.size_mb.toFixed(3) }} MB
+              {{ formatServerSize(scope.row.size_mb) }}
             </span>
             <span v-else-if="scope.row.size_calc_state === 'failed'">计算失败</span>
             <span v-else>计算中</span>
@@ -99,21 +99,6 @@
         </el-table-column>
 
         <el-table-column prop="port" label="局域网端口" width="120" align="center" sortable/>
-        <el-table-column prop="rcon_port" label="RCON端口" width="120" align="center" />
-        <el-table-column prop="rcon_password" label="RCON密码" min-width="150" align="center"  v-if="hasRole('ADMIN')">
-          <template #default="scope">
-            <div
-                v-if="scope.row.rcon_port !== '未启用RCON' && scope.row.rcon_password !== 'N/A' && scope.row.rcon_password !== '不适用' && scope.row.rcon_password !== '未设置'">
-              <span v-if="scope.row.rcon_password_visible" class="rcon-pass">{{ scope.row.rcon_password }}</span>
-              <span v-else>••••••••</span>
-              <el-icon class="password-toggle-icon" @click="togglePasswordVisibility(scope.row)">
-                <View v-if="!scope.row.rcon_password_visible"/>
-                <Hide v-else/>
-              </el-icon>
-            </div>
-            <span v-else>{{ scope.row.rcon_password }}</span>
-          </template>
-        </el-table-column>
 
         <el-table-column label="操作" width="450" align="center" fixed="right" v-if="hasRole('HELPER')">
           <template #default="scope">
@@ -127,6 +112,10 @@
                          :disabled="scope.row.status !== 'running'" :loading="scope.row.loading" v-if="hasRole('USER')"/>
             </el-button-group>
 
+            <el-button style="margin-left: 10px;" size="small" type="primary" @click="openConfigDialog(scope.row)"
+                       :icon="Setting" class="config-btn">配置
+            </el-button>
+
             <el-dropdown trigger="click" style="margin-left: 10px;">
               <el-button size="small">
                 更多操作
@@ -139,7 +128,6 @@
                   <el-dropdown-item :icon="Monitor" @click="goToConsole(scope.row.id)"
                                     :disabled="scope.row.status === 'new_setup'" v-if="hasRole('ADMIN')">控制台
                   </el-dropdown-item>
-                  <el-dropdown-item :icon="Setting" @click="openConfigDialog(scope.row)">配置</el-dropdown-item>
                   <el-dropdown-item :icon="Document" @click="openPluginConfigDialog(scope.row)" v-if="hasRole('HELPER')">插件配置
                   </el-dropdown-item>
                   <el-dropdown-item :icon="FolderAdd" @click="handleCreateArchive(scope.row)"
@@ -151,13 +139,12 @@
                   <el-dropdown-item divided :icon="CircleClose" @click="forceKillServer(scope.row)"
                                     :disabled="scope.row.status !== 'running' && scope.row.status !== 'pending'" v-if="hasRole('ADMIN')">强制关闭
                   </el-dropdown-item>
+                  <el-dropdown-item :icon="Delete" @click="handleDeleteServer(scope.row)" v-if="hasRole('ADMIN')">
+                    删除
+                  </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
-
-            <el-button style="margin-left: 10px;" size="small" type="danger" @click="handleDeleteServer(scope.row)"
-                       :icon="Delete" plain v-if="hasRole('ADMIN')">删除
-            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -287,15 +274,7 @@
                   </div>
                 </div>
               </el-form-item>
-              <el-form-item>
-                <div class="form-item-wrapper">
-                  <div class="form-item-label"><span>Java 命令</span><small>来自系统设置</small></div>
-                  <div class="form-item-control">
-                    <el-input class="input-long" :model-value="settings.java_command" disabled></el-input>
-                    <div class="form-tip">如需修改，请前往 设置 → 系统设置</div>
-                  </div>
-                </div>
-              </el-form-item>
+
             </el-form>
           </div>
 
@@ -1186,11 +1165,11 @@
   </div>
 </template>
 
-	<script setup>
-	import {
-	  Plus, VideoPlay, SwitchButton, Refresh, Monitor, ArrowDown, Promotion,
-	  View, Hide, Setting, Cpu, Delete, Document, FolderAdd, FolderChecked, Rank, Loading, CircleClose, DocumentCopy, Upload
-	} from '@element-plus/icons-vue';
+		<script setup>
+		import {
+		  Plus, VideoPlay, SwitchButton, Refresh, Monitor, ArrowDown, Promotion,
+		  Setting, Cpu, Delete, Document, FolderAdd, FolderChecked, Rank, Loading, CircleClose, DocumentCopy, Upload
+		} from '@element-plus/icons-vue';
 	import {io} from 'socket.io-client';
 	import apiClient from '@/api';
 	import {ref, onMounted, onUnmounted, reactive, computed, nextTick, watch} from 'vue';
@@ -1225,6 +1204,24 @@ const getStatusTagText = (row) => {
   if (s === 'new_setup') return '未配置'
   // 其他状态带上返回码
   return row?.return_code != null ? `已停止 (${row.return_code})` : '已停止'
+}
+
+const formatServerSize = (sizeMb) => {
+  const n = Number(sizeMb)
+  if (!Number.isFinite(n)) return ''
+
+  let decimals = 3
+  if (n >= 1 && n <= 1000) decimals = 2
+  if (n > 1000) decimals = 1
+
+  const fixed = n.toFixed(decimals)
+  if (n <= 1000) return `${fixed} MB`
+
+  const parts = fixed.split('.')
+  const intPart = parts[0] || '0'
+  const fracPart = parts[1]
+  const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return fracPart != null ? `${withCommas}.${fracPart} MB` : `${withCommas} MB`
 }
 
 let pollInterval = null;
@@ -1517,18 +1514,17 @@ const fetchServerSizes = async (requestId) => {
 	    const {data} = await apiClient.get('/api/servers');
 	    const selectedIds = new Set(selectedServers.value.map(s => s.id));
 	
-	    serverList.value = data.map(s => {
-	      const coreConfig = s.core_config || {};
-	      if (coreConfig.auto_start == null) coreConfig.auto_start = false;
-	      return {
-	        ...s,
-	        core_config: coreConfig,
-	        loading: false,
-	        rcon_password_visible: false,
-	        size_mb: null,
-	        size_calc_state: 'pending',
-	      };
-	    });
+		    serverList.value = data.map(s => {
+		      const coreConfig = s.core_config || {};
+		      if (coreConfig.auto_start == null) coreConfig.auto_start = false;
+		      return {
+		        ...s,
+		        core_config: coreConfig,
+		        loading: false,
+		        size_mb: null,
+		        size_calc_state: 'pending',
+		      };
+		    });
 
     await nextTick();
     if (tableRef.value) {
@@ -2177,7 +2173,6 @@ const copyPath = async (path) => {
     ElMessage.error('复制失败，请手动复制。');
   }
 };
-const togglePasswordVisibility = (row) => row.rcon_password_visible = !row.rcon_password_visible;
 const testPort = async (port) => {
   if (!port) return ElMessage.warning('请输入有效的端口号');
   const msg = ElMessage({message: `正在测试端口 ${port}...`, type: 'info', duration: 0});
@@ -2918,15 +2913,8 @@ onUnmounted(() => {
   text-decoration: underline;
 }
 
-.password-toggle-icon {
-  margin-left: 6px;
-  cursor: pointer;
-  color: var(--el-text-color-secondary);
-  transition: color var(--t-fast), transform var(--t-fast);
-}
-.password-toggle-icon:hover {
-  color: var(--brand-primary);
-  transform: scale(1.05);
+.config-btn {
+  font-weight: 600;
 }
 
 .version-cell {
