@@ -12,6 +12,10 @@
               <el-button type="success" :icon="Refresh" @click="refreshPlayTime">刷新时长</el-button>
               <el-button type="warning" :icon="RefreshRight" :loading="busyNames" @click="refreshOfficialNames">刷新正版玩家名</el-button>
             </el-button-group>
+            <el-button-group>
+              <el-button type="primary" :icon="Plus" @click="openWhitelistDialog">添加玩家到白名单</el-button>
+              <el-button type="danger" :icon="CircleClose" @click="openBanDialog">封禁玩家/IP</el-button>
+            </el-button-group>
           </div>
         </div>
       </template>
@@ -58,6 +62,22 @@
               </div>
             </template>
           </el-table-column>
+          <el-table-column label="管理员 (OP)" min-width="220">
+            <template #default="{ row }">
+              <el-space wrap v-if="(opServersByUuid[row.uuid] || []).length > 0">
+                <el-tag
+                    v-for="s in (opServersByUuid[row.uuid] || [])"
+                    :key="s"
+                    type="warning"
+                    effect="plain"
+                    size="small"
+                >
+                  {{ s }}
+                </el-tag>
+              </el-space>
+              <el-tag v-else type="info" effect="plain" size="small">否</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="游玩时长" width="200" align="center">
             <template #header>
               <span class="pt-sort-header" @click="togglePlaytimeSort">游玩时长<span v-if="playtimeSort==='desc'"> ↓</span><span v-else> —</span></span>
@@ -70,6 +90,71 @@
 
     </div>
     </el-card>
+
+    <!-- 添加玩家到白名单 -->
+    <el-dialog v-model="whitelistDialogVisible" title="添加玩家到白名单" width="560px" align-center>
+      <el-form label-width="110px" class="pm-dialog-form">
+        <el-form-item label="玩家名">
+          <el-input v-model="whitelistForm.player_name" placeholder="请输入玩家名（支持未入库玩家）" clearable />
+        </el-form-item>
+        <el-form-item label="服务器">
+          <el-select v-model="whitelistForm.servers" multiple filterable placeholder="请选择服务器" style="width: 100%;">
+            <el-option v-for="s in serverNames" :key="s" :label="s" :value="s" />
+          </el-select>
+          <div class="pm-form-hint">不包含 Velocity 服务器；默认勾选“数据来源”的服务器。</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="whitelistDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="whitelistSubmitting" @click="submitWhitelist">确认添加</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <!-- 封禁玩家 / IP -->
+    <el-dialog v-model="banDialogVisible" title="封禁玩家 / IP" width="640px" align-center>
+      <el-form label-width="110px" class="pm-dialog-form">
+        <el-form-item label="封禁类型">
+          <el-radio-group v-model="banForm.type">
+            <el-radio-button label="player">玩家</el-radio-button>
+            <el-radio-button label="ip">IP</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+
+        <el-form-item label="玩家" v-if="banForm.type === 'player'">
+          <el-select v-model="banForm.uuid" filterable placeholder="选择玩家（可搜索名字/UUID）" style="width: 100%;">
+            <el-option
+                v-for="p in playerOptions"
+                :key="p.uuid"
+                :label="p.label"
+                :value="p.uuid"
+            />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="IP" v-else>
+          <el-input v-model="banForm.ip" placeholder="例如：203.0.113.10 或 2001:db8::1" />
+        </el-form-item>
+
+        <el-form-item label="原因">
+          <el-input v-model="banForm.reason" placeholder="可选，不填则使用默认原因" />
+        </el-form-item>
+
+        <el-form-item label="服务器">
+          <el-select v-model="banForm.servers" multiple filterable placeholder="请选择服务器" style="width: 100%;">
+            <el-option v-for="s in serverNames" :key="s" :label="s" :value="s" />
+          </el-select>
+          <div class="pm-form-hint">不包含 Velocity 服务器；默认勾选“数据来源”的服务器。</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="banDialogVisible = false">取消</el-button>
+          <el-button type="danger" :loading="banSubmitting" @click="submitBan">确认封禁</el-button>
+        </span>
+      </template>
+    </el-dialog>
 
     <!-- 外部分页，置于右下角 -->
 	    <div class="pm-pagination">
@@ -92,7 +177,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/api'
 import { ElMessage } from 'element-plus'
-import { Search, Refresh, RefreshRight } from '@element-plus/icons-vue'
+import { Search, Refresh, RefreshRight, Plus, CircleClose } from '@element-plus/icons-vue'
 
 type Player = {
   id: number,
@@ -119,6 +204,9 @@ const whitelistSet = computed(() => new Set(whitelistUUIDs.value))
 
 const busyTicks = ref(false)
 const busyNames = ref(false)
+
+const opServersByUuid = ref<Record<string, string[]>>({})
+const opLoading = ref(false)
 
 	const page = ref(1)
 	const pageSize = ref(20)
@@ -150,6 +238,19 @@ const load = async () => {
   const { data } = await api.get('/api/players', { params: { scope: scope.value } })
   rows.value = (data || []).map((x: any) => ({ ...x, play_time: x.play_time || {} }))
   page.value = 1
+  loadOpServers()
+}
+
+const loadOpServers = async () => {
+  opLoading.value = true
+  try {
+    const { data } = await api.get('/api/players/op-servers')
+    opServersByUuid.value = (data && typeof data === 'object') ? data : {}
+  } catch (e) {
+    opServersByUuid.value = {}
+  } finally {
+    opLoading.value = false
+  }
 }
 
 const refreshPlayTime = async () => {
@@ -242,6 +343,104 @@ const togglePlaytimeSort = () => {
   page.value = 1
 }
 
+const playerOptions = computed(() => {
+  return rows.value
+    .map((p) => {
+      const name = (p.player_name || '').trim()
+      const label = name ? `${name} (${p.uuid})` : p.uuid
+      return { uuid: p.uuid, label }
+    })
+    .sort((a, b) => a.label.localeCompare(b.label))
+})
+
+const whitelistDialogVisible = ref(false)
+const whitelistSubmitting = ref(false)
+const whitelistForm = ref<{ player_name: string, servers: string[] }>({ player_name: '', servers: [] })
+const openWhitelistDialog = () => {
+  whitelistForm.value = {
+    player_name: '',
+    servers: (selectedServers.value.length > 0 ? selectedServers.value.slice() : serverNames.value.slice()),
+  }
+  whitelistDialogVisible.value = true
+}
+const submitWhitelist = async () => {
+  if (!whitelistForm.value.player_name.trim()) { ElMessage.warning('请输入玩家名'); return }
+  if (whitelistForm.value.servers.length === 0) { ElMessage.warning('请选择至少一个服务器'); return }
+  whitelistSubmitting.value = true
+  try {
+    const name = whitelistForm.value.player_name.trim()
+    const payload = {
+      player_name: name,
+      servers: whitelistForm.value.servers,
+    }
+    const { data } = await api.post('/api/players/whitelist', payload)
+    const ok = Array.isArray(data?.updated) ? data.updated.length : 0
+    const err = Array.isArray(data?.errors) ? data.errors.length : 0
+    ElMessage.success(`已写入白名单：${ok} 个服务器${err ? `（${err} 个失败）` : ''}`)
+    whitelistDialogVisible.value = false
+    // 刷新白名单 UUID 列表（用于“仅白名单玩家”筛选）
+    try {
+      const { data: wl } = await api.get('/api/players/whitelist-uuids')
+      whitelistUUIDs.value = Array.isArray(wl) ? wl : []
+    } catch (e) { /* ignore */ }
+  } catch (e: any) {
+    ElMessage.error(`添加失败: ${e?.response?.data?.detail || e?.message || '未知错误'}`)
+  } finally {
+    whitelistSubmitting.value = false
+  }
+}
+
+const banDialogVisible = ref(false)
+const banSubmitting = ref(false)
+const banForm = ref<{ type: 'player' | 'ip', uuid: string, ip: string, reason: string, servers: string[] }>({
+  type: 'player',
+  uuid: '',
+  ip: '',
+  reason: '',
+  servers: [],
+})
+const openBanDialog = () => {
+  banForm.value = {
+    type: 'player',
+    uuid: '',
+    ip: '',
+    reason: '',
+    servers: (selectedServers.value.length > 0 ? selectedServers.value.slice() : serverNames.value.slice()),
+  }
+  banDialogVisible.value = true
+}
+const submitBan = async () => {
+  if (banForm.value.servers.length === 0) { ElMessage.warning('请选择至少一个服务器'); return }
+  if (banForm.value.type === 'player' && !banForm.value.uuid) { ElMessage.warning('请选择玩家'); return }
+  if (banForm.value.type === 'ip' && !banForm.value.ip.trim()) { ElMessage.warning('请输入 IP'); return }
+  banSubmitting.value = true
+  try {
+    const p = banForm.value.type === 'player'
+      ? rows.value.find(r => r.uuid === banForm.value.uuid)
+      : null
+    const payload: any = {
+      type: banForm.value.type,
+      servers: banForm.value.servers,
+      reason: banForm.value.reason || null,
+    }
+    if (banForm.value.type === 'player') {
+      payload.uuid = banForm.value.uuid
+      payload.name = p?.player_name || null
+    } else {
+      payload.ip = banForm.value.ip.trim()
+    }
+    const { data } = await api.post('/api/players/ban', payload)
+    const ok = Array.isArray(data?.updated) ? data.updated.length : 0
+    const err = Array.isArray(data?.errors) ? data.errors.length : 0
+    ElMessage.success(`已写入封禁：${ok} 个服务器${err ? `（${err} 个失败）` : ''}`)
+    banDialogVisible.value = false
+  } catch (e: any) {
+    ElMessage.error(`封禁失败: ${e?.response?.data?.detail || e?.message || '未知错误'}`)
+  } finally {
+    banSubmitting.value = false
+  }
+}
+
 watch(serverNames, (list) => {
   // 当服务器列表变化时，默认全选
   if (selectedServers.value.length === 0) selectedServers.value = list.slice()
@@ -307,5 +506,13 @@ onMounted(async () => {
 
 /* 外部分页容器对齐右下角 */
 .pm-pagination { display: flex; justify-content: flex-end; margin-top: 8px; }
+
+.pm-dialog-form :deep(.el-form-item) { margin-bottom: 14px; }
+.pm-form-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.2;
+}
 
 </style>
