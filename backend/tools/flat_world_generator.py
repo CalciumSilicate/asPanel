@@ -3,14 +3,17 @@
 import base64
 import io
 import os
+import re
 import shutil
 import tempfile
 import uuid
 import nbtlib
+import httpx
+from cachetools import TTLCache
 from nbtlib import File
 from nbtlib.tag import Compound, List as NbtList, String, Int, Long
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from backend.tools.server_parser import parse_properties
 
@@ -19,6 +22,116 @@ from backend.tools.server_parser import parse_properties
 LEVEL_DAT_TEMPLATE_BASE64 = (
     "H4sIAAAAAAAA/4VYzW8cSRV/4xmPZ8bfH9mNNywsnEBCIR9sEiGheOyxE7OOY3m8iQmIVk13zUzh7q6mqtrOREjLhdtKIC0HgpCIOMB/ANoDElpxQUr+g90TElyQEBdOiPCr6u6ZcexoLU1iV71X79X7+L1fTYOoQZUWM6xMbz1kccCViHsHiuGXdsJO4o0+i31ORKtVml2XCusbPDZcPaL8p0SNluh2hZ+GZjBRoaVMqi2e8B2ukgMR8ZHolGIihgWqUGW0c+nfZardYRE/GCR2qVSnmTZXx1ytK/ika0632mUdJfxX/DgsDq/SSrbeYhHr8T0oh9I/uv3Xp/bnV1VazrYfMmU9cJt6bSVTbtDCQ6nC4A6P29wY7OsSTXdknGrP73NtrMOa84B/7wefio9vfbFEiz0ec8UM97qcmVRxXWpQI8ClYi1krBu0HImY+4p1zbck7nJiDTSonutJ1aCaHhqrFadQjSY7QiI2CyP9JETcdJ2qIRtwhbOJylbOXoIWR3IdHigslana56LXNy5wQ8G5kWAglBmXmhhJXRhJ9RTT2nPLp4+s07I2KvWtx569nBIBd3maGNeHjIx7fRkGmpZGy8ciDJEi3HoyZEe4MoxXjM39mIfdkJnh+nmhRNJWRsumz72Y4181HuLaKMTj4SwEZ1ygPS1T5fMaVRPEn5uzkoUbY1eLUO7Ci6XQfOjl/JjeqY1z/YT/i6fXeRy8zvnZkaSTesXzzMzZ4z7ftXN0bDtMtxTryXjLZrxES7sofd02qPa2z2LbP+hRtKzhJ2ygy1CxjTSDzxw+0/gsu5YkmrelSkWXESqHaNHVCdGCqyWiSbIVQOgxoiV8ZvGZKtFM5sN7qBYeQHBhT/FjIVMdDvK1UdMP4YapHjfND399MzM49QDtgnZEF7Rjlui+tEVVBboI1F0lQluVaWIbRy0eIiS7ACGqXr187erlW3BnqsUG4zAFTAB8GcFCmAtK6IOHTN+TQeD+mGVhKE82ZBRZ0CqVafU8RG1x9DDRexZzNlJtZLQutd48BppprNUtDu6noe2mxV4oOyxsyzQOcoEKug75vmBis/k4CaW9W0vJpMV9nDrZZaHG9kVu7e5xpkL9gMVC9+/DLjP9Qr8RyC2h+IFAvxdHRuxx7jtAX8Q7PO5BYfLGu+9ev1Gj2UA+QKXoNnqEBYXSW4HQrBPyzXBgFLuH3gT8mY0+x7mFMyshO2ZtV6gbMj7O8jHcXfIzmw6P76cmSU1x+FJXqp445vA82MuAr9h6J8n+3nWdtCeVYeEGHDNO3Aa4dMX5fE92XNTdzMl0F3HRzdgIM9hQLIrszsS1b9ZouohpwId2vuBSWoRKN1HtW0pGmTfDOzTgu23YdaYKxbk0FvaqLGzGvTHR1dzxdsh5AtMYUz4iBjSk8tUr8PkNHcuTpu+nABhcR8Z3M9QtXa3Rmw6Jz8l7EbBAbkcRDwT6cp9re++h4eXYjhcW7vMcX2wScr26i9OOlMPQN6AVZoO0WEIws6hZs8MAzdsBLSMbnXbCbZter9GXzslOi3cZIDNLzsQt3HTaObjPApFqmriKlZmu4vwJP213WaOY88LcgoUOG9XsQiAxzgMM7Vdy3OgiZafPWVA8SH0etHgn7W3HXTkMzYUTxEudqdBcbzVR8ofcNwItucHidVTZUUYeCokVICJa1OfN4NiypWi8U+cwkJ1rr3ijM3aVxkd5BErXEIC8nfaZwMQs/JvDLW3zgvIM/JCPGlZ2Xl8L84EEeIW2dk5pLQICTxwW3ONa2ylc7EwH8gCXPJVe4MR2rGUUCzasgyNU7nZs4UiqEeQUSJC1xvlIsBjIHREJw4MNO3BsvoqtaVzmDjC5O5bEt3NoAMAK8EtXsi7y7hCavH7t5o1brgjG4HVMfyGUvWaABi8gudi4qBMk1HasvpOTOJcJPVZXewzcJXz1yOURSG5JdbSBtJscIoHd1ezyDZpctzwX/C7ikXSTBjNw/m6qzLqbJ9qwKCE3BRsOCeyissNwBpFNQ+sTYmm59RYacSscWB/KNJcjnQSjQlWRm50LzY6WKrHRaUbOITf56qwjQswqS7MaII+GdVIRBqVJqp+wMOvWbz9//gI2xZhNzLFqxAbdcIDfavht3WlZ+u28gH4Nv2XqO89fwFJDcV8kfF3KozoYvvsj5+wXR+zCz1PuGWumTrNGrvOW0A4rgs8RR6DqrmizaQwyepi04cHN3zz4fZmmDpMDibiQ4x6V99/fblk28Ycrv335wRvNzz78z9ZPvv+76k8RvwyYxp8aGOng9TGGRyDQtaDY96QNZXWMt5z5maTqXc5C028+s38sd6UM2g5freoOP+bh2jN7oa+JXixBkS2ceoFDAK+LAeL5qVLoD48XDQwqM5tJCaQqe3NRViLlplClryMb9+M7ynIBMJh6q3honMuNQc72ERHrjSVXE5+k3U+bv+z+2MXK+Ufufl8t/BBRkqIRPV/iUfXYeI4Ie+D/PvdMzoDAt08c2noOvDxMfP+IqzLNnmRvKi8cnXzR2IHpaYGreCHTxsuFwKNeIBN+XsOek6NMabLtI1rkaGJ5T2qXhD+znY/+cWV5de32//61O//3H63tfvbfh58kqxNUsYP55T8nqXyY7GVajU3LfLYNj7IzscKMUaKTGu6eTZUaTYiAvjwKGmZ6IgVigPvEGsji4f8er1KlwzQHlbzlTjqj54axJ+wjlPk20qf01pby/GV6Xxnn73aKvl6xdkpxrCWiHFQRfpR+Ln7746dPn2XRm7bv+JzvWj5bprotzCLdK3mhbj7uM/DOolDJdd7bWUqResW8hClkBfPOg2+2KO3z0KJX0X0LbR4CQXlgA90OpclCXR+NhcyjWWvPcoMc39xi1YHqd1++fPkXPPstULpjSz//G65ggMNIYGbojx8U0o8yL2t91J8rEbwGRt867CARoB6F8GFmZwE3YCqfnAWLBxbmJtz0AfxaDXC0kGdaU8X4p+/8qUpz+euCdfkjGfPi64IKNXZQ0g7u8XQoPf3Fzz66VKXFU98wWJNrlykvw/m23wcBwaslZ/JZiusuB+7ZUd/lJ++4byGq1Bi9aoq3zNn8AuPtyh66UAN4N2OLlEH2kJoCE7Gv7OJbE3qzi9n+jT4HnwUQGZZA6/ITkdAlt9EJU54o2wXjm4CRVjbW3bHl/AGM8rCAofJ61LQC9MRLJuYWzxDabHXe2LEMKMEbJke0/wMy47IDcBIAAA=="
 )
+
+
+_MC_RELEASE_RE = re.compile(r"^(?P<major>\d+)\.(?P<minor>\d+)(?:\.(?P<patch>\d+))?$")
+_MC_BASE_VERSION_RE = re.compile(r"^(?P<base>\d+\.\d+(?:\.\d+)?)(?:-.+)?$")
+
+_DATA_VERSION_URL = "https://minecraft.wiki/w/Data_version"
+_DATA_VERSION_RELEASE_RE = re.compile(
+    r"Java Edition\s+(?P<version>\d+\.\d+(?:\.\d+)?)</a>\s*</td>\s*<td[^>]*>\s*(?P<data_version>\d+)\s*</td>",
+    re.IGNORECASE,
+)
+_DATA_VERSION_CACHE: TTLCache = TTLCache(maxsize=1, ttl=24 * 60 * 60)
+
+
+def _parse_release_version(version_name: Optional[str]) -> Optional[Tuple[int, int, int]]:
+    if not version_name:
+        return None
+    m = _MC_RELEASE_RE.match(version_name.strip())
+    if not m:
+        return None
+    return (int(m.group("major")), int(m.group("minor")), int(m.group("patch") or 0))
+
+
+def _extract_base_release_version(version_name: Optional[str]) -> Optional[str]:
+    """将 1.21.5-pre3 / 1.21.5-rc1 -> 1.21.5；非 release 返回 None。"""
+    if not version_name:
+        return None
+    m = _MC_BASE_VERSION_RE.match(version_name.strip())
+    if not m:
+        return None
+    return m.group("base")
+
+
+def _get_release_data_version_map() -> Dict[str, int]:
+    cached = _DATA_VERSION_CACHE.get("release_map")
+    if isinstance(cached, dict) and cached:
+        return cached
+
+    try:
+        resp = httpx.get(
+            _DATA_VERSION_URL,
+            timeout=10.0,
+            headers={"User-Agent": "ASPanel/flat_world_generator"},
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
+        html = resp.text or ""
+    except Exception:
+        _DATA_VERSION_CACHE["release_map"] = {}
+        return {}
+
+    mapping: Dict[str, int] = {}
+    for m in _DATA_VERSION_RELEASE_RE.finditer(html):
+        try:
+            mapping[str(m.group("version"))] = int(m.group("data_version"))
+        except Exception:
+            continue
+
+    _DATA_VERSION_CACHE["release_map"] = mapping
+    return mapping
+
+
+def _maybe_apply_version_metadata(data: Compound, version_name: Optional[str]) -> Optional[int]:
+    """根据版本名写入 DataVersion / Version.Id / Version.Name。返回写入的 dataVersion。"""
+    if not version_name:
+        return None
+
+    base_release = _extract_base_release_version(version_name)
+    if not base_release:
+        return None
+    data_version = _get_release_data_version_map().get(base_release)
+    if data_version is None:
+        return None
+
+    data["DataVersion"] = Int(int(data_version))
+    ver = data.get("Version")
+    if ver is None or not isinstance(ver, Compound):
+        ver = Compound()
+        data["Version"] = ver
+    ver["Id"] = Int(int(data_version))
+    ver["Name"] = String(str(version_name))
+    return int(data_version)
+
+
+def _infer_flat_base_y(version_name: Optional[str]) -> int:
+    """推断超平坦底部层的起始 Y。
+
+    - 1.18+：-64
+    - <=1.17：0
+    - 无法解析：沿用模板（-64）
+    """
+    base_release = _extract_base_release_version(version_name) or ""
+    rel = _parse_release_version(base_release)
+    if rel is None:
+        return -64
+    return -64 if rel >= (1, 18, 0) else 0
+
+
+def _layers_total_height(layers_py: List[Dict[str, Any]]) -> int:
+    total = 0
+    for it in layers_py:
+        total += int(it.get("height", 1) or 0)
+    return max(0, total)
+
+
+def _apply_spawn_from_layers(data: Compound, base_y: int, layers_py: List[Dict[str, Any]]) -> None:
+    """根据 layers 自动设置出生点高度（X/Z 固定 0）。"""
+    total_h = _layers_total_height(layers_py)
+    data["SpawnX"] = Int(0)
+    data["SpawnZ"] = Int(0)
+    data["SpawnY"] = Int(int(base_y + total_h))
 
 
 def _ns_block_name(name: str) -> str:
@@ -141,17 +254,39 @@ def generate_flat_level_dat(config: Dict[str, Any]) -> bytes:
         data = Compound()
         root["Data"] = data
 
+    # 读取模板原始版本（用于 DataVersion 映射失败时的兜底判断）
+    template_version_name: Optional[str] = None
+    try:
+        ver_tag = data.get("Version")
+        if isinstance(ver_tag, Compound):
+            template_version_name = str(ver_tag.get("Name") or "")
+    except Exception:
+        template_version_name = None
+
     # LevelName 设置为 UUID
     data["LevelName"] = String(str(uuid.uuid4()))
 
-    # Version.Name
+    # Version / DataVersion（尽量与目标版本对齐，避免“存档来自更高版本”）
     version_name = config.get("version") or config.get("versionName")
     if version_name:
+        # 始终写入 Version.Name；DataVersion/Version.Id 尽力从 wiki 映射
         ver = data.get("Version")
         if ver is None or not isinstance(ver, Compound):
             ver = Compound()
             data["Version"] = ver
         ver["Name"] = String(str(version_name))
+        applied_dv = _maybe_apply_version_metadata(data, str(version_name))
+        if applied_dv is None and template_version_name:
+            target_base = _extract_base_release_version(str(version_name))
+            template_base = _extract_base_release_version(template_version_name)
+            target_rel = _parse_release_version(target_base) if target_base else None
+            template_rel = _parse_release_version(template_base) if template_base else None
+            # 目标版本比模板旧，但没能拿到 DataVersion：直接拒绝，避免生成“更高版本存档”
+            if target_rel and template_rel and target_rel < template_rel:
+                raise ValueError(
+                    f"无法获取版本 {version_name} 的 DataVersion 映射（可能无法访问 minecraft.wiki），"
+                    "为避免生成更高版本存档已中止。请稍后重试或选择更高版本。"
+                )
 
     # seed
     if "seed" in config and config.get("seed") not in (None, ""):
@@ -173,8 +308,7 @@ def generate_flat_level_dat(config: Dict[str, Any]) -> bytes:
     if biome_value:
         settings["biome"] = String(biome_value)
     else:
-        # 若未提供群系，显式写入空字符串，交由游戏/后端后续逻辑处理
-        settings["biome"] = String("")
+        settings["biome"] = String("minecraft:plains")
 
     # layers
     layers = config.get("layers") or []
@@ -187,11 +321,34 @@ def generate_flat_level_dat(config: Dict[str, Any]) -> bytes:
         or config.get("structureOverrides")
         or []
     )
-    if structures:
-        settings["structure_overrides"] = _to_nbt_string_list(structures)
-    else:
-        # 若未提供结构覆盖，按需求写入空对象 {}
-        settings["structure_overrides"] = Compound()
+    # 统一写为字符串 List（空列表也保持类型一致，避免不同版本解析差异）
+    settings["structure_overrides"] = _to_nbt_string_list(structures) if structures else NbtList[String]([])
+
+    # 出生点高度：根据版本推断底部 Y，并随 layers 总高度调整
+    if layers:
+        _apply_spawn_from_layers(data, _infer_flat_base_y(str(version_name) if version_name else None), layers)
+
+    # 旧版本（<=1.15）依赖 generatorName/generatorOptions
+    base_release = _extract_base_release_version(str(version_name) if version_name else None)
+    rel = _parse_release_version(base_release) if base_release else None
+    if rel and rel < (1, 16, 0):
+        if rel < (1, 13, 0):
+            raise ValueError("暂不支持 1.13 以下版本的 superflat generatorOptions 格式")
+
+        data["generatorName"] = String("flat")
+        data["generatorVersion"] = Int(0)
+
+        biome_id = str(biome_value or "minecraft:plains")
+        if ":" not in biome_id:
+            biome_id = f"minecraft:{biome_id}"
+        layers_code: List[str] = []
+        for it in layers:
+            block = _ns_block_name(str(it.get("block", "minecraft:air")))
+            height = int(it.get("height", 1))
+            if height <= 0:
+                continue
+            layers_code.append(f"{height}*{block}" if height != 1 else block)
+        data["generatorOptions"] = String(f"{','.join(layers_code)};{biome_id}")
 
     # 导出 gzip NBT 字节
     # 使用 File 保存到内存
