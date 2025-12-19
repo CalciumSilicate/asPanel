@@ -228,7 +228,7 @@ def _TIME_FORMATTER(x: float) -> str:
     minutes = total_minutes % 60
     parts = []
     if hours > 0:
-        parts.append(f"{hours}h")
+        parts.append(f"{hours:,}h")
     if minutes > 0:
         parts.append(f"{minutes}m")
     return "".join(parts) if parts else "0"
@@ -236,15 +236,17 @@ def _TIME_FORMATTER(x: float) -> str:
 def _DISTANCE_FORMATTER(x: float) -> str:
     try:
         km = float(x)
+        abs_km = abs(km)
     except Exception:
         return "0"
-    if km <= 0:
-        return "0"
-    if km >= 1:
-        s = f"{round(km, 3):.3f}".rstrip("0").rstrip(".")
+    if abs_km >= 1_000:
+        s = f"{km:,.1f}".rstrip("0").rstrip(".")
+        return f"{s}km"
+    if abs_km >= 1:
+        s = f"{km:,.2f}".rstrip("0").rstrip(".")
         return f"{s}km"
     meters = km * 1000
-    return f"{meters:.2f}".rstrip("0").rstrip(".") + "m"
+    return f"{meters:,.2f}".rstrip("0").rstrip(".") + "m"
 
 TOTAL_ITEMS = [
     ("上线次数", ["custom.leave_game"], 1, lambda x: x),
@@ -339,7 +341,7 @@ def _build_boundaries(tr: TimeRange) -> List[datetime]:
 
 
 def _calc_preset(label: str, offset: int = 0) -> TimeRange:
-    now = datetime.now()
+    now = get_now_tz()
     if label == "1d":
         start = (now - timedelta(days=offset)).replace(hour=1, minute=0, second=0, microsecond=0)
         if offset:
@@ -402,7 +404,7 @@ def _calc_preset(label: str, offset: int = 0) -> TimeRange:
         min = (now.minute // 10 + 1) * 10
         end = now.replace(microsecond=0, second=0, minute=min if min != 60 else 0)
         if min == 60:
-            end + timedelta(hours=1)
+            end = end + timedelta(hours=1)
         start = end - timedelta(days=1)
         start = convert_to_tz(start)
         end = convert_to_tz(end)
@@ -413,8 +415,9 @@ def _calc_preset(label: str, offset: int = 0) -> TimeRange:
 
 def _parse_custom_range(start_text: str, end_text: str) -> TimeRange:
     fmt = "%Y-%m-%d %H:%M"
-    start = datetime.strptime(start_text, fmt)
-    end = datetime.strptime(end_text, fmt)
+    tz = get_tz_info()
+    start = datetime.strptime(start_text, fmt).replace(tzinfo=tz)
+    end = datetime.strptime(end_text, fmt).replace(tzinfo=tz)
     delta = end - start
     if delta < timedelta(days=1):
         granularity = "10min"
@@ -424,7 +427,7 @@ def _parse_custom_range(start_text: str, end_text: str) -> TimeRange:
         granularity = "24h"
     else:
         granularity = "1month"
-    return TimeRange(start, end, granularity, f"{start_text} ~ {end_text}", [])
+    return TimeRange(start, end, start, end, granularity, f"{start_text} ~ {end_text}", [])
 
 
 def _time_range_from_tokens(tokens: List[str]) -> TimeRange:
@@ -563,6 +566,7 @@ def _get_last_seen_str(db: Session, player: models.Player, server_ids: List[int]
         return "N/A"
         
     latest_timestamp = 0
+    now_ts = int(datetime.now(timezone.utc).timestamp())
     
     target_servers = server_ids if server_ids else []
     
@@ -570,7 +574,8 @@ def _get_last_seen_str(db: Session, player: models.Player, server_ids: List[int]
         q = select(models.PlayerMetrics.ts).where(
             models.PlayerMetrics.server_id == sid,
             models.PlayerMetrics.player_id == player.id,
-            models.PlayerMetrics.metric_id == metric_id
+            models.PlayerMetrics.metric_id == metric_id,
+            models.PlayerMetrics.ts <= now_ts,
         ).order_by(models.PlayerMetrics.ts.desc()).limit(2)
         
         rows = db.execute(q).scalars().all()
@@ -582,7 +587,7 @@ def _get_last_seen_str(db: Session, player: models.Player, server_ids: List[int]
                 latest_timestamp = ts
     
     if latest_timestamp > 0:
-        dt = datetime.fromtimestamp(latest_timestamp)
+        dt = datetime.fromtimestamp(latest_timestamp, tz=timezone.utc)
         dt = convert_to_tz(dt)
         return f"至少于 {dt.strftime('%Y-%m-%d %H:%M')} 前"
     
@@ -612,7 +617,10 @@ def _get_session_range_for_last(db: Session, player: models.Player, server_ids: 
         if not end:
             end = datetime.now(timezone.utc)
         end = convert_to_tz(end)
-        label = f"上次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
+        if offset == 0:
+            label = f"上次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
+        else:
+            label = f"倒数第{offset + 1}次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
         c_start = _floor_to_10min(start)
         c_end = _ceil_to_10min(end) if end else None
         
@@ -622,7 +630,7 @@ def _get_session_range_for_last(db: Session, player: models.Player, server_ids: 
 
 
 def _calculate_time_range(tokens: List[str], player: models.Player, is_online: bool, db: Session, server_ids: List[int]) -> TimeRange:
-    now = datetime.now()
+    now = get_now_tz()
     
     is_last = False
     offset = 0
@@ -702,7 +710,7 @@ def build_stats_picture(
         "is_online": is_online,
         "in_server": server_name,
         "data_source_text": data_source_text,
-        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "generated_at": get_now_tz().strftime("%Y-%m-%d %H:%M:%S")
     }
     # 默认使用 [3] 如果未提供 server_ids，防止报错
     effective_server_ids = server_ids if server_ids else [3]

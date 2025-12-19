@@ -814,8 +814,12 @@ def render_combined_view(
     info_limit_w = Theme.LEFT_PANEL_WIDTH - (avatar_size + 30)
 
     # 生成时间
-    gen_time = data.get("generated_at", "")
-    draw.text((text_x, cursor_y + 5), f"Generated: {gen_time}", fill=Theme.TEXT_SECONDARY, font=font_info, anchor="lt")
+    generated_at = data.get("generated_at", "")
+    draw.text((text_x, cursor_y + 5), f"Generated at: {generated_at}", fill=Theme.TEXT_SECONDARY, font=font_info, anchor="lt")
+
+    # 统计区间
+    time_range_label = data.get("time_range_label", "")
+    draw.text((text_x, cursor_y - 25), time_range_label, fill=Theme.TEXT_SECONDARY, font=font_info, anchor="lt")
 
     # 玩家名字
     name_text = data.get("player_name", "Player")
@@ -917,8 +921,8 @@ def render_combined_view(
     # 计算右侧栏位置
     right_x = Theme.PADDING + Theme.LEFT_PANEL_WIDTH + Theme.COLUMN_GAP
     right_w = Theme.WIDTH - right_x - Theme.PADDING
-    right_h = total_height - 2 * Theme.PADDING # 上下对齐
-    right_y = Theme.PADDING
+    right_h = total_height - 2 * Theme.PADDING - 20 # 上下对齐
+    right_y = Theme.PADDING + 20
 
     if has_map:
         bbox = (right_x, right_y, right_x + right_w, right_y + right_h)
@@ -982,7 +986,7 @@ def render_combined_view(
 
             # 地图信息卡片 (悬浮在右侧地图的底部)
             if info_data and all(k in info_data for k in ["x", "z", "dim"]):
-                card_w, card_h = 700, 140
+                card_w, card_h = 450, 140
                 
                 # 悬浮位置：右侧面板的底部居中
                 cx = right_x + (right_w - card_w) // 2
@@ -1004,7 +1008,7 @@ def render_combined_view(
                 # 最近站点
                 if info_data.get("nearest_name"):
                     n_name = info_data['nearest_name']
-                    n_name = truncate_text(od, n_name, load_font(22, True), 350)
+                    n_name = truncate_text(od, n_name, load_font(22, True), 200)
                     
                     od.text((card_w - 25, 20), "Nearest Station", fill=Theme.TEXT_SECONDARY, font=font_info, anchor="rt")
                     od.text((card_w - 25, 45), n_name, fill=Theme.TEXT_PRIMARY, font=load_font(22, True), anchor="rt")
