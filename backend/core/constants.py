@@ -111,11 +111,11 @@ DEFAULT_CORE_CONFIG = {
 # --- DEFAULT Vanilla Server Properties ---
 DEFAULT_SERVER_PROPERTIES_CONFIG = {
     "online-mode": True, "server-port": 25565,
-    "view-distance": 10, "max-players": 20,
+    "view-distance": 16, "max-players": 20,
     "motd": "A Minecraft Server",
     "gamemode": "survival", "difficulty": "hard",
     "hardcore": False, "enable-command-block": True,
-    "enable-rcon": False, "rcon.password": "",
+    "enable-rcon": True, "rcon.password": "password",
     "rcon.port": 25575, "level-seed": ""
 }
 

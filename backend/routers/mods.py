@@ -1,5 +1,6 @@
 # backend/routers/mods.py
 
+import asyncio
 import json
 import os
 import shutil
@@ -17,7 +18,7 @@ from backend.core.constants import TEMP_PATH
 from backend.core.utils import get_file_md5, get_file_sha256, get_size_bytes, get_file_sha1
 from backend.core.database import get_db, SessionLocal
 from backend.core.logger import logger
-from backend.core.schemas import Role, ServerCoreConfig, ModDBCreate
+from backend.core.schemas import Role, ServerCoreConfig, ModDBCreate, ServerModsCount
 from backend.core.dependencies import mod_manager
 
 router = APIRouter(prefix="/api", tags=["Mods"])
@@ -130,6 +131,24 @@ async def mods_overview(server_id: int, db: Session = Depends(get_db), _user=Dep
 async def mods_usage_total(db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
     """汇总所有服务器 mods 目录的总占用。"""
     return mod_manager.usage_total(db)
+
+
+@router.get('/mods/servers', response_model=List[ServerModsCount])
+async def list_servers_mods_counts(db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
+    """汇总所有服务器的 mods 数量（不含模组列表与大小）。"""
+    servers = crud.get_all_servers(db)
+    if not servers:
+        return []
+
+    async def _count(server) -> Optional[ServerModsCount]:
+        try:
+            mods_count = await asyncio.to_thread(mod_manager.count_mods, server)
+            return ServerModsCount(id=server.id, mods_count=int(mods_count))
+        except Exception:
+            return None
+
+    results = await asyncio.gather(*[_count(s) for s in servers])
+    return [r for r in results if r is not None]
 
 
 @router.post('/mods/server/{server_id}/switch/{file_name}')

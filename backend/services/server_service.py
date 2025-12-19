@@ -44,6 +44,60 @@ class ServerService:
     async def get_status(self, db_server: models.Server) -> Tuple[schemas.ServerStatus, int]:
         return await self.mcdr_manager.get_status(db_server.id, db_server.path)
 
+    async def get_servers_list(self, db: Session) -> List[schemas.ServerDetail]:
+        """快速获取服务器列表（不计算目录大小、不统计 mods）。"""
+        servers_from_db = crud.get_all_servers(db)
+        if not servers_from_db:
+            return []
+
+        status_tasks = [self.get_status(server) for server in servers_from_db]
+        plugins_count_tasks = [self.get_server_plugin_count(server) for server in servers_from_db]
+
+        core_configs: List[ServerCoreConfig] = []
+        fs_tasks = []
+        for server in servers_from_db:
+            try:
+                if hasattr(ServerCoreConfig, "model_validate_json"):
+                    core_config = ServerCoreConfig.model_validate_json(server.core_config)  # type: ignore[attr-defined]
+                else:
+                    core_config = ServerCoreConfig.model_validate(json.loads(server.core_config))
+            except Exception:
+                core_config = ServerCoreConfig()
+            core_configs.append(core_config)
+            fs_tasks.append(asyncio.to_thread(
+                server_parser.get_server_details,
+                server.path,
+                core_config.server_type,
+            ))
+
+        statuses, plugins_counts, fs_details_list = await asyncio.gather(
+            asyncio.gather(*status_tasks),
+            asyncio.gather(*plugins_count_tasks),
+            asyncio.gather(*fs_tasks),
+        )
+
+        server_details_list: List[schemas.ServerDetail] = []
+        for i, server in enumerate(servers_from_db):
+            status_res = statuses[i]
+            plugins_count = plugins_counts[i]
+            fs_details = fs_details_list[i] if isinstance(fs_details_list[i], dict) else {}
+            server_detail = schemas.ServerDetail(
+                name=server.name,
+                id=server.id,
+                path=server.path,
+                creator_id=server.creator_id,
+                core_config=core_configs[i],
+                map=getattr(server, "map", None),
+                status=status_res[0],
+                return_code=status_res[1],
+                size_mb=None,
+                plugins_count=plugins_count,
+                mods_count=None,
+                **fs_details,
+            )
+            server_details_list.append(server_detail)
+        return server_details_list
+
     async def get_servers_with_details(self, db: Session) -> List[schemas.ServerDetail]:
         servers_from_db = crud.get_all_servers(db)
 
@@ -86,6 +140,32 @@ class ServerService:
             )
             server_details_list.append(server_detail)
         return server_details_list
+
+    async def get_servers_sizes(self, db: Session) -> List[schemas.ServerSize]:
+        """获取所有服务器目录大小。
+
+        - 默认使用 get_size_mb 的进程内缓存
+        - 仅对运行中的服务器绕过缓存（更接近实时大小）
+        """
+        servers_from_db = crud.get_all_servers(db)
+        if not servers_from_db:
+            return []
+
+        statuses = await asyncio.gather(*[self.get_status(server) for server in servers_from_db])
+
+        async def _calc(server: models.Server, status: tuple[schemas.ServerStatus, int]) -> Optional[schemas.ServerSize]:
+            try:
+                is_running = status[0] == schemas.ServerStatus.RUNNING
+                if is_running:
+                    size_mb = await asyncio.to_thread(get_size_mb, server.path, time.time())
+                else:
+                    size_mb = await asyncio.to_thread(get_size_mb, server.path)
+                return schemas.ServerSize(id=server.id, size_mb=size_mb)
+            except Exception:
+                return None
+
+        results = await asyncio.gather(*[_calc(s, statuses[i]) for i, s in enumerate(servers_from_db)])
+        return [r for r in results if r is not None]
 
     async def get_server_details_by_id(self, server_id: int, db: Session) -> schemas.ServerDetail:
         server = crud.get_server_by_id(db, server_id)

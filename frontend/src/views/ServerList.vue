@@ -79,8 +79,11 @@
 
         <el-table-column prop="size_mb" label="服务器大小 (MB)" width="160" align="center" sortable>
           <template #default="scope">
-            <span v-if="scope.row.size_mb != null">{{ scope.row.size_mb.toFixed(3) }} MB</span>
-            <span v-else>N/A</span>
+            <span v-if="scope.row.size_calc_state === 'ok' && scope.row.size_mb != null">
+              {{ scope.row.size_mb.toFixed(3) }} MB
+            </span>
+            <span v-else-if="scope.row.size_calc_state === 'failed'">计算失败</span>
+            <span v-else>计算中</span>
           </template>
         </el-table-column>
 
@@ -715,73 +718,75 @@
 	                </div>
 	              </div>
 	
-	              <el-divider>地图配置</el-divider>
-	              <el-form-item>
-	                <div class="form-item-wrapper">
-	                  <div class="form-item-label">
-	                    <span>位置地图 (主世界 + 下界)</span>
-	                    <small>the_nether.json</small>
-                      <small>用于主世界 + 下界双维度路径渲染</small>
-	                  </div>
-	                  <div class="form-item-control map-upload-control">
-                      
-	                    <div class="map-upload-row">
-                        <el-tag v-if="currentConfigServer?.map?.nether_json" type="success" plain>已配置</el-tag>
-	                      <el-tag v-else type="info" plain>未配置</el-tag>
-	                      <el-upload
-	                          ref="netherMapUploaderRef"
-	                          v-model:file-list="netherMapFileList"
-	                          action="#"
-	                          :auto-upload="false"
-	                          :limit="1"
-	                          accept=".json"
-	                          :on-exceed="files => handleMapExceed('nether', files)"
-	                          :on-change="file => handleMapFileChange('nether', file)"
-	                      >
-	                        <el-button :icon="Upload">选择文件</el-button>
-                          <el-button type="primary" @click="handleUploadMapJson('nether')" :loading="isUploadingMap.nether">
-	                        上传
-	                      </el-button>
-                        
-	                      </el-upload>
-	                      
-	                      
-	                    </div>
-	                  </div>
-	                </div>
-	              </el-form-item>
-	              <el-form-item>
-	                <div class="form-item-wrapper">
-	                  <div class="form-item-label">
-	                    <span>位置地图 (末地)</span>
-	                    <small>the_end.json</small>
-                      <small>用于末地单维度路径渲染</small>
-	                  </div>
-	                  <div class="form-item-control map-upload-control">
-	                    <div class="map-upload-row">
-                        <el-tag v-if="currentConfigServer?.map?.end_json" type="success" plain>已配置</el-tag>
-	                      <el-tag v-else type="info" plain>未配置</el-tag>
-	                      <el-upload
-	                          ref="endMapUploaderRef"
-	                          v-model:file-list="endMapFileList"
-	                          action="#"
-	                          :auto-upload="false"
-	                          :limit="1"
-	                          accept=".json"
-	                          :on-exceed="files => handleMapExceed('end', files)"
-	                          :on-change="file => handleMapFileChange('end', file)"
-	                      >
-	                        <el-button :icon="Upload">选择文件</el-button>
-                          <el-button type="primary" @click="handleUploadMapJson('end')" :loading="isUploadingMap.end">
-	                        上传
-	                      </el-button>
-	                      </el-upload>
-	                      
-	                      
-	                    </div>
-	                  </div>
-	                </div>
-	              </el-form-item>
+		              <template v-if="isVanillaFamily || isForgeType">
+		                <el-divider>地图配置</el-divider>
+		                <el-form-item>
+		                  <div class="form-item-wrapper">
+		                    <div class="form-item-label">
+		                      <span>位置地图 (主世界 + 下界)</span>
+		                      <small>the_nether.json</small>
+	                        <small>用于主世界 + 下界双维度路径渲染</small>
+		                    </div>
+		                    <div class="form-item-control map-upload-control">
+		                      
+		                      <div class="map-upload-row">
+	                          <el-tag v-if="currentConfigServer?.map?.nether_json" type="success" plain>已配置</el-tag>
+		                        <el-tag v-else type="info" plain>未配置</el-tag>
+		                        <el-upload
+		                            ref="netherMapUploaderRef"
+		                            v-model:file-list="netherMapFileList"
+		                            action="#"
+		                            :auto-upload="false"
+		                            :limit="1"
+		                            accept=".json"
+		                            :on-exceed="files => handleMapExceed('nether', files)"
+		                            :on-change="file => handleMapFileChange('nether', file)"
+		                        >
+		                          <el-button :icon="Upload">选择文件</el-button>
+	                            <el-button type="primary" @click="handleUploadMapJson('nether')" :loading="isUploadingMap.nether">
+		                          上传
+		                        </el-button>
+		                        
+		                        </el-upload>
+		                        
+		                        
+		                      </div>
+		                    </div>
+		                  </div>
+		                </el-form-item>
+		                <el-form-item>
+		                  <div class="form-item-wrapper">
+		                    <div class="form-item-label">
+		                      <span>位置地图 (末地)</span>
+		                      <small>the_end.json</small>
+	                        <small>用于末地单维度路径渲染</small>
+		                    </div>
+		                    <div class="form-item-control map-upload-control">
+		                      <div class="map-upload-row">
+	                          <el-tag v-if="currentConfigServer?.map?.end_json" type="success" plain>已配置</el-tag>
+		                        <el-tag v-else type="info" plain>未配置</el-tag>
+		                        <el-upload
+		                            ref="endMapUploaderRef"
+		                            v-model:file-list="endMapFileList"
+		                            action="#"
+		                            :auto-upload="false"
+		                            :limit="1"
+		                            accept=".json"
+		                            :on-exceed="files => handleMapExceed('end', files)"
+		                            :on-change="file => handleMapFileChange('end', file)"
+		                        >
+		                          <el-button :icon="Upload">选择文件</el-button>
+	                            <el-button type="primary" @click="handleUploadMapJson('end')" :loading="isUploadingMap.end">
+		                          上传
+		                        </el-button>
+		                        </el-upload>
+		                        
+		                        
+		                      </div>
+		                    </div>
+		                  </div>
+		                </el-form-item>
+		              </template>
 	              <!-- 其他不支持的类型 -->
 	              <div v-if="currentView === 'unsupported_type'">
 	                <p>此服务器类型 ({{ configFormData.core_config.server_type }}) 的配置界面暂未支持。</p>
@@ -1468,13 +1473,45 @@ watch(
 );
 
 
+let serverSizesRequestSeq = 0;
+
+const fetchServerSizes = async (requestId) => {
+  try {
+    const { data } = await apiClient.get('/api/servers/sizes');
+    if (requestId !== serverSizesRequestSeq) return;
+
+    const sizeMap = new Map((data || []).map(item => [Number(item.id), item.size_mb]));
+    serverList.value.forEach((s) => {
+      if (sizeMap.has(Number(s.id))) {
+        s.size_mb = sizeMap.get(Number(s.id));
+        s.size_calc_state = 'ok';
+      } else {
+        s.size_mb = null;
+        s.size_calc_state = 'failed';
+      }
+    });
+  } catch (e) {
+    if (requestId !== serverSizesRequestSeq) return;
+    serverList.value.forEach((s) => {
+      s.size_mb = null;
+      s.size_calc_state = 'failed';
+    });
+  }
+};
+
 const fetchServers = async () => {
   loading.value = true;
   try {
     const {data} = await apiClient.get('/api/servers');
     const selectedIds = new Set(selectedServers.value.map(s => s.id));
 
-    serverList.value = data.map(s => ({...s, loading: false, rcon_password_visible: false}));
+    serverList.value = data.map(s => ({
+      ...s,
+      loading: false,
+      rcon_password_visible: false,
+      size_mb: null,
+      size_calc_state: 'pending',
+    }));
 
     await nextTick();
     if (tableRef.value) {
@@ -1485,6 +1522,9 @@ const fetchServers = async () => {
         }
       });
     }
+
+    const requestId = ++serverSizesRequestSeq;
+    fetchServerSizes(requestId);
 
   } finally {
     loading.value = false;
@@ -1523,20 +1563,20 @@ const fetchServers = async () => {
   configLoading.value = true;
   try {
     const {data} = await apiClient.get(`/api/servers/config?server_id=${server.id}`);
-    configFormData.value = data.config;
-    dialogState.isNewSetup = data.is_new_setup;
-    dialogState.coreFileExists = data.core_file_exists;
-    dialogState.configFileExists = data.config_file_exists;
-    const type = configFormData.value.core_config.server_type;
-    if (!type && dialogState.isNewSetup) {
-      currentView.value = 'select_type';
-    } else if (type === 'vanilla' && dialogState.isNewSetup) {
-      currentView.value = 'select_type';
-    } else if (type === 'velocity') {
-      if (!dialogState.coreFileExists) {
-        currentView.value = 'velocity_initial_setup';
-        await fetchVelocityVersions();
-      } else if (!dialogState.configFileExists) {
+	    configFormData.value = data.config;
+	    dialogState.isNewSetup = data.is_new_setup;
+	    dialogState.coreFileExists = data.core_file_exists;
+	    dialogState.configFileExists = data.config_file_exists;
+	    const type = configFormData.value.core_config.server_type;
+	    if (dialogState.isNewSetup) {
+	      currentView.value = 'select_type';
+	      const pickable = serverTypes.some(t => t.value === type && !t.disabled);
+	      selectedServerTypeForSetup.value = pickable ? type : '';
+	    } else if (type === 'velocity') {
+	      if (!dialogState.coreFileExists) {
+	        currentView.value = 'velocity_initial_setup';
+	        await fetchVelocityVersions();
+	      } else if (!dialogState.configFileExists) {
         currentView.value = 'needs_first_start';
       } else {
         currentView.value = 'full_config';
@@ -1568,11 +1608,11 @@ const fetchServers = async () => {
       if (configFormData.value.core_config.is_fabric) {
         await fetchFabricLoaderVersions(configFormData.value.core_config.core_version);
       }
-    } else {
-      currentView.value = 'unsupported_type';
-    }
-  } catch (error) {
-    ElMessage.error(`加载配置失败: ${error.response?.data?.detail || error.message}`);
+	    } else {
+	      currentView.value = 'unsupported_type';
+	    }
+	  } catch (error) {
+	    ElMessage.error(`加载配置失败: ${error.response?.data?.detail || error.message}`);
     configDialogVisible.value = false;
   } finally {
     configLoading.value = false;
@@ -2464,19 +2504,23 @@ onMounted(() => {
     console.log('WebSocket for ServerList connected successfully.');
   });
 
-  socket.on('server_status_update', (updatedServer) => {
-    if (updatedServer && updatedServer.id) {
-      const index = serverList.value.findIndex(s => s.id === updatedServer.id);
-      if (index !== -1) {
-        const originalServer = serverList.value[index];
-        serverList.value[index] = {
-          ...originalServer,
-          ...updatedServer,
-          loading: false
-        };
-      }
-    }
-  });
+	  socket.on('server_status_update', (updatedServer) => {
+	    if (updatedServer && updatedServer.id) {
+	      const index = serverList.value.findIndex(s => s.id === updatedServer.id);
+	      if (index !== -1) {
+	        const originalServer = serverList.value[index];
+	        const merged = {
+	          ...originalServer,
+	          ...updatedServer,
+	          loading: false
+	        };
+	        if (merged.size_mb != null) {
+	          merged.size_calc_state = 'ok';
+	        }
+	        serverList.value[index] = merged;
+	      }
+	    }
+	  });
 
   socket.on('server_delete', () => {
     fetchServers();

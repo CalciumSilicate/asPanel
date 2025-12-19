@@ -218,6 +218,16 @@ class ServerDetail(Server):
     mods_count: Optional[int] = None
 
 
+class ServerSize(BaseModel):
+    id: int
+    size_mb: float
+
+
+class ServerModsCount(BaseModel):
+    id: int
+    mods_count: int
+
+
 class ServerDashboardInfo(ServerBase):
     status: ServerStatus
     cpu_percent: float = None

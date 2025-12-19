@@ -309,6 +309,24 @@ class ModManager:
             'loader_version': core.loader_version,
         }
 
+    def count_mods(self, server: Any) -> int:
+        """仅统计模组数量（不计算总大小），用于服务器列表等场景。"""
+        mods_dir = self.mods_dir_for_server(server)
+        try:
+            count = 0
+            with os.scandir(mods_dir) as it:
+                for entry in it:
+                    if entry.name.startswith('.'):
+                        continue
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            count += 1
+                    except OSError:
+                        continue
+            return count
+        except OSError:
+            return 0
+
     def usage_total(self, db: Session) -> Dict[str, int]:
         servers = crud.get_all_servers(db)
         total = 0
