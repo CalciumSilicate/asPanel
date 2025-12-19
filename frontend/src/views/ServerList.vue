@@ -76,6 +76,17 @@
           </template>
         </el-table-column>
         <el-table-column prop="core_config.core_version" label="核心版本" width="180" align="center" sortable/>
+        <el-table-column label="自动启动" width="120" align="center" v-if="hasRole('ADMIN')">
+          <template #default="scope">
+            <el-tooltip effect="dark" content="ASPanel 启动时自动启动该服务器" placement="top" :show-after="400">
+              <el-switch
+                  v-model="scope.row.core_config.auto_start"
+                  :disabled="!!autoStartSaving[scope.row.id]"
+                  @change="(v) => setAutoStart(scope.row, v)"
+              />
+            </el-tooltip>
+          </template>
+        </el-table-column>
 
         <el-table-column prop="size_mb" label="服务器大小 (MB)" width="160" align="center" sortable>
           <template #default="scope">
@@ -1190,11 +1201,12 @@ import draggable from 'vuedraggable';
 import { settings } from '@/store/settings'
 import { hasRole } from '@/store/user';
 
-const router = useRouter();
-const serverList = ref([]);
-const loading = ref(true);
-const selectedServers = ref([]);
-const isBatchProcessing = ref(false);
+	const router = useRouter();
+	const serverList = ref([]);
+	const loading = ref(true);
+	const selectedServers = ref([]);
+	const isBatchProcessing = ref(false);
+	const autoStartSaving = reactive({});
 
 // 状态标签统一渲染，避免多个标签同时过渡导致换行
 const getStatusTagType = (row) => {
@@ -1499,19 +1511,24 @@ const fetchServerSizes = async (requestId) => {
   }
 };
 
-const fetchServers = async () => {
-  loading.value = true;
-  try {
-    const {data} = await apiClient.get('/api/servers');
-    const selectedIds = new Set(selectedServers.value.map(s => s.id));
-
-    serverList.value = data.map(s => ({
-      ...s,
-      loading: false,
-      rcon_password_visible: false,
-      size_mb: null,
-      size_calc_state: 'pending',
-    }));
+	const fetchServers = async () => {
+	  loading.value = true;
+	  try {
+	    const {data} = await apiClient.get('/api/servers');
+	    const selectedIds = new Set(selectedServers.value.map(s => s.id));
+	
+	    serverList.value = data.map(s => {
+	      const coreConfig = s.core_config || {};
+	      if (coreConfig.auto_start == null) coreConfig.auto_start = false;
+	      return {
+	        ...s,
+	        core_config: coreConfig,
+	        loading: false,
+	        rcon_password_visible: false,
+	        size_mb: null,
+	        size_calc_state: 'pending',
+	      };
+	    });
 
     await nextTick();
     if (tableRef.value) {
@@ -1921,26 +1938,45 @@ const openCreateDialog = () => {
   if (formRef.value) formRef.value.resetFields();
   newServerForm.value = {name: ''};
 };
-const handleCreateServer = async () => {
-  if (!formRef.value) return;
-  await formRef.value.validate(async (valid) => {
-    if (valid) {
-      try {
-        const {data} = await apiClient.post('/api/servers/create', newServerForm.value);
-        ElMessage.success(data?.message || '已提交创建服务器任务');
-        createDialogVisible.value = false;
-        // 服务器将由后台任务创建，ServerList 通过 socket 的 server_create 事件自动刷新
-      } catch (e) {
-        ElMessage.error(`创建失败: ${e.response?.data?.detail || e.message}`);
-      }
-    }
-  });
-};
-const startServer = async (s) => {
-  s.loading = true;
-  try {
-    // 交互上立即置为“启动中”，避免先显示“运行中”再跳回“启动中”的视觉抖动
-    s.status = 'pending'
+	const handleCreateServer = async () => {
+	  if (!formRef.value) return;
+	  await formRef.value.validate(async (valid) => {
+	    if (valid) {
+	      try {
+	        const {data} = await apiClient.post('/api/servers/create', newServerForm.value);
+	        ElMessage.success(data?.message || '已提交创建服务器任务');
+	        createDialogVisible.value = false;
+	        // 服务器将由后台任务创建，ServerList 通过 socket 的 server_create 事件自动刷新
+	      } catch (e) {
+	        ElMessage.error(`创建失败: ${e.response?.data?.detail || e.message}`);
+	      }
+	    }
+	  });
+	};
+
+	const setAutoStart = async (s, autoStart) => {
+	  if (!s?.id) return;
+	  autoStartSaving[s.id] = true;
+	  const revertTo = !autoStart;
+	  try {
+	    const { data } = await apiClient.post('/api/servers/auto-start', { server_id: s.id, auto_start: !!autoStart });
+	    if (!s.core_config) s.core_config = {};
+	    s.core_config.auto_start = data?.auto_start ?? !!autoStart;
+	    ElMessage.success(`${s.name} 已${s.core_config.auto_start ? '启用' : '关闭'}自动启动`);
+	  } catch (e) {
+	    ElMessage.error(`设置自动启动失败: ${e.response?.data?.detail || e.message}`);
+	    if (!s.core_config) s.core_config = {};
+	    s.core_config.auto_start = revertTo;
+	  } finally {
+	    autoStartSaving[s.id] = false;
+	  }
+	};
+
+	const startServer = async (s) => {
+	  s.loading = true;
+	  try {
+	    // 交互上立即置为“启动中”，避免先显示“运行中”再跳回“启动中”的视觉抖动
+	    s.status = 'pending'
     await apiClient.post(`/api/servers/start?server_id=${s.id}`);
     ElMessage.success(`${s.name} 已发送启动命令`);
   } catch (e) {

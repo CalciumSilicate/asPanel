@@ -224,6 +224,26 @@ def update_server_core_config(db: Session, server_id: int, core_config: ServerCo
     return None
 
 
+def set_server_auto_start(db: Session, server_id: int, auto_start: bool) -> Optional[models.Server]:
+    db_server = get_server_by_id(db, server_id)
+    if not db_server:
+        return None
+    try:
+        if hasattr(ServerCoreConfig, "model_validate_json"):
+            core_config = ServerCoreConfig.model_validate_json(db_server.core_config)  # type: ignore[attr-defined]
+        else:
+            core_config = ServerCoreConfig.model_validate(json.loads(db_server.core_config))
+    except Exception:
+        core_config = ServerCoreConfig()
+
+    core_config.auto_start = bool(auto_start)
+    db_server.core_config = core_config.model_dump_json()
+    db.add(db_server)
+    db.commit()
+    db.refresh(db_server)
+    return db_server
+
+
 def create_server(db: Session, server: schemas.ServerCreateInternal, creator_id: int) -> models.Server:
     db_server = models.Server(name=server.name, path=server.path, creator_id=creator_id)
     db.add(db_server)

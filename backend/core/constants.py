@@ -105,7 +105,8 @@ DEFAULT_CORE_CONFIG = {
     "is_fabric": False,
     "loader_version": None,
     "launcher_jar": "server.jar",
-    "server_jar": "server.jar"
+    "server_jar": "server.jar",
+    "auto_start": False,
 }
 
 # --- DEFAULT Vanilla Server Properties ---

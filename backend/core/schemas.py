@@ -161,6 +161,7 @@ class ServerCoreConfig(BaseModel):
     launcher_jar: Optional[str] = None
     # when vanilla and is_fabric==True or forge server, it will be different from server_jar, indicating loader_version
     server_jar: Optional[str] = "server.jar"  # indicates core_version
+    auto_start: bool = Field(False, description="Whether to auto-start this server when ASPanel starts")
 
 
 class ServerMapConfig(BaseModel):
@@ -205,6 +206,11 @@ class ServerConfigResponse(BaseModel):
 class ServerConfigPayload(BaseModel):
     server_id: int
     config: ServerConfigData
+
+
+class ServerAutoStartPayload(BaseModel):
+    server_id: int
+    auto_start: bool
 
 
 class ServerDetail(Server):
