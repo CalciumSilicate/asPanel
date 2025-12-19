@@ -3,6 +3,7 @@
 import time
 import sys
 import asyncio
+import json
 import socketio
 from sqlalchemy import text
 from fastapi import FastAPI, Request
@@ -16,8 +17,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.core import models
-from backend.core.database import engine
+from backend.core import models, crud
+from backend.core.database import engine, SessionLocal
 from backend.core.constants import (
     ALLOWED_ORIGINS, AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, ARCHIVE_STORAGE_PATH, ARCHIVE_URL_PREFIX,
     UVICORN_HOST, UVICORN_PORT, UVICORN_LOG_LEVEL
@@ -35,6 +36,8 @@ from backend.services import stats_service
 from backend.core.api import *
 from backend.core.ws import sio
 from backend.core.logger import logger
+from backend.core.schemas import ServerCoreConfig
+from backend.core.dependencies import mcdr_manager
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -190,6 +193,57 @@ async def warmup_cache():
     except Exception as e:
         logger.error(f"后台预热失败: {e}")
 
+
+async def _auto_start_servers_on_boot():
+    """启动 ASPanel 时自动启动标记了 core_config.auto_start 的服务器。"""
+    # 给其他启动初始化任务一点时间（例如 OneBot / ws / task broadcaster）
+    await asyncio.sleep(1.0)
+    try:
+        with SessionLocal() as db:
+            servers = crud.get_all_servers(db)
+    except Exception as e:
+        logger.warning(f"自动启动：读取服务器列表失败：{e}")
+        return
+
+    targets = []
+    for s in servers:
+        try:
+            if hasattr(ServerCoreConfig, "model_validate_json"):
+                cfg = ServerCoreConfig.model_validate_json(s.core_config)  # type: ignore[attr-defined]
+            else:
+                cfg = ServerCoreConfig.model_validate(json.loads(s.core_config))
+        except Exception:
+            cfg = ServerCoreConfig()
+        if bool(getattr(cfg, "auto_start", False)):
+            targets.append(s)
+
+    if not targets:
+        logger.info("自动启动：没有开启 auto_start 的服务器")
+        return
+
+    started, skipped, failed = 0, 0, 0
+    for s in targets:
+        try:
+            st, _ = await mcdr_manager.get_status(int(s.id), str(s.path))
+            if st in ("running", "pending", "new_setup"):
+                skipped += 1
+                continue
+            ok, msg = await mcdr_manager.start(s)
+            if ok:
+                started += 1
+                logger.info(f"自动启动：已启动 server_id={s.id} name={getattr(s, 'name', '')}")
+            else:
+                failed += 1
+                logger.warning(f"自动启动：启动失败 server_id={s.id} | {msg}")
+        except Exception as e:
+            failed += 1
+            logger.warning(f"自动启动：启动异常 server_id={getattr(s, 'id', None)}：{e}")
+        # 避免同时拉起过多进程造成瞬时 IO/CPU 峰值
+        await asyncio.sleep(0.3)
+
+    logger.info(f"自动启动完成：started={started} skipped={skipped} failed={failed} total={len(targets)}")
+
+
 @app.on_event("startup")
 async def startup_event():
     logger.warning(f"服务器启动中")
@@ -235,6 +289,13 @@ async def startup_event():
         logger.info("TaskManager 实时任务推送已启动")
     except Exception as e:
         logger.warning(f"TaskManager 实时推送启动失败：{e}")
+
+    # 自动启动：按 core_config.auto_start 拉起服务器
+    try:
+        asyncio.create_task(_auto_start_servers_on_boot())
+        logger.info("自动启动后台任务已创建")
+    except Exception as e:
+        logger.warning(f"创建自动启动任务失败：{e}")
 
 
 main_asgi_app = socketio.ASGIApp(sio, other_asgi_app=app, socketio_path='/ws/socket.io')

@@ -74,6 +74,22 @@ async def start_server(server_id: int, db: Session = Depends(get_db),
     return {"status": "success", "pid": message}
 
 
+@router.post("/servers/auto-start")
+async def set_server_auto_start(
+        payload: schemas.ServerAutoStartPayload,
+        db: Session = Depends(get_db),
+        _user: models.User = Depends(require_role(Role.ADMIN)),
+):
+    db_server = crud.set_server_auto_start(db, payload.server_id, payload.auto_start)
+    if not db_server:
+        raise HTTPException(404, "Server not found")
+    try:
+        core_config = ServerCoreConfig.model_validate(json.loads(db_server.core_config))
+    except Exception:
+        core_config = ServerCoreConfig()
+    return {"status": "success", "server_id": int(db_server.id), "auto_start": bool(core_config.auto_start)}
+
+
 @router.post("/servers/stop")
 async def stop_server(server_id: int, db: Session = Depends(get_db),
                       _user: models.User = Depends(require_role(Role.ADMIN))):
