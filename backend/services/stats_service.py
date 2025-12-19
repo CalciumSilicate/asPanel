@@ -191,9 +191,9 @@ def _run_save_all_sync(server: models.Server, debounce_sec: float) -> None:
 
         if loop and loop.is_running():
             # 已在事件循环中：安排异步任务执行，避免 asyncio.run 抛错导致协程未 awaited
-            loop.create_task(mcdr_manager.send_command(server, "save-all"))
+            loop.create_task(mcdr_manager.send_command(server, "save-all flush"))
         else:
-            asyncio.run(mcdr_manager.send_command(server, "save-all"))
+            asyncio.run(mcdr_manager.send_command(server, "save-all flush"))
     except Exception:
         logger.exception("发送 save-all 命令失败")
     _SAVEALL_LAST_TS[server.id] = now
@@ -336,9 +336,7 @@ def ingest_once_for_server(
                 prev_total = prev_map.get(mid)
                 delta, new = _compute_delta(prev_total, curr_total)
                 # target_ts/force_update：即便 delta==0 也需要写入新桶
-                if delta == 0 and not new and target_ts is None:
-                    continue
-                if curr_total == 0 and new:
+                if delta == 0 and not new:
                     continue
                 # 查找是否已存在同(ts, server, player, metric)记录
                 existing = db.execute(
@@ -447,7 +445,7 @@ async def ingest_scheduler_loop():
                         now_ts = time.time()
                         if now_ts - last_ts >= 3.0:
                             logger.debug(f"服务器运行中，试发送命令save-all server_id={srv.id}")
-                            await mcdr_manager.send_command(srv, 'save-all')
+                            await mcdr_manager.send_command(srv, 'save-all flush')
                             _SAVEALL_LAST_TS[srv.id] = now_ts
                             await asyncio.sleep(1.0)
                 except Exception:
