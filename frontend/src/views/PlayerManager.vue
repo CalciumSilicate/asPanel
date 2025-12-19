@@ -97,6 +97,12 @@
         <el-form-item label="玩家名">
           <el-input v-model="whitelistForm.player_name" placeholder="请输入玩家名（支持未入库玩家）" clearable />
         </el-form-item>
+        <el-form-item label="玩家类型">
+          <el-radio-group v-model="whitelistForm.is_official">
+            <el-radio-button :label="true">正版</el-radio-button>
+            <el-radio-button :label="false">离线</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
         <el-form-item label="服务器">
           <el-select v-model="whitelistForm.servers" multiple filterable placeholder="请选择服务器" style="width: 100%;">
             <el-option v-for="s in serverNames" :key="s" :label="s" :value="s" />
@@ -355,10 +361,11 @@ const playerOptions = computed(() => {
 
 const whitelistDialogVisible = ref(false)
 const whitelistSubmitting = ref(false)
-const whitelistForm = ref<{ player_name: string, servers: string[] }>({ player_name: '', servers: [] })
+const whitelistForm = ref<{ player_name: string, is_official: boolean, servers: string[] }>({ player_name: '', is_official: true, servers: [] })
 const openWhitelistDialog = () => {
   whitelistForm.value = {
     player_name: '',
+    is_official: true,
     servers: (selectedServers.value.length > 0 ? selectedServers.value.slice() : serverNames.value.slice()),
   }
   whitelistDialogVisible.value = true
@@ -371,6 +378,7 @@ const submitWhitelist = async () => {
     const name = whitelistForm.value.player_name.trim()
     const payload = {
       player_name: name,
+      is_official: whitelistForm.value.is_official,
       servers: whitelistForm.value.servers,
     }
     const { data } = await api.post('/api/players/whitelist', payload)
