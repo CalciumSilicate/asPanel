@@ -16,19 +16,21 @@ from backend.tools import server_parser
 from backend.services.mcdr_manager import MCDRManager
 from backend.services.plugin_manager import PluginManager
 from backend.services.mod_manager import ModManager
+from backend.core.database import get_db_context
 from backend.core.constants import MCDR_ROOT_PATH
 from backend.core.utils import get_size_mb, poll_copy_progress, copytree_resumable_throttled
-from backend.core.schemas import ServerCoreConfig, Task, TaskStatus
+from backend.core.schemas import ServerCoreConfig, Task, TaskStatus, TaskType
 from backend.tools.server_parser import infer_server_type_and_analyze_core_config
 from backend.core.logger import logger
 from backend.services import player_manager
 
 
 class ServerService:
-    def __init__(self, mcdr_manager: MCDRManager, plugin_manager: PluginManager, mod_manager: ModManager):
+    def __init__(self, mcdr_manager: MCDRManager, plugin_manager: PluginManager, mod_manager: ModManager, task_manager: TaskManager):
         self.mcdr_manager = mcdr_manager
         self.plugin_manager = plugin_manager
         self.mod_manager = mod_manager
+        self.task_manager = task_manager
 
     @staticmethod
     def _generate_server_path(server_name: str) -> Path:
@@ -114,7 +116,49 @@ class ServerService:
             **fs_details,
         )
 
-    async def create_server(self, server_create: schemas.ServerCreate, db: Session, user: models.User) -> models.Server:
+    async def start_create_server_task(self, server_create: schemas.ServerCreate, creator_id: int) -> Task:
+        # 轻量校验：名称重复 / 目标目录已存在（避免创建后立刻失败的任务）
+        with get_db_context() as db:
+            if crud.get_server_by_name(db, server_create.name):
+                raise HTTPException(status_code=409, detail="A server with this name already exists.")
+        safe_dirname = "".join(c if c.isalnum() or c in " _-" else "" for c in server_create.name).rstrip()
+        if safe_dirname:
+            target = MCDR_ROOT_PATH / safe_dirname
+            if target.exists():
+                raise HTTPException(status_code=409, detail=f"The directory '{target}' already exists.")
+
+        task = self.task_manager.create_task(
+            TaskType.CREATE_SERVER,
+            name="创建服务器",
+            message=f"服务器：{server_create.name}",
+        )
+
+        async def _runner():
+            try:
+                with get_db_context() as db:
+                    await self.create_server(server_create, db, creator_id, task=task)
+            except Exception as e:
+                # create_server 内部会做回滚与清理；这里只做任务状态标记
+                task.status = TaskStatus.FAILED
+                task.error = str(getattr(e, "detail", e))
+                task.message = f"服务器：{server_create.name}"
+            finally:
+                try:
+                    self.task_manager.clear_finished_task(task.id)
+                except Exception:
+                    pass
+
+        asyncio.create_task(_runner())
+        return task
+
+    async def create_server(
+            self,
+            server_create: schemas.ServerCreate,
+            db: Session,
+            creator_id: int,
+            *,
+            task: Optional[Task] = None,
+    ) -> models.Server:
         if crud.get_server_by_name(db, server_create.name):
             raise HTTPException(status_code=409, detail="A server with this name already exists.")
 
@@ -122,17 +166,31 @@ class ServerService:
         if server_path.exists():
             raise HTTPException(status_code=409, detail=f"The directory '{server_path}' already exists.")
 
+        if task:
+            task.status = TaskStatus.RUNNING
+            task.progress = 5
+            task.message = f"服务器：{server_create.name} | 创建中..."
+
         internal_server_model = schemas.ServerCreateInternal(name=server_create.name, path=str(server_path),
-                                                             creator_id=user.id)
-        db_server = crud.create_server(db, internal_server_model, creator_id=user.id)
+                                                             creator_id=creator_id)
+        db_server = crud.create_server(db, internal_server_model, creator_id=creator_id)
 
         try:
+            if task:
+                task.progress = 15
+                task.message = f"服务器：{server_create.name} | 初始化目录..."
             server_path.mkdir(parents=True, exist_ok=True)
+            if task:
+                task.progress = 25
+                task.message = f"服务器：{server_create.name} | 初始化 MCDR..."
             success, message = await self.mcdr_manager.initialize_server_files(db_server)
             if not success:
                 crud.delete_server(db, db_server.id)
-                shutil.rmtree(server_path, ignore_errors=True)
+                await asyncio.to_thread(shutil.rmtree, server_path, ignore_errors=True)
                 raise HTTPException(status_code=500, detail=f"Failed to initialize server files: {message}")
+            if task:
+                task.progress = 80
+                task.message = f"服务器：{server_create.name} | 同步面板状态..."
             await self.mcdr_manager.notify_server_list_update(db_server, is_adding=True)
             # 玩家游玩时长映射：创建服务器后，为所有玩家添加 {server_name: 0}（当 world 存在时）
             try:
@@ -140,19 +198,67 @@ class ServerService:
                 player_manager.on_server_created(server_name, db_server.path)
             except Exception:
                 pass
+            if task:
+                task.status = TaskStatus.SUCCESS
+                task.progress = 100
+                task.message = f"服务器：{server_create.name}"
         except Exception as e:
             crud.delete_server(db, db_server.id)
-            shutil.rmtree(server_path, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, server_path, ignore_errors=True)
+            if task:
+                task.status = TaskStatus.FAILED
+                task.error = str(getattr(e, "detail", e))
+                task.message = f"服务器：{server_create.name}"
             raise HTTPException(status_code=500, detail=f"An error occurred during server creation: {e}")
 
         return db_server
 
-    async def delete_server(self, server_id: int, db: Session):
+    async def start_delete_server_task(self, server_id: int) -> Task:
+        # 校验：存在 + 不在运行中
+        with get_db_context() as db:
+            db_server = crud.get_server_by_id(db, server_id)
+            if not db_server:
+                raise HTTPException(status_code=404, detail="Server not found")
+            server_name = db_server.name
+            server_path_str = db_server.path
+
+        st, _ = await self.mcdr_manager.get_status(server_id, server_path_str)
+        if st == 'running':
+            raise HTTPException(status_code=409, detail="Server is running. Please stop it before deletion.")
+
+        task = self.task_manager.create_task(
+            TaskType.DELETE_SERVER,
+            name="删除服务器",
+            message=f"服务器：{server_name}",
+        )
+
+        async def _runner():
+            try:
+                with get_db_context() as db:
+                    await self.delete_server(server_id, db, task=task)
+            except Exception as e:
+                task.status = TaskStatus.FAILED
+                task.error = str(getattr(e, "detail", e))
+                task.message = f"服务器：{server_name}"
+            finally:
+                try:
+                    self.task_manager.clear_finished_task(task.id)
+                except Exception:
+                    pass
+
+        asyncio.create_task(_runner())
+        return task
+
+    async def delete_server(self, server_id: int, db: Session, *, task: Optional[Task] = None):
         db_server = crud.get_server_by_id(db, server_id)
         if not db_server:
             # Server might already be deleted from DB but folder exists. Proceed gracefully.
             logger.warning(f"ID 为 {server_id} 的服务器在数据库中未找到，跳过数据库清理。")
         else:
+            if task:
+                task.status = TaskStatus.RUNNING
+                task.progress = 5
+                task.message = f"服务器：{db_server.name} | 删除中..."
             st, _ = await self.mcdr_manager.get_status(server_id, db_server.path)
             if st == 'running':
                 raise HTTPException(status_code=409, detail="Server is running. Please stop it before deletion.")
@@ -164,7 +270,26 @@ class ServerService:
 
         server_path_str = server.path
 
+        if task:
+            task.progress = 20
+            task.message = f"服务器：{server.name} | 清理数据库记录..."
         crud.delete_server(db, server_id)
+
+        # 删除该服务器的 mods 数据库记录与关联
+        try:
+            crud.cleanup_mods_for_server_path(db, server_id, server_path_str)
+        except Exception:
+            pass
+        # 额外清理：plugin 表中的 servers_installed 与 server_link_groups 的 server_ids
+        try:
+            crud.cleanup_plugins_for_server(db, server_id)
+        except Exception:
+            pass
+        try:
+            crud.cleanup_server_link_groups_for_server(db, server_id)
+        except Exception:
+            pass
+
         self.mcdr_manager.processes.pop(server_id, None)
         self.mcdr_manager.return_code.pop(server_id, None)
         self.mcdr_manager.java_pid.pop(server_id, None)
@@ -179,15 +304,76 @@ class ServerService:
             except Exception:
                 pass
             if server_path.is_dir():
-                shutil.rmtree(server_path)
+                if task:
+                    task.progress = 80
+                    task.message = f"服务器：{server.name} | 删除文件..."
+                await asyncio.to_thread(shutil.rmtree, server_path)
         except Exception as e:
             logger.warning(f"已删除服务器 {server_id} 的数据库记录，但删除目录 {server_path_str} 失败：{e}")
+            if task:
+                task.status = TaskStatus.FAILED
+                task.error = str(e)
+                task.message = f"服务器：{server.name}"
+            return
 
-    async def import_server(self, server_import: schemas.ServerImport, db: Session, user: models.User, task: Task,
-                            task_manager: TaskManager) -> models.Server:
+        if task:
+            task.status = TaskStatus.SUCCESS
+            task.progress = 100
+            task.message = f"服务器：{server.name}"
+
+    async def start_import_server_task(self, server_import: schemas.ServerImport, creator_id: int) -> Task:
+        # 轻量校验：源路径有效 / 名称与目标目录冲突（避免创建后立刻失败的任务）
+        source_path = Path(server_import.path).expanduser().resolve()
+        if not source_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"提供的源路径 '{source_path}' 不是一个有效的目录。")
+        if not (source_path / 'config.yml').is_file():
+            raise HTTPException(status_code=400, detail=f"源路径 '{source_path}' 下未找到 'config.yml' 文件，请确保这是MCDR根目录。")
+        is_copy = False
+        with get_db_context() as db:
+            if crud.get_server_by_name(db, server_import.name):
+                raise HTTPException(status_code=409, detail=f"服务器名称 '{server_import.name}' 已存在。")
+            try:
+                # 若源路径正好是一个已存在服务器的 MCDR 根目录，则按“复制服务器”展示
+                is_copy = db.query(models.Server).filter(models.Server.path == str(source_path)).first() is not None
+            except Exception:
+                is_copy = False
+        safe_dirname = "".join(c if c.isalnum() or c in " _-" else "" for c in server_import.name).rstrip()
+        if safe_dirname:
+            target = MCDR_ROOT_PATH / safe_dirname
+            if target.exists():
+                raise HTTPException(status_code=409, detail=f"目标目录 '{target}' 已存在，无法导入。")
+
+        task = self.task_manager.create_task(
+            TaskType.IMPORT,
+            name="复制服务器" if is_copy else "导入服务器",
+            message=f"服务器：{server_import.name}",
+        )
+
+        async def _runner():
+            try:
+                with get_db_context() as db:
+                    await self.import_server(server_import, db, creator_id, task)
+            except Exception as e:
+                task.status = TaskStatus.FAILED
+                task.error = str(getattr(e, "detail", e))
+                task.message = f"服务器：{server_import.name}"
+            finally:
+                try:
+                    self.task_manager.clear_finished_task(task.id)
+                except Exception:
+                    pass
+
+        asyncio.create_task(_runner())
+        return task
+
+    async def import_server(self, server_import: schemas.ServerImport, db: Session, creator_id: int, task: Task) -> models.Server:
 
         progress_task = None
         try:
+            task.status = TaskStatus.RUNNING
+            task.progress = 1
+            task.message = f"服务器：{server_import.name} | 准备导入..."
+
             source_path = Path(server_import.path).expanduser().resolve()
             if not source_path.is_dir():
                 raise HTTPException(status_code=400, detail=f"提供的源路径 '{source_path}' 不是一个有效的目录。")
@@ -203,10 +389,12 @@ class ServerService:
                                     detail=f"目标目录 '{target_path}' 已存在，无法导入。")
 
             internal_server_model = schemas.ServerCreateInternal(name=server_import.name, path=str(target_path),
-                                                                 creator_id=user.id)
-            db_server = crud.create_server(db, internal_server_model, creator_id=user.id)
+                                                                 creator_id=creator_id)
+            db_server = crud.create_server(db, internal_server_model, creator_id=creator_id)
 
             try:
+                task.progress = 5
+                task.message = f"服务器：{server_import.name} | 复制文件中..."
                 progress_task = asyncio.create_task(
                     poll_copy_progress(source_path, target_path, task, interval=2.0)
                 )
@@ -220,11 +408,18 @@ class ServerService:
                     player_manager.on_server_created(Path(db_server.path).name, db_server.path)
                 except Exception:
                     pass
+                # 推送服务器列表更新（用于 ServerList 自动刷新）
+                try:
+                    await self.mcdr_manager.notify_server_list_update(db_server, is_adding=True)
+                except Exception:
+                    pass
+                task.status = TaskStatus.SUCCESS
+                task.message = f"服务器：{server_import.name}"
                 return db_server
             except Exception as e:
                 crud.delete_server(db, db_server.id)
                 if target_path.exists():
-                    shutil.rmtree(target_path)
+                    await asyncio.to_thread(shutil.rmtree, target_path)
                 raise HTTPException(status_code=500,
                                     detail=f"从 '{source_path}' 复制文件到 '{target_path}' 时发生错误: {e}")
         except Exception as e:
@@ -232,7 +427,6 @@ class ServerService:
             task.error = str(e)
             raise e
         finally:
-            task_manager.clear_finished_task(task.id)
             if progress_task:
                 progress_task.cancel()
                 try:

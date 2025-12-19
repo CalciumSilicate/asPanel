@@ -9,16 +9,16 @@ import psutil
 import shutil
 from fastapi import APIRouter, Depends, HTTPException, status, Response, BackgroundTasks, UploadFile
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List
 from pathlib import Path
 
 from backend.tools import server_parser
 from backend.core import crud, models, schemas
 from backend.core.auth import require_role
-from backend.core.database import get_db, get_db_context
+from backend.core.database import get_db
 from backend.core.dependencies import mcdr_manager, server_service
 from backend.core.dependencies import task_manager
-from backend.core.schemas import TaskType, TaskStatus, Role, PaperBuild, PaperBuildDownload, ServerCoreConfig
+from backend.core.schemas import TaskType, Role, PaperBuild, PaperBuildDownload, ServerCoreConfig
 from backend.tasks.background import background_download_jar, background_install_fabric, background_install_forge
 from backend.core.constants import DEFAULT_SERVER_PROPERTIES_CONFIG, PUBLIC_PLUGINS_DIRECTORIES, MAP_JSON_STORAGE_PATH
 from backend.core.utils import get_file_sha1, get_file_sha256, get_fabric_jar_version, get_forge_jar_version
@@ -42,121 +42,17 @@ async def get_servers(db: Session = Depends(get_db), _user: models.User = Depend
 
 
 @router.post('/servers/create', status_code=status.HTTP_202_ACCEPTED)
-async def create_server(server: schemas.ServerCreate, db: Session = Depends(get_db),
-                        user: models.User = Depends(require_role(Role.ADMIN))):
+async def create_server(server: schemas.ServerCreate, user: models.User = Depends(require_role(Role.ADMIN))):
     # PERMISSION: ADMIN
-    # 先做快速校验，避免无意义的后台任务
-    if crud.get_server_by_name(db, server.name):
-        raise HTTPException(status_code=409, detail="A server with this name already exists.")
-
-    task = task_manager.create_task(
-        TaskType.CREATE_SERVER,
-        name="创建服务器",
-        message=f"服务器：{server.name}",
-    )
-
-    async def _run_create_server() -> None:
-        server_path: Optional[Path] = None
-        db_server: Optional[models.Server] = None
-        try:
-            task.status = TaskStatus.RUNNING
-            task.progress = 5
-            task.message = f"服务器：{server.name} | 创建中..."
-
-            # 使用独立 DB session，避免依赖请求生命周期
-            with get_db_context() as _db:
-                # 再校验一次，防止并发创建
-                if crud.get_server_by_name(_db, server.name):
-                    raise HTTPException(status_code=409, detail="A server with this name already exists.")
-
-                server_path = server_service._generate_server_path(server.name)
-                if server_path.exists():
-                    raise HTTPException(status_code=409, detail=f"The directory '{server_path}' already exists.")
-
-                internal_server_model = schemas.ServerCreateInternal(
-                    name=server.name,
-                    path=str(server_path),
-                    creator_id=user.id,
-                )
-                db_server = crud.create_server(_db, internal_server_model, creator_id=user.id)
-
-            task.progress = 20
-            task.message = f"服务器：{server.name} | 初始化 MCDR..."
-            server_path.mkdir(parents=True, exist_ok=True)
-
-            success, message = await mcdr_manager.initialize_server_files(db_server)
-            if not success:
-                raise RuntimeError(f"Failed to initialize server files: {message}")
-
-            task.progress = 80
-            task.message = f"服务器：{server.name} | 同步面板状态..."
-            await mcdr_manager.notify_server_list_update(db_server, is_adding=True)
-
-            try:
-                from backend.services import player_manager
-                player_manager.on_server_created(Path(db_server.path).name, db_server.path)
-            except Exception:
-                pass
-
-            task.status = TaskStatus.SUCCESS
-            task.progress = 100
-            task.message = f"服务器：{server.name}"
-        except Exception as e:
-            task.status = TaskStatus.FAILED
-            task.error = str(getattr(e, "detail", e))
-            task.message = f"服务器：{server.name}"
-
-            # 与旧逻辑一致：创建失败时回滚 DB + 文件夹
-            try:
-                if db_server is not None:
-                    with get_db_context() as _db:
-                        crud.delete_server(_db, db_server.id)
-            except Exception:
-                pass
-            try:
-                if server_path is not None:
-                    shutil.rmtree(server_path, ignore_errors=True)
-            except Exception:
-                pass
-        finally:
-            # 成功任务可延迟自动清理；失败任务默认保留，供前端“清除失败任务”
-            try:
-                task_manager.clear_finished_task(task.id)
-            except Exception:
-                pass
-
-    asyncio.create_task(_run_create_server())
-    # 后台创建：客户端通过 TaskManager 实时获取进度
+    task = await server_service.start_create_server_task(server, user.id)
     return {"task_id": task.id, "message": "已开始创建服务器任务"}
 
 
-@router.delete("/servers/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_server(server_id: int, db: Session = Depends(get_db),
-                        _user: models.User = Depends(require_role(Role.ADMIN))):
+@router.delete("/servers/{server_id}", status_code=status.HTTP_202_ACCEPTED)
+async def delete_server(server_id: int, _user: models.User = Depends(require_role(Role.ADMIN))):
     # PERMISSION: ADMIN
-    # 预先获取服务器以便清理 mods 记录
-    srv = crud.get_server_by_id(db, server_id)
-    srv_path = srv.path if srv else None
-
-    await server_service.delete_server(server_id, db)
-
-    # 删除该服务器的 mods 数据库记录与关联
-    if srv_path:
-        try:
-            crud.cleanup_mods_for_server_path(db, server_id, srv_path)
-        except Exception:
-            pass
-
-    # 额外清理：plugin 表中的 servers_installed 与 server_link_groups 的 server_ids
-    try:
-        crud.cleanup_plugins_for_server(db, server_id)
-    except Exception:
-        pass
-    try:
-        crud.cleanup_server_link_groups_for_server(db, server_id)
-    except Exception:
-        pass
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    task = await server_service.start_delete_server_task(server_id)
+    return {"task_id": task.id, "message": "已开始删除服务器任务"}
 
 
 # --- Server Action Endpoints ---
@@ -231,6 +127,17 @@ async def batch_action_on_servers(action: str, payload: schemas.BatchActionPaylo
     # PERMISSION: ADMIN
     if not payload.ids:
         raise HTTPException(400, "No server IDs provided")
+    if action == "delete":
+        task_ids: List[str] = []
+        failed: List[dict] = []
+        for sid in payload.ids:
+            try:
+                t = await server_service.start_delete_server_task(int(sid))
+                task_ids.append(t.id)
+            except Exception as e:
+                failed.append({"id": sid, "detail": str(getattr(e, "detail", e))})
+        return {"status": "accepted", "task_ids": task_ids, "failed": failed, "message": "已开始批量删除服务器任务"}
+
     tasks = []
     for sid in payload.ids:
         server = crud.get_server_by_id(db, sid)
@@ -242,8 +149,6 @@ async def batch_action_on_servers(action: str, payload: schemas.BatchActionPaylo
             tasks.append(mcdr_manager.stop(server))
         elif action == "restart":
             tasks.append(mcdr_manager.restart(server))
-        elif action == "delete":
-            tasks.append(server_service.delete_server(sid, db))
         elif action == "command" and payload.command:
             tasks.append(mcdr_manager.send_command(server, payload.command))
     if tasks:
@@ -679,10 +584,10 @@ async def upload_server_map_json(
     return {"message": "ok", "map": current}
 
 
-@router.post('/servers/import', status_code=status.HTTP_201_CREATED)
-async def api_import_server(server_data: schemas.ServerImport, background_tasks: BackgroundTasks,
-                            db: Session = Depends(get_db), user: models.User = Depends(require_role(Role.ADMIN))):
+@router.post('/servers/import', status_code=status.HTTP_202_ACCEPTED)
+async def api_import_server(server_data: schemas.ServerImport,
+                            user: models.User = Depends(require_role(Role.ADMIN))):
     # PERMISSION: ADMIN
-    task = task_manager.create_task(TaskType.IMPORT)
-    background_tasks.add_task(server_service.import_server, server_data, db, user, task, task_manager)
-    return {"task_id": task.id, "message": "已开始导入服务器任务"}
+    task = await server_service.start_import_server_task(server_data, user.id)
+    op = task.name or "导入服务器"
+    return {"task_id": task.id, "message": f"已开始{op}任务"}
