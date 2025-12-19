@@ -505,7 +505,7 @@ class PositionMapRenderer:
             screen_pts = [self._world_to_screen(wx, wz, center_x, center_z, s_scale, w, h) for wx, wz in coords]
 
             if len(screen_pts) > 1:
-                draw.line(screen_pts, fill=seg_color, width=4 * ss, joint="curve")
+                draw.line(screen_pts, fill=seg_color, width=round(0.5 * ss), joint="curve")
                 dist_accum = 0
                 for i in range(len(screen_pts) - 1):
                     p1, p2 = screen_pts[i], screen_pts[i + 1]
@@ -520,7 +520,7 @@ class PositionMapRenderer:
                             ax_ = p1[0] + dx * t
                             ay_ = p1[1] + dy * t
                             angle = math.degrees(math.atan2(dy, dx))
-                            arrow_img = self.create_arrow_marker(angle, 14 * ss, arrow_color)
+                            arrow_img = self.create_arrow_marker(angle, 6 * ss, arrow_color)
                             img.paste(arrow_img, (int(ax_ - arrow_img.width / 2), int(ay_ - arrow_img.height / 2)), arrow_img)
                             dist_accum = 0
                             current_dist += remaining
