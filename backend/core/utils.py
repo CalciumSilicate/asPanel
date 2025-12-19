@@ -7,7 +7,9 @@ import time
 import shutil
 import asyncio
 import hashlib
+import random
 import zipfile
+import socket
 import subprocess
 from pathlib import Path
 from threading import RLock
@@ -187,8 +189,10 @@ def get_velocity_jar_version(jar_path: Path) -> Optional[str]:
 
 
 def get_fabric_jar_version(jar_path: Path) -> Tuple[Optional[str], Optional[str]]:
-    _ = _read_files_in_zipfile(jar_path, 'META-INF/MANIFEST.MF')[0]
-    manifest_lines = _.decode().splitlines()
+    _ = _read_files_in_zipfile(jar_path, 'META-INF/MANIFEST.MF')
+    if _ is None:
+        return None, None
+    manifest_lines = _[0].decode().splitlines()
 
     vanilla_version = None
     fabric_loader_version = None
@@ -394,3 +398,32 @@ def to_local_dt(dt):
 def to_local_iso(dt):
     x = to_local_dt(dt)
     return x.isoformat() if x else None
+
+
+def check_port(port: int) -> bool:
+    if not (1024 <= port <= 65535):
+        return False
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(('0.0.0.0', port))
+            return True
+        except socket.error as e:
+            return False
+
+
+def get_available_port(min_port: int, max_port: int, max_try: int = 10) -> int:
+    if max_try <= 0:
+        return 0
+    if min_port > max_port:
+        min_port, max_port = max_port, min_port
+
+    min_port = max(1024, min_port)
+    max_port = min(65535, max_port)
+    if min_port > max_port:
+        return 0
+
+    for _ in range(max_try):
+        port = random.randint(min_port, max_port)
+        if check_port(port):
+            return port
+    return 0

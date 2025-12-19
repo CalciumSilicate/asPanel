@@ -34,7 +34,9 @@
           </el-table-column>
           <el-table-column label="mods数" width="80" align="center">
             <template #default="{ row }">
-              <span>{{ Number(row.mods_count) || 0 }}</span>
+              <span v-if="row.mods_count_state === 'ok'">{{ Number(row.mods_count) || 0 }}</span>
+              <span v-else-if="row.mods_count_state === 'failed'">计算失败</span>
+              <span v-else>计算中</span>
             </template>
           </el-table-column>
         </el-table>
@@ -328,8 +330,11 @@ import router from '@/router'
 const servers = ref([])
 const serverQuery = ref('')
 const serversLoading = ref(false)
-// 使用 /api/servers 返回的 mods_count 汇总
-const totalModsCount = computed(() => servers.value.reduce((sum, s) => sum + (Number(s.mods_count) || 0), 0))
+const modsCountsLoaded = ref(false)
+const totalModsCount = computed(() => {
+  if (!modsCountsLoaded.value) return '计算中'
+  return servers.value.reduce((sum, s) => sum + (Number(s.mods_count) || 0), 0)
+})
 
 // 右侧数据
 const selectedServer = ref(null)
@@ -370,12 +375,48 @@ const formatBytes = (bytes) => {
   return (b / Math.pow(1024, i)).toFixed(2) + ' ' + units[i]
 }
 
+let modsCountsRequestSeq = 0
+const fetchServersModsCounts = async (requestId) => {
+  try {
+    const { data } = await apiClient.get('/api/mods/servers')
+    if (requestId !== modsCountsRequestSeq) return
+
+    const countMap = new Map((data || []).map(item => [Number(item.id), item.mods_count]))
+    servers.value.forEach((s) => {
+      if (countMap.has(Number(s.id))) {
+        s.mods_count = countMap.get(Number(s.id))
+        s.mods_count_state = 'ok'
+      } else {
+        s.mods_count = null
+        s.mods_count_state = 'failed'
+      }
+    })
+    modsCountsLoaded.value = true
+  } catch (e) {
+    if (requestId !== modsCountsRequestSeq) return
+    servers.value.forEach((s) => {
+      s.mods_count = null
+      s.mods_count_state = 'failed'
+    })
+    modsCountsLoaded.value = true
+  }
+}
+
 const initialLoad = async () => {
   serversLoading.value = true
   try {
-    // 快速获取服务器列表（已包含 mods_count）
+    // 快速获取服务器列表（不含 mods_count，单独通过 /api/mods/servers 获取）
     const { data: serverData } = await apiClient.get('/api/servers')
-    servers.value = serverData || []
+    servers.value = (serverData || []).map(s => ({
+      ...s,
+      mods_count: null,
+      mods_count_state: 'pending',
+    }))
+
+    modsCountsLoaded.value = false
+    const requestId = ++modsCountsRequestSeq
+    fetchServersModsCounts(requestId)
+
     // 后台预取各服务器的模组列表，填充缓存，避免后续重复拉取
     prefetchAllServerMods(servers.value)
     // 初始不选中服务器，保持右侧空白

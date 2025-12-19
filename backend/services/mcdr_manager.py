@@ -351,6 +351,11 @@ class MCDRManager:
                 contents = [item.name for item in server_dir_path.iterdir()]
                 if len(contents) <= 1 and 'eula.txt' in contents:
                     is_new_setup = True
+                elif len(contents) <= 1 and 'mods' in contents:
+                    is_new_setup = True
+                elif len(contents) == 2 and contents == ['mods', 'eula.txt']:
+                    is_new_setup = True
+            
             except OSError as e:
                 logger.error(f"无法读取目录 {server_path}：{e}")
                 is_new_setup = False

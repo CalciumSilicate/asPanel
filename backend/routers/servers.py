@@ -21,7 +21,7 @@ from backend.core.dependencies import task_manager
 from backend.core.schemas import TaskType, Role, PaperBuild, PaperBuildDownload, ServerCoreConfig
 from backend.tasks.background import background_download_jar, background_install_fabric, background_install_forge
 from backend.core.constants import DEFAULT_SERVER_PROPERTIES_CONFIG, PUBLIC_PLUGINS_DIRECTORIES, MAP_JSON_STORAGE_PATH
-from backend.core.utils import get_file_sha1, get_file_sha256, get_fabric_jar_version, get_forge_jar_version
+from backend.core.utils import get_file_sha1, get_file_sha256, get_fabric_jar_version, get_forge_jar_version, get_available_port
 from backend.core.api import (
     get_velocity_version_detail,
     get_minecraft_version_detail_by_version_id,
@@ -38,7 +38,12 @@ router = APIRouter(
 # --- Server Endpoints ---
 @router.get('/servers', response_model=List[schemas.ServerDetail])
 async def get_servers(db: Session = Depends(get_db), _user: models.User = Depends(require_role(Role.GUEST))):
-    return await server_service.get_servers_with_details(db)
+    return await server_service.get_servers_list(db)
+
+
+@router.get('/servers/sizes', response_model=List[schemas.ServerSize])
+async def get_server_sizes(db: Session = Depends(get_db), _user: models.User = Depends(require_role(Role.GUEST))):
+    return await server_service.get_servers_sizes(db)
 
 
 @router.post('/servers/create', status_code=status.HTTP_202_ACCEPTED)
@@ -166,9 +171,11 @@ async def get_server_config(server_id: int, db: Session = Depends(get_db),
     server = schemas.Server.model_validate(db_server)
     mcdr_path = Path(server.path)
     server_dir = mcdr_path / 'server'
-    is_new_setup = not server_dir.exists() or not any(
-        f.name not in ['eula.txt', 'velocity.toml'] for f in server_dir.iterdir())
+    is_new_setup = not server_dir.exists() or (await mcdr_manager.get_status(db_server.id, db_server.path))[0] == schemas.ServerStatus.NEW_SETUP
     if is_new_setup:
+        default_properties = DEFAULT_SERVER_PROPERTIES_CONFIG
+        default_properties["server-port"] = get_available_port(41000, 42000)
+        default_properties["rcon.port"] = get_available_port(51000, 52000)
         default_config = schemas.ServerConfigData(
             core_config=server.core_config,
             jvm=schemas.ServerConfigJvm(),
