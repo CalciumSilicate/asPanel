@@ -215,7 +215,7 @@ _TOOLS = [
 ]
 _MATS = ["wooden", "stone", "iron", "golden", "diamond", "netherite", "copper"]
 _BREAK_METRICS = ["used.shears", *[f"used.{m}_{t}" for m in _MATS for t in _TOOLS]]
-_WALK_METRICS = ['custom.sprint_one_cm','custom.walk_one_cm','custom.walk_under_water_one_cm','custom.walk_on_water_one_cm', 'custom.crouch_one_cm', 'custom.swim_one_cm']
+_WALK_METRICS = ['custom.fly_one_cm', 'custom.sprint_one_cm','custom.walk_one_cm','custom.walk_under_water_one_cm','custom.walk_on_water_one_cm', 'custom.crouch_one_cm', 'custom.swim_one_cm']
 _VEHICLE = ['boat','horse','minecart','pig','crouch']
 _VEHICLE_METRICS = [f'custom.{v}_one_cm' for v in _VEHICLE]
 
@@ -269,7 +269,7 @@ TOTAL_ITEMS = [
 CHART_ITEMS = [
     ("上线时长 (min)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 60, True),
     # ("上线次数", ["custom.leave_game"], 1, True),
-    ("移动 (m)", ['custom.aviate_one_cm', 'custom.ender_pearl_one_cm', 'custom.fly_one_cm', *_WALK_METRICS, *_VEHICLE_METRICS], 0.01, True),
+    ("移动 (m)", ['custom.aviate_one_cm', 'custom.ender_pearl_one_cm', *_WALK_METRICS, *_VEHICLE_METRICS], 0.01, True),
     ("挖掘方块", _BREAK_METRICS, 1, True),
     ("破基岩", ["custom.break_bedrock"], 1, True),
     ("死亡次数", ["custom.deaths"], 1, True),

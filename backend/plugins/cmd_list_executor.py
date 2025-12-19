@@ -120,6 +120,10 @@ def _parse_coord(token: str, base: int) -> int:
 
 
 def run_execute(server: ServerInterface, source: CommandSource, ctx: dict):
+    if not source.has_permission(PermissionLevel.ADMIN):
+        source.reply(RText('[CommandListExecuter] 权限不足：需要 MCDR ADMIN 权限').set_color(RColor.red))
+        return
+
     x = ctx.get('x')
     y = ctx.get('y')
     z = ctx.get('z')
@@ -221,7 +225,12 @@ def run_execute(server: ServerInterface, source: CommandSource, ctx: dict):
 def on_load(server: ServerInterface, old):
     server.register_help_message('!!execute', HELP)
     server.register_command(
-        Literal('!!execute').then(
+        Literal('!!execute')
+        .requires(
+            lambda src: src.has_permission(PermissionLevel.ADMIN),
+            lambda src: RText('[CommandListExecuter] 权限不足：需要 MCDR ADMIN 权限').set_color(RColor.red),
+        )
+        .then(
             Text('x').then(
                 Text('y').then(
                     Text('z').then(

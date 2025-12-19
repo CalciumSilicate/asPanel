@@ -51,26 +51,39 @@
               <span>{{ formatTime(row.created_at) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" min-width="520" fixed="right" align="right">
+          <el-table-column label="复制/生成命令" width="160" fixed="right" align="right">
             <template #default="{ row }">
               <template v-if="!row.cl_generated">
-                <el-button-group>
-                  <el-button size="small" type="primary" :loading="row.loadingGen" @click="generateCL(row)">生成命令</el-button>
-                  <el-button size="small" @click="renameRow(row)">重命名</el-button>
-                  <el-button size="small" type="danger" :loading="row.loadingDel" @click="deleteRow(row)">删除投影</el-button>
-                  <el-button size="small" @click="downloadLtm(row)">下载投影</el-button>
-                  <el-button size="small" :disabled="true">下载命令</el-button>
-                </el-button-group>
+                <el-button size="small" type="primary" :loading="row.loadingGen" @click="generateCL(row)">生成命令</el-button>
               </template>
               <template v-else>
-                <el-button-group>
-                  <el-button size="small" @click="copyCommand(row)">复制命令</el-button>
-                  <el-button size="small" @click="renameRow(row)">重命名</el-button>
-                  <el-button size="small" type="warning" :loading="row.loadingDelCL" @click="deleteCL(row)">删除命令</el-button>
-                  <el-button size="small" @click="downloadLtm(row)">下载投影</el-button>
-                  <el-button size="small" type="success" @click="downloadCL(row)">下载命令</el-button>
-                </el-button-group>
+                <el-button size="small" @click="copyCommand(row)">复制命令</el-button>
               </template>
+            </template>
+          </el-table-column>
+          <el-table-column label="" width="140" fixed="right" align="center">
+            <template #default="{ row }">
+              <el-dropdown trigger="click">
+                <el-button size="small">
+                  更多操作
+                  <el-icon class="el-icon--right">
+                    <arrow-down/>
+                  </el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item @click="renameRow(row)">重命名</el-dropdown-item>
+                    <el-dropdown-item
+                        :disabled="!!row.loadingDel || !!row.loadingDelCL"
+                        @click="row.cl_generated ? deleteCL(row) : deleteRow(row)"
+                    >
+                      {{ row.cl_generated ? '删除命令' : '删除投影' }}
+                    </el-dropdown-item>
+                    <el-dropdown-item @click="downloadLtm(row)">下载投影</el-dropdown-item>
+                    <el-dropdown-item :disabled="!row.cl_generated" @click="downloadCL(row)">下载命令</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </template>
           </el-table-column>
         </el-table>
@@ -97,6 +110,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import apiClient from '@/api'
+import { ArrowDown } from '@element-plus/icons-vue'
 
 interface LtmRow {
   file_name: string

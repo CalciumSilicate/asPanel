@@ -19,7 +19,6 @@ from backend.core.dependencies import mcdr_manager
 from pydantic import BaseModel
 from backend.services import player_manager
 from backend.core.constants import UUID_HYPHEN_PATTERN
-from backend.tools.server_parser import parse_properties
 
 router = APIRouter(
     prefix="/api/players",
@@ -179,6 +178,7 @@ def _write_json_atomic(path: Path, data: object):
 
 class PlayerWhitelistAddRequest(BaseModel):
     player_name: str
+    is_official: bool = True
     servers: List[str]
 
 
@@ -199,14 +199,6 @@ async def add_player_to_whitelist(payload: PlayerWhitelistAddRequest,
         md5[6] = (md5[6] & 0x0F) | 0x30
         md5[8] = (md5[8] & 0x3F) | 0x80
         return str(uuid.UUID(bytes=bytes(md5)))
-
-    def is_online_mode(server: models.Server) -> bool:
-        props_path = Path(server.path) / "server" / "server.properties"
-        props = parse_properties(str(props_path))
-        val = props.get("online-mode", True)
-        if isinstance(val, bool):
-            return val
-        return str(val).strip().lower() not in ("false", "0", "no")
 
     def is_process_running(server_id: int) -> bool:
         proc = mcdr_manager.processes.get(server_id)
@@ -240,18 +232,12 @@ async def add_player_to_whitelist(payload: PlayerWhitelistAddRequest,
             skipped_velocity.append(server_name)
             continue
         try:
-            if is_process_running(int(s.id)):
-                await mcdr_manager.send_command(s, f"whitelist add {player_name}")
-                updated.append(server_name)
-                via_command.append(server_name)
-                continue
-
             server_root = Path(s.path) / "server"
             wl_path = server_root / "whitelist.json"
             wl = _load_json_list(wl_path)
 
             uuid_to_use: Optional[str] = None
-            if is_online_mode(s):
+            if payload.is_official is True:
                 if official_uuid is None:
                     official_uuid = await get_uuid_by_name(player_name)
                 uuid_to_use = official_uuid
@@ -275,6 +261,13 @@ async def add_player_to_whitelist(payload: PlayerWhitelistAddRequest,
             file_uuids[server_name] = uuid_to_use
             updated.append(server_name)
             via_file.append(server_name)
+
+            if is_process_running(int(s.id)):
+                try:
+                    await mcdr_manager.send_command(s, "whitelist reload")
+                    via_command.append(server_name)
+                except Exception:
+                    pass
         except Exception as e:
             errors.append({"server": server_name, "error": str(e)})
 
