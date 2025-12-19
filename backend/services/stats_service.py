@@ -25,11 +25,14 @@ _LAST_QUERY_INGEST_AT: float = 0.0
 
 def _ingest_for_query(granularity: str, server_ids: Optional[List[int]], metrics: List[str]) -> None:
     """
-    查询前触发一次“对齐到下一颗粒度边界”的入库，覆盖之前同 ts 的记录。
+    查询前触发一次入库：对齐到下一颗 10min 边界并覆盖之前同 ts 的记录。
+
+    说明：
+    - PlayerMetrics.ts 的最小入库粒度是 10min（scheduler 也是按 10min 写入）
+    - 若按查询粒度（如 24h/1year）去“向上取整”，会把数据写到很远的未来时间点（例如 2026-01-01 08:00）
     """
-    step = _GRANULARITY_SECONDS.get(granularity)
-    if step is None:
-        return
+    # query 粒度与“补一次最新数据入库”解耦：始终按 10min 对齐
+    step = 600
     now_float = time.time()
     global _LAST_QUERY_INGEST_AT
     if now_float - _LAST_QUERY_INGEST_AT < 10:
@@ -191,9 +194,9 @@ def _run_save_all_sync(server: models.Server, debounce_sec: float) -> None:
 
         if loop and loop.is_running():
             # 已在事件循环中：安排异步任务执行，避免 asyncio.run 抛错导致协程未 awaited
-            loop.create_task(mcdr_manager.send_command(server, "save-all flush"))
+            loop.create_task(mcdr_manager.send_command(server, "save-all"))
         else:
-            asyncio.run(mcdr_manager.send_command(server, "save-all flush"))
+            asyncio.run(mcdr_manager.send_command(server, "save-all"))
     except Exception:
         logger.exception("发送 save-all 命令失败")
     _SAVEALL_LAST_TS[server.id] = now
@@ -447,7 +450,7 @@ async def ingest_scheduler_loop():
                         now_ts = time.time()
                         if now_ts - last_ts >= 3.0:
                             logger.debug(f"服务器运行中，试发送命令save-all server_id={srv.id}")
-                            await mcdr_manager.send_command(srv, 'save-all flush')
+                            await mcdr_manager.send_command(srv, 'save-all')
                             _SAVEALL_LAST_TS[srv.id] = now_ts
                             await asyncio.sleep(1.0)
                 except Exception:
@@ -500,7 +503,15 @@ def _parse_iso(ts_str: Optional[str]) -> Optional[int]:
     if ts_str is None:
         return None
     import datetime as dt
-    return int(dt.datetime.fromisoformat(ts_str).timestamp())
+    s = str(ts_str).strip()
+    # 兼容 ISO8601 的 Z 结尾（Python fromisoformat 不一定支持）
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    x = dt.datetime.fromisoformat(s)
+    # 无 tzinfo：按系统配置的 TIMEZONE 解释，避免依赖运行环境的系统时区
+    if x.tzinfo is None:
+        x = x.replace(tzinfo=get_tz_info())
+    return int(x.timestamp())
 
 
 def _align_floor(ts: int, step: int) -> int:
@@ -1159,6 +1170,7 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
                                                 models.PlayerMetrics.player_id == player_id,
                                                 models.PlayerMetrics.metric_id == mid,
                                                 models.PlayerMetrics.server_id == sid,
+                                                models.PlayerMetrics.ts <= now_ts,
                                             )
                                             .order_by(models.PlayerMetrics.ts.desc())
                                             .first()
