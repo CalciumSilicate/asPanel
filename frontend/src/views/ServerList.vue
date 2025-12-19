@@ -721,9 +721,13 @@
 	                  <div class="form-item-label">
 	                    <span>位置地图 (主世界 + 下界)</span>
 	                    <small>the_nether.json</small>
+                      <small>用于主世界 + 下界双维度路径渲染</small>
 	                  </div>
 	                  <div class="form-item-control map-upload-control">
+                      
 	                    <div class="map-upload-row">
+                        <el-tag v-if="currentConfigServer?.map?.nether_json" type="success" plain>已配置</el-tag>
+	                      <el-tag v-else type="info" plain>未配置</el-tag>
 	                      <el-upload
 	                          ref="netherMapUploaderRef"
 	                          v-model:file-list="netherMapFileList"
@@ -735,14 +739,14 @@
 	                          :on-change="file => handleMapFileChange('nether', file)"
 	                      >
 	                        <el-button :icon="Upload">选择文件</el-button>
-	                      </el-upload>
-	                      <el-button type="primary" @click="handleUploadMapJson('nether')" :loading="isUploadingMap.nether">
+                          <el-button type="primary" @click="handleUploadMapJson('nether')" :loading="isUploadingMap.nether">
 	                        上传
 	                      </el-button>
-	                      <el-tag v-if="currentConfigServer?.map?.nether_json" type="success" plain>已配置</el-tag>
-	                      <el-tag v-else type="info" plain>未配置</el-tag>
+                        
+	                      </el-upload>
+	                      
+	                      
 	                    </div>
-	                    <div class="map-upload-hint">用于主世界 + 下界双维度路径渲染</div>
 	                  </div>
 	                </div>
 	              </el-form-item>
@@ -751,9 +755,12 @@
 	                  <div class="form-item-label">
 	                    <span>位置地图 (末地)</span>
 	                    <small>the_end.json</small>
+                      <small>用于末地单维度路径渲染</small>
 	                  </div>
 	                  <div class="form-item-control map-upload-control">
 	                    <div class="map-upload-row">
+                        <el-tag v-if="currentConfigServer?.map?.end_json" type="success" plain>已配置</el-tag>
+	                      <el-tag v-else type="info" plain>未配置</el-tag>
 	                      <el-upload
 	                          ref="endMapUploaderRef"
 	                          v-model:file-list="endMapFileList"
@@ -765,14 +772,13 @@
 	                          :on-change="file => handleMapFileChange('end', file)"
 	                      >
 	                        <el-button :icon="Upload">选择文件</el-button>
-	                      </el-upload>
-	                      <el-button type="primary" @click="handleUploadMapJson('end')" :loading="isUploadingMap.end">
+                          <el-button type="primary" @click="handleUploadMapJson('end')" :loading="isUploadingMap.end">
 	                        上传
 	                      </el-button>
-	                      <el-tag v-if="currentConfigServer?.map?.end_json" type="success" plain>已配置</el-tag>
-	                      <el-tag v-else type="info" plain>未配置</el-tag>
+	                      </el-upload>
+	                      
+	                      
 	                    </div>
-	                    <div class="map-upload-hint">用于末地单维度路径渲染</div>
 	                  </div>
 	                </div>
 	              </el-form-item>
@@ -1173,7 +1179,7 @@
 	import apiClient from '@/api';
 	import {ref, onMounted, onUnmounted, reactive, computed, nextTick, watch} from 'vue';
 	import {useRouter} from 'vue-router';
-import {ElMessage, ElMessageBox, ElLoading, ElNotification} from 'element-plus';
+import {ElMessage, ElMessageBox, ElNotification} from 'element-plus';
 import ConfigEditor from '@/components/ConfigEditor.vue';
 import draggable from 'vuedraggable';
 import { settings } from '@/store/settings'
@@ -1935,15 +1941,11 @@ const handleDeleteServer = (server) => {
     type: 'warning',
     confirmButtonClass: 'el-button--danger',
   }).then(async () => {
-    const loadingInstance = ElLoading.service({lock: true, text: `正在删除服务器 ${server.name}...`});
     try {
-      await apiClient.delete(`/api/servers/${server.id}`);
-      ElMessage.success(`服务器 "${server.name}" 已被成功删除`);
-      await fetchServers();
+      const {data} = await apiClient.delete(`/api/servers/${server.id}`);
+      ElMessage.success(data?.message || `已开始删除服务器 "${server.name}" 的后台任务`);
     } catch (error) {
       ElMessage.error(`删除失败: ${error.response?.data?.detail || error.message}`);
-    } finally {
-      loadingInstance.close();
     }
   }).catch(() => {
     ElMessage.info('已取消删除操作');
@@ -2016,10 +2018,9 @@ const handleImportServer = async () => {
   await importFormRef.value.validate(async (valid) => {
     if (valid) {
       try {
-        await apiClient.post('/api/servers/import', importServerForm.value);
-        ElMessage.success('服务器已成功导入！');
+        const {data} = await apiClient.post('/api/servers/import', importServerForm.value);
+        ElMessage.success(data?.message || '已提交导入服务器任务');
         importDialogVisible.value = false;
-        await fetchServers();
       } catch (e) {
         ElMessage.error(`导入失败: ${e.response?.data?.detail || e.message}`);
       }
@@ -2045,10 +2046,9 @@ const handleCopyServer = async () => {
         path: sourceServerToCopy.value.path // 使用源服务器的路径
       };
       try {
-        await apiClient.post('/api/servers/import', payload);
-        ElMessage.success('服务器已成功复制！');
+        const {data} = await apiClient.post('/api/servers/import', payload);
+        ElMessage.success(data?.message || '已提交复制服务器任务');
         copyDialogVisible.value = false;
-        await fetchServers(); // 刷新列表
       } catch (e) {
         ElMessage.error(`复制失败: ${e.response?.data?.detail || e.message}`);
       }

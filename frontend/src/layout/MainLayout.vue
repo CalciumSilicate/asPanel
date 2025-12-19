@@ -410,6 +410,7 @@ const TASK_TYPE_LABELS = {
   RESTORE_ARCHIVE: '恢复存档',
   IMPORT: '导入服务器',
   CREATE_SERVER: '创建服务器',
+  DELETE_SERVER: '删除服务器',
   COMBINED: '组合任务',
 }
 
