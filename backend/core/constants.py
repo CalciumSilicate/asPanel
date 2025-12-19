@@ -71,7 +71,7 @@ LITEMATIC_COMMAND_LIST_PATH.mkdir(exist_ok=True, parents=True)
 
 # --- Logger Configuration ---
 LOG_LEVEL = "DEBUG"
-LOG_FILE_LEVEL = "DEBUG"
+LOG_FILE_LEVEL = "INFO"
 LOG_STORAGE = STORAGE_ROOT_PATH / "logs"
 
 # --- Timezone Setting ---
