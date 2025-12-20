@@ -12,10 +12,10 @@ from pathlib import Path
 from backend.core import crud, schemas
 from backend.core.utils import to_local_dt
 from backend.core.database import get_db
-from backend.core.constants import ARCHIVE_STORAGE_PATH
-from backend.core.dependencies import task_manager
+from backend.core.constants import ARCHIVE_STORAGE_PATH, TEMP_PATH
+from backend.core.dependencies import task_manager, archive_manager
 from backend.core.schemas import TaskType, Role
-from backend.tasks.background import background_create_archive, background_restore_archive, background_process_upload
+from backend.tasks.background import background_restore_archive
 from backend.core.logger import logger
 from backend.core.auth import require_role
 
@@ -26,53 +26,33 @@ router = APIRouter(
 
 
 @router.get("/archives", response_model=List[schemas.Archive])
-def read_archives(db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
-    db_archives = crud.get_archives(db)
-    response_archives = []
-    for archive in db_archives:
-        out = schemas.Archive.model_validate(archive)
-        try:
-            if getattr(archive, 'created_at', None):
-                out = out.model_copy(update={"created_at": to_local_dt(archive.created_at)})
-        except Exception:
-            pass
-        response_archives.append(out)
-    return response_archives
+async def read_archives(_user=Depends(require_role(Role.HELPER))):
+    return await archive_manager.list_archives()
 
 
 @router.post("/archives/create/from-server", status_code=status.HTTP_202_ACCEPTED)
 async def create_archive_from_server(
         server_id: int,
-        background_tasks: BackgroundTasks,
         db: Session = Depends(get_db),
         _user=Depends(require_role(Role.HELPER)),
 ):
-    db_server = crud.get_server_by_id(db, server_id)
-    if not db_server:
-        raise HTTPException(status_code=404, detail="服务器未找到")
-    task = task_manager.create_task(TaskType.CREATE_ARCHIVE)
-    background_tasks.add_task(background_create_archive, db, server_id, task)
+    task = await archive_manager.start_create_archive_from_server_task(db, server_id)
     return {"task_id": task.id, "message": "已开始创建存档任务"}
 
 
 @router.post("/archives/create/from-upload", status_code=status.HTTP_202_ACCEPTED)
 async def upload_archive(
         file: UploadFile,
-        background_tasks: BackgroundTasks,
         mc_version: Optional[str] = None,
-        db: Session = Depends(get_db),
         _user=Depends(require_role(Role.HELPER))
 ):
     if not any(file.filename.endswith(ext) for ext in ['.zip', '.tar', '.gz', '.7z', '.rar']):
         raise HTTPException(status_code=400, detail="不支持的文件格式。仅支持 zip, tar, tar.gz, 7z, rar。")
-    archive_name = Path(file.filename).stem  # 使用文件名（不含扩展名）作为存档名
-
-    # 先将上传的文件保存到临时位置
-    task = task_manager.create_task(TaskType.UPLOAD_ARCHIVE)
-    temp_file_path = ARCHIVE_STORAGE_PATH / f"upload_{task.id}_{file.filename}"
+    archive_name = Path(file.filename).stem
+    temp_file_path = TEMP_PATH / f"upload_{str(uuid.uuid4())}_{file.filename}"
     with open(temp_file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    background_tasks.add_task(background_process_upload, db, temp_file_path, archive_name, mc_version, task)
+    task = await archive_manager.start_create_archive_from_upload_task(temp_file_path, archive_name, mc_version)
     return {"task_id": task.id, "message": "文件已上传，开始后台处理"}
 
 

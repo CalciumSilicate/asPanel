@@ -68,6 +68,7 @@ async def refresh_playtime(background_tasks: BackgroundTasks,
     background_tasks.add_task(player_manager.recalc_all_play_time)
     return {"scheduled": True, "task": "refresh-playtime"}
 
+
 @router.post("/refresh-all-names")
 async def refresh_names_official(background_tasks: BackgroundTasks,
                                  _user: models.User = Depends(require_role(Role.ADMIN))):
@@ -103,8 +104,10 @@ async def get_whitelist_uuids(db: Session = Depends(get_db),
             continue
     return sorted(uuids)
 
+
 class DataSourceSelectionUpdate(BaseModel):
     servers: List[str]
+
 
 @router.get("/data-source-selection", response_model=List[str])
 async def get_data_source_selection(db: Session = Depends(get_db),
@@ -115,6 +118,7 @@ async def get_data_source_selection(db: Session = Depends(get_db),
     if isinstance(lst, list):
         return [str(x) for x in lst]
     return []
+
 
 @router.patch("/data-source-selection", response_model=List[str])
 async def set_data_source_selection(payload: DataSourceSelectionUpdate,
@@ -184,8 +188,8 @@ class PlayerWhitelistAddRequest(BaseModel):
 
 @router.post("/whitelist")
 async def add_player_to_whitelist(payload: PlayerWhitelistAddRequest,
-                                 db: Session = Depends(get_db),
-                                 _user: models.User = Depends(require_role(Role.ADMIN))):
+                                  db: Session = Depends(get_db),
+                                  _user: models.User = Depends(require_role(Role.ADMIN))):
     player_name = (payload.player_name or "").strip()
     if not player_name:
         raise HTTPException(status_code=400, detail="无效的玩家名")

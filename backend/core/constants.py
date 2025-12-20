@@ -10,18 +10,10 @@ UVICORN_HOST = "0.0.0.0"
 UVICORN_LOG_LEVEL = "warning"
 UVICORN_PORT = 8013
 
-# --- API Configure ---
-MINECRAFT_VERSION_MANIFEST_URL = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
-VELOCITY_VERSION_MANIFEST_URL = "https://fill.papermc.io/v3/projects/velocity/versions"
-VELOCITY_BUILD_MANIFEST_URL = "https://fill.papermc.io/v3/projects/velocity/versions/{0}/builds"
-FABRIC_GAME_VERSION_LIST_MANIFEST_URL = "https://meta.fabricmc.net/v2/versions/game"
-FABRIC_LOADER_VERSION_LIST_MANIFEST_URL = "https://meta.fabricmc.net/v2/versions/loader/{0}"
-FABRIC_LOADER_VERSION_MANIFEST_URL = "https://meta.fabricmc.net/v2/versions/loader/{0}/{1}"
+# --- COPY Speed Limit Configure ---
+COPY_LIMIT_MBPS = 1024.0
+
 FABRIC_REPO_URL = "https://maven.fabricmc.net/"
-FORGE_PROMOTIONS_MANIFEST_URL = "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json"
-FORGE_MAVEN_REPO_URL = "https://maven.minecraftforge.net/"
-FORGE_LOADER_VERSION_API_URL = "https://mc-versions-api.net/api/forge?version={0}"
-MCDR_PLUGINS_CATALOGUE_URL = "https://api.mcdreforged.com/catalogue/everything_slim.json"
 
 # --- Path Configure ---
 BASE_DIR = Path(__file__).resolve().parent.parent.parent

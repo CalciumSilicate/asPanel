@@ -6,18 +6,18 @@ from cache import AsyncTTL
 from fastapi.exceptions import HTTPException
 import uuid
 
-from backend.core.constants import (
-    MINECRAFT_VERSION_MANIFEST_URL,
-    VELOCITY_VERSION_MANIFEST_URL,
-    VELOCITY_BUILD_MANIFEST_URL,
-    FABRIC_GAME_VERSION_LIST_MANIFEST_URL,
-    FABRIC_LOADER_VERSION_LIST_MANIFEST_URL,
-    FABRIC_LOADER_VERSION_MANIFEST_URL,
-    MCDR_PLUGINS_CATALOGUE_URL,
-    FORGE_PROMOTIONS_MANIFEST_URL,
-    FORGE_MAVEN_REPO_URL,
-    FORGE_LOADER_VERSION_API_URL
-)
+# --- API Configure ---
+MINECRAFT_VERSION_MANIFEST_URL = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
+VELOCITY_VERSION_MANIFEST_URL = "https://fill.papermc.io/v3/projects/velocity/versions"
+VELOCITY_BUILD_MANIFEST_URL = "https://fill.papermc.io/v3/projects/velocity/versions/{0}/builds"
+FABRIC_GAME_VERSION_LIST_MANIFEST_URL = "https://meta.fabricmc.net/v2/versions/game"
+FABRIC_LOADER_VERSION_LIST_MANIFEST_URL = "https://meta.fabricmc.net/v2/versions/loader/{0}"
+FABRIC_LOADER_VERSION_MANIFEST_URL = "https://meta.fabricmc.net/v2/versions/loader/{0}/{1}"
+FORGE_PROMOTIONS_MANIFEST_URL = "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json"
+FORGE_MAVEN_REPO_URL = "https://maven.minecraftforge.net/"
+FORGE_LOADER_VERSION_API_URL = "https://mc-versions-api.net/api/forge?version={0}"
+MCDR_PLUGINS_CATALOGUE_URL = "https://api.mcdreforged.com/catalogue/everything_slim.json"
+MOJANG_PLAYER_PROFILE_URL = "https://api.mojang.com/users/profiles/minecraft/{0}"
 
 async_client = httpx.AsyncClient(timeout=10)
 
@@ -157,7 +157,7 @@ async def get_mcdr_plugins_catalogue(_r=None) -> Dict:
 
 @AsyncTTL(time_to_live=3600, maxsize=16384)
 async def get_uuid_by_name(player_name: str) -> Optional[str]:
-    url = f"https://api.mojang.com/users/profiles/minecraft/{player_name}"
+    url = MOJANG_PLAYER_PROFILE_URL.format(player_name)
     try:
         response = await async_get(url)
         if response.status_code == 200:

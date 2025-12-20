@@ -60,16 +60,11 @@ def get_all_users(db: Session) -> List[models.User]:
 
 
 def list_users_sorted(db: Session, *, search: Optional[str] = None, role: Optional[str] = None) -> list[dict]:
-    """
-    返回按 id 升序排序的用户列表，并展开绑定玩家的 name/uuid。
-    输出为字典，便于填充 mc_uuid/mc_name。
-    """
     q = db.query(models.User)
     if role:
         q = q.filter(models.User.role == str(role))
     users = q.order_by(models.User.id.asc()).all()
     rows: list[dict] = []
-    # 预拉取需要的 Player 映射
     pid_set = {u.bound_player_id for u in users if getattr(u, 'bound_player_id', None)}
     pmap: dict[int, models.Player] = {}
     if pid_set:
@@ -92,7 +87,6 @@ def list_users_sorted(db: Session, *, search: Optional[str] = None, role: Option
             row['mc_uuid'] = bp.uuid
             row['mc_name'] = bp.player_name
         rows.append(row)
-    # 前端也会做 client-side 搜索，但这里提供基础过滤
     if search:
         sq = (search or '').strip().lower()
         if sq:
@@ -106,7 +100,6 @@ def update_user_fields(db: Session, user_id: int, payload: schemas.UserUpdate) -
     u = get_user_by_id(db, user_id)
     if not u:
         return None
-    # 用户名：唯一性校验
     if payload.username is not None:
         other = get_user_by_username(db, payload.username)
         if other and other.id != u.id:
@@ -117,7 +110,6 @@ def update_user_fields(db: Session, user_id: int, payload: schemas.UserUpdate) -
     if payload.qq is not None:
         u.qq = payload.qq
     if payload.bound_player_id is not None:
-        # 允许传入 None 解除绑定；若非 None 则校验是否存在该玩家
         if payload.bound_player_id == 0:
             u.bound_player_id = None
         else:
@@ -176,7 +168,6 @@ def create_chat_message(db: Session, msg: models.ChatMessage) -> models.ChatMess
 
 
 def list_chat_messages_by_group(db: Session, group_id: int, limit: int = 200) -> List[models.ChatMessage]:
-    # 最新在后端按 created_at 排序拿最近的
     return (
         db.query(models.ChatMessage)
         .filter(models.ChatMessage.group_id == group_id)
@@ -187,7 +178,6 @@ def list_chat_messages_by_group(db: Session, group_id: int, limit: int = 200) ->
 
 
 def delete_chat_messages_by_group(db: Session, group_id: int) -> int:
-    """删除指定组的所有聊天记录（不影响 ALERT/None 组）。"""
     q = db.query(models.ChatMessage).filter(models.ChatMessage.group_id == group_id)
     deleted = q.delete(synchronize_session=False)
     db.commit()
@@ -259,6 +249,8 @@ def delete_server(db: Session, server_id: int) -> Optional[models.Server]:
         db.query(models.PlayerSession).filter(models.PlayerSession.server_id == server_id).delete()
         # Cleanup player positions
         db.query(models.PlayerPosition).filter(models.PlayerPosition.server_id == server_id).delete()
+        # Cleanup metrics record
+        db.query(models.PlayerMetrics).filter(models.PlayerMetrics.server_id == server_id).delete()
         db.delete(db_server)
         db.commit()
     return db_server
@@ -294,7 +286,7 @@ def create_download_file(db: Session, file_url: str, file_path: str, file_name: 
 
 
 def delete_download_file(db: Session, file_id: int) -> Optional[models.Download]:
-    db_file = get_server_by_id(db, file_id)
+    db_file = get_download_file_by_id(db, file_id)
     if db_file:
         db.delete(db_file)
         db.commit()

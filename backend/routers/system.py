@@ -15,6 +15,7 @@ from backend.core.database import get_db
 from backend.core.dependencies import mcdr_manager, task_manager
 from backend.core.schemas import TaskStatus, TaskType, Role
 from backend.core.auth import require_role
+from backend.core.utils import check_port
 
 router = APIRouter(
     prefix="/api",
@@ -99,11 +100,4 @@ def clear_tasks(payload: TaskClearRequest, _user=Depends(require_role(Role.USER)
 def check_port_availability(port: int, _user=Depends(require_role(Role.USER))):
     if not (1024 <= port <= 65535):
         raise HTTPException(400, "端口号必须在 1024-65535 之间")
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        try:
-            s.bind(('0.0.0.0', port))
-            return {"is_available": True}
-        except socket.error as e:
-            if e.errno == errno.EADDRINUSE:
-                return {"is_available": False}
-            raise HTTPException(500, f"检查端口时发生错误: {e}")
+    return {"is_available": check_port(port)}

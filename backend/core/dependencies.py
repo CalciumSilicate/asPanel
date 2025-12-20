@@ -10,11 +10,11 @@ from backend.services.dependency_handler import DependencyHandler
 from backend.services.mod_manager import ModManager
 
 mcdr_manager = MCDRManager()
-archive_manager = ArchiveManager()
 dependency_handler = DependencyHandler(PYTHON_EXECUTABLE)
 plugin_manager = PluginManager(dependency_handler)
 task_manager = TaskManager()
 mod_manager = ModManager()
+archive_manager = ArchiveManager(task_manager)
 server_service = ServerService(mcdr_manager, plugin_manager, mod_manager, task_manager)
 
 mcdr_manager.set_server_service(server_service)
