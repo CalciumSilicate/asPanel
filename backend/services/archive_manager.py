@@ -15,17 +15,19 @@ from sqlalchemy.orm import Session
 from backend.core import crud
 from backend.core.constants import ARCHIVE_STORAGE_PATH
 from backend.core.database import get_db_context
-from backend.core.schemas import Server, Task, TaskStatus, TaskType, ArchiveCreate, ArchiveType, Archive
+from backend.core.schemas import Server, Task, TaskStatus, TaskType, ArchiveCreate, ArchiveType, Archive, ServerStatus
 from backend.core.utils import to_local_dt
 from backend.services.task_manager import TaskManager
+from backend.services.mcdr_manager import MCDRManager
 from backend.tools import server_parser
 
 
 class ArchiveManager:
     """处理与服务器存档相关的操作"""
 
-    def __init__(self, task_manager: TaskManager):
+    def __init__(self, task_manager: TaskManager, mcdr_manager: MCDRManager):
         self.task_manager = task_manager
+        self.mcdr_manager = mcdr_manager
         self.storage_path = Path(ARCHIVE_STORAGE_PATH)
         self.storage_path.mkdir(exist_ok=True)
 
@@ -143,6 +145,114 @@ class ArchiveManager:
                     shutil.rmtree(temp_extract_dir, ignore_errors=True)
             except Exception:
                 pass
+
+    @staticmethod
+    def _restore_archive(
+            db_archive,
+            db_server,
+            task: Task,
+    ) -> str:
+        """
+        纯同步：做所有阻塞的文件系统操作（备份 / copy / unpack / move / 清理临时目录等）
+        返回 world_name 供外层组装消息
+        """
+        temp_unpack_dir: Path | None = None
+
+        server_name = getattr(db_server, "name", str(getattr(db_server, "id", "")))
+        archive_name = getattr(db_archive, "name", str(getattr(db_archive, "id", "")))
+
+        target_server_path = Path(db_server.path)
+        target_mc_server_dir = target_server_path / "server"
+        target_mc_server_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1) 解析 server.properties 获取 world_name
+        task.progress = 15
+        task.message = f"正在读取服务器配置（{server_name}）..."
+
+        properties_path = target_mc_server_dir / "server.properties"
+        world_name = "world"
+        if properties_path.exists():
+            properties = server_parser.parse_properties(str(properties_path))
+            world_name = properties.get("level-name", "world")
+
+        target_world_path = target_mc_server_dir / world_name
+
+        # 2) 备份现有世界（滚动备份：world_backup_last）
+        task.progress = 30
+        task.message = f"正在备份当前世界 '{world_name}'..."
+
+        if target_world_path.exists() and target_world_path.is_dir():
+            backup_name = f"{world_name}_backup_last"
+            backup_path = target_world_path.with_name(backup_name)
+
+            if backup_path.exists():
+                task.message = f"正在删除旧的备份 '{backup_name}'..."
+                shutil.rmtree(backup_path)
+
+            task.message = f"正在将当前世界备份为 '{backup_name}'..."
+            shutil.move(str(target_world_path), str(backup_path))
+        else:
+            if target_world_path.exists():
+                # 存在但不是目录，清掉避免后续 copytree/move 冲突
+                try:
+                    target_world_path.unlink()
+                except Exception:
+                    # 如果是奇怪的非文件/非目录，交给后续操作报错也行
+                    pass
+
+        # 3) 恢复存档
+        task.progress = 60
+        task.message = f"正在恢复存档 '{archive_name}' 到世界 '{world_name}'..."
+
+        source_archive_path = Path(db_archive.path)
+
+        try:
+            if db_archive.type.value == ArchiveType.UPLOADED.value:
+                # UPLOADED：db_archive.path 是一个世界目录
+                if target_world_path.exists():
+                    shutil.rmtree(target_world_path, ignore_errors=True)
+                task.message = f"正在复制上传的存档到 '{world_name}'..."
+                shutil.copytree(str(source_archive_path), str(target_world_path))
+
+            elif db_archive.type.value == ArchiveType.SERVER.value:
+                # SERVER：db_archive.path 是 tar.gz
+                task.message = "正在解压服务器存档..."
+                temp_unpack_dir = target_mc_server_dir / f"temp_unpack_{task.id}"
+                temp_unpack_dir.mkdir(parents=True, exist_ok=False)
+
+                shutil.unpack_archive(str(source_archive_path), str(temp_unpack_dir))
+
+                task.message = "正在查找世界数据..."
+                unpacked_world_path = None
+                for item in temp_unpack_dir.iterdir():
+                    if item.is_dir() and (item / "level.dat").is_file():
+                        unpacked_world_path = item
+                        break
+
+                if not unpacked_world_path:
+                    raise FileNotFoundError("在解压的存档中未能找到有效的世界文件夹 (缺少 level.dat)。")
+
+                if target_world_path.exists():
+                    shutil.rmtree(target_world_path, ignore_errors=True)
+
+                task.message = f"正在恢复世界到 '{world_name}'..."
+                shutil.move(str(unpacked_world_path), str(target_world_path))
+
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+                    detail=f"不支持的存档类型：{getattr(db_archive.type, 'value', db_archive.type)}",
+                )
+
+            task.progress = 90
+            task.message = "文件恢复完成，正在收尾..."
+
+        finally:
+            # 清理临时解压目录（无论成功失败都清）
+            if temp_unpack_dir and temp_unpack_dir.exists():
+                shutil.rmtree(temp_unpack_dir, ignore_errors=True)
+
+        return world_name
 
     async def start_create_archive_from_server_task(self, db: Session, server_id: int) -> Task:
         db_server = crud.get_server_by_id(db, server_id)
@@ -311,3 +421,80 @@ class ArchiveManager:
                     continue
                 response_archives.append(out)
             return response_archives
+
+    async def start_restore_archive_task(self, archive_id: int, target_server_id: int) -> Task:
+        # 先创建 Task，符合你其它 start_xxx_task 的行为
+        task = self.task_manager.create_task(
+            TaskType.RESTORE_ARCHIVE,  # 如果你有专门的 RESTORE 类型，可以换成 TaskType.RESTORE_ARCHIVE
+            name=f"恢复存档：{archive_id} -> 服务器：{target_server_id}",
+            message="排队中",
+        )
+
+        async def _runner():
+            task.status = TaskStatus.RUNNING
+            task.progress = 0
+            task.message = "排队中"
+
+            try:
+                # 读取 DB（这里很轻量，保持同步即可；你也可以改成 to_thread）
+                with get_db_context() as db:
+                    db_archive = crud.get_archive_by_id(db, archive_id)
+                    if not db_archive:
+                        raise HTTPException(status_code=404, detail="存档不存在")
+
+                    db_server = crud.get_server_by_id(db, target_server_id)
+                    if not db_server:
+                        raise HTTPException(status_code=404, detail="目标服务器不存在")
+                task.name = f"恢复存档：{db_archive.name} → 服务器：{db_server.name}"
+                # 停服（必须 await，保持在事件循环里）
+                server_name = getattr(db_server, "name", str(target_server_id))
+                task.progress = 5
+                task.message = f"正在检查服务器 '{server_name}' 状态..."
+
+                status_tuple = await self.mcdr_manager.get_status(
+                    server_id=db_server.id,
+                    server_path=db_server.path,
+                )
+                if status_tuple and status_tuple[0] == ServerStatus.RUNNING:
+                    task.message = f"正在停止服务器 '{server_name}'..."
+                    await self.mcdr_manager.stop(db_server)
+                    task.message = f"服务器 '{server_name}' 已停止，准备恢复存档..."
+
+                # 关键：阻塞文件操作进线程
+                task.progress = 10
+                task.message = "准备恢复存档..."
+
+                world_name = await asyncio.to_thread(
+                    self._restore_archive,
+                    db_archive,
+                    db_server,
+                    task,
+                )
+
+                # 恢复成功后启动服务器
+                task.progress = 95
+                task.message = "正在启动服务器..."
+                await self.mcdr_manager.start(db_server)
+
+                task.status = TaskStatus.SUCCESS
+                task.progress = 100
+                task.message = f"存档 '{db_archive.name}' 已成功恢复到服务器 '{db_server.name}'（世界：{world_name}）！"
+
+            except HTTPException as e:
+                task.status = TaskStatus.FAILED
+                task.error = e.detail
+                task.message = "恢复存档失败"
+
+            except Exception as e:
+                task.status = TaskStatus.FAILED
+                task.error = str(e)
+                task.message = "恢复存档失败"
+
+            finally:
+                try:
+                    self.task_manager.clear_finished_task(task.id)
+                except Exception:
+                    pass
+
+        asyncio.create_task(_runner())
+        return task

@@ -10,12 +10,10 @@ from typing import List, Optional
 from pathlib import Path
 
 from backend.core import crud, schemas
-from backend.core.utils import to_local_dt
 from backend.core.database import get_db
 from backend.core.constants import ARCHIVE_STORAGE_PATH, TEMP_PATH
 from backend.core.dependencies import task_manager, archive_manager
 from backend.core.schemas import TaskType, Role
-from backend.tasks.background import background_restore_archive
 from backend.core.logger import logger
 from backend.core.auth import require_role
 
@@ -169,18 +167,11 @@ def batch_delete_archives(payload: schemas.BatchActionPayload, db: Session = Dep
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/archives/restore/{archive_id}", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/archives/restore/{archive_id}/{server_id}", status_code=status.HTTP_202_ACCEPTED)
 async def restore_archive_to_server(
         archive_id: int,
-        payload: schemas.RestorePayload,
-        background_tasks: BackgroundTasks,
-        db: Session = Depends(get_db),
+        server_id: int,
         _user=Depends(require_role(Role.HELPER))
 ):
-    if not crud.get_archive_by_id(db, archive_id):
-        raise HTTPException(status_code=404, detail="源存档未找到。")
-    if not crud.get_server_by_id(db, payload.target_server_id):
-        raise HTTPException(status_code=404, detail="目标服务器未找到。")
-    task = task_manager.create_task(TaskType.RESTORE_ARCHIVE)
-    background_tasks.add_task(background_restore_archive, db, archive_id, payload.target_server_id, task)
+    task = await archive_manager.start_restore_archive_task(archive_id, server_id)
     return {"task_id": task.id, "message": "已开始恢复存档任务"}
