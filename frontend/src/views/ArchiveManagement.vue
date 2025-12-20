@@ -213,6 +213,7 @@ import {Upload, Download, Delete, WarningFilled, FolderAdd, Search, Refresh, Fol
 import apiClient from '@/api';
 import { settings } from '@/store/settings'
 import { fetchTasks, onTaskEvent } from '@/store/tasks'
+import { downloadArchive } from '@/store/downloads'
 
 // --- 状态 ---
 const allArchives = ref([]);
@@ -283,19 +284,6 @@ const archives = computed(() => {
 });
 const filteredArchives = computed(() => archives.value.filter(matchesKeyword));
 
-const getFilenameFromContentDisposition = (contentDisposition) => {
-  if (!contentDisposition) return null;
-  const utf8Match = String(contentDisposition).match(/filename\*=UTF-8''([^;]+)/i);
-  if (utf8Match?.[1]) {
-    try {
-      return decodeURIComponent(utf8Match[1]);
-    } catch (e) {
-      return utf8Match[1];
-    }
-  }
-  const asciiMatch = String(contentDisposition).match(/filename=\"?([^\";]+)\"?/i);
-  return asciiMatch?.[1] || null;
-};
 const formatDateTime = (isoString) => {
   if (!isoString) return 'N/A';
   const date = new Date(isoString);
@@ -446,46 +434,8 @@ const handleConfirmRestore = async () => {
 
 
 // --- 下载功能处理 ---
-const resolveDownloadError = async (error) => {
-  const detail = error?.response?.data?.detail;
-  if (detail) return detail;
-  const data = error?.response?.data;
-  if (data instanceof Blob) {
-    try {
-      const text = await data.text();
-      try {
-        const json = JSON.parse(text);
-        if (json?.detail) return json.detail;
-      } catch (e) {
-        // ignore
-      }
-      if (text) return text;
-    } catch (e) {
-      // ignore
-    }
-  }
-  return error?.message || '下载失败';
-};
-const handleDownload = async (archive) => {
-  try {
-    const res = await apiClient.get(`/api/archives/download/${archive.id}`, {responseType: 'blob'});
-    const cd = res.headers?.['content-disposition'];
-    const filename =
-      getFilenameFromContentDisposition(cd) ||
-      (archive?.type === 'SERVER' ? `${archive.name}.tar.gz` : `${archive.name}.zip`);
-
-    const blob = res.data instanceof Blob ? res.data : new Blob([res.data], {type: res.headers?.['content-type']});
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
-  } catch (error) {
-    ElMessage.error(await resolveDownloadError(error));
-  }
+const handleDownload = (archive) => {
+  void downloadArchive(archive)
 };
 
 // 从服务器创建存档

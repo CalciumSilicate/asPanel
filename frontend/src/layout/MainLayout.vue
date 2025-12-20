@@ -12,6 +12,74 @@
       <div class="header-right">
         <el-dropdown
           trigger="click"
+          class="downloads-dropdown"
+          placement="bottom-end"
+          :popper-options="dropdownPopperOptions"
+          :hide-on-click="false"
+        >
+          <el-badge
+            :value="activeDownloadsCount"
+            :max="99"
+            type="primary"
+            :hidden="activeDownloadsCount === 0"
+            class="downloads-badge"
+          >
+            <el-button
+              class="downloads-toggle"
+              aria-label="下载"
+              title="下载"
+              circle
+              text
+            >
+              <el-icon :size="18">
+                <Download/>
+              </el-icon>
+            </el-button>
+          </el-badge>
+          <template #dropdown>
+            <el-dropdown-menu class="downloads-menu">
+              <el-dropdown-item class="downloads-menu-actions-item">
+                <div class="downloads-menu-actions">
+                  <span class="downloads-menu-header">下载</span>
+                  <el-button
+                    size="small"
+                    text
+                    :disabled="clearDownloadsDisabled"
+                    @click.stop="handleClearDownloads"
+                  >
+                    清除已完成
+                  </el-button>
+                </div>
+              </el-dropdown-item>
+
+              <el-dropdown-item v-for="d in downloads" :key="d.id" class="download-menu-item">
+                <div class="download-row">
+                  <div class="download-row-header">
+                    <span class="download-name">{{ d.title }}</span>
+                    <span class="download-state">{{ downloadStatusLabel(d.status) }}</span>
+                    <span class="download-percent">{{ downloadDisplayPercent(d) }}%</span>
+                  </div>
+                  <div v-if="downloadDesc(d)" class="download-row-desc" :title="downloadDesc(d)">{{ downloadDesc(d) }}</div>
+                  <el-progress
+                    v-if="d.status === 'DOWNLOADING' || d.status === 'PREPARING'"
+                    class="download-progress"
+                    :class="d.status.toLowerCase()"
+                    :percentage="downloadProgressPercent(d)"
+                    :stroke-width="4"
+                    :show-text="false"
+                  />
+                  <div class="download-row-actions" v-if="d.status === 'PREPARING' || d.status === 'DOWNLOADING'">
+                    <el-button size="small" text @click.stop="cancelDownload(d.id)">取消</el-button>
+                  </div>
+                </div>
+              </el-dropdown-item>
+              <el-dropdown-item v-if="downloads.length === 0" disabled>暂无下载</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+
+        <el-dropdown
+          trigger="click"
           class="tasks-dropdown"
           placement="bottom-end"
           :popper-options="dropdownPopperOptions"
@@ -377,7 +445,7 @@ import {
   Cpu, Grid, Umbrella, Tools, Promotion, MapLocation, Connection, User, Printer,
   // Icons for Server Configuration
   SetUp, Link, Refresh, VideoPlay, Key,
-  LocationInformation, Place, List, RefreshRight, Comment, DocumentCopy, Operation,
+  LocationInformation, Place, List, RefreshRight, Comment, DocumentCopy, Operation, Download,
   Moon, Sunny
 } from '@element-plus/icons-vue';
 import {user, fullAvatarUrl, fetchUser, clearUser, refreshAvatar, hasRole} from '@/store/user';
@@ -394,6 +462,13 @@ import {
   onTaskEvent,
   clearTasks,
 } from '@/store/tasks'
+import {
+  downloads,
+  activeDownloadsCount,
+  finishedDownloadsCount,
+  cancelDownload,
+  clearFinishedDownloads,
+} from '@/store/downloads'
 
 
 // 折叠状态由全局 ui store 提供
@@ -456,6 +531,24 @@ const handleClearTasks = async () => {
     ElMessage.error(`清理失败: ${e.response?.data?.detail || e.message}`)
   }
 }
+
+const clearDownloadsDisabled = computed(() => finishedDownloadsCount.value === 0)
+const handleClearDownloads = () => {
+  if (clearDownloadsDisabled.value) return
+  clearFinishedDownloads()
+  ElMessage.success('已清理已完成下载')
+}
+
+const downloadStatusLabel = (status) => ({
+  PREPARING: '准备中',
+  DOWNLOADING: '下载中',
+  SUCCESS: '完成',
+  FAILED: '失败',
+  CANCELED: '已取消',
+}[status] || status)
+const downloadDesc = (d) => d?.error || d?.message || ''
+const downloadDisplayPercent = (d) => (d.status === 'SUCCESS' || d.status === 'FAILED' || d.status === 'CANCELED') ? 100 : (d.progress || 0)
+const downloadProgressPercent = (d) => (d.status === 'SUCCESS' || d.status === 'FAILED' || d.status === 'CANCELED') ? 100 : (d.progress || 0)
 
 // 右上角合并通知：新增/完成/失败
 const NOTIFY_WINDOW_MS = 4500
@@ -768,6 +861,29 @@ onUnmounted(() => {
   background-color: var(--el-color-danger);
 }
 .tasks-badge :deep(.el-badge__content) { transform: translate(4px, -6px); }
+
+.downloads-dropdown { margin-right: 8px; }
+.downloads-menu { width: 420px; max-width: min(520px, 92vw); padding: 6px 0; overflow-x: hidden; box-sizing: border-box; }
+.downloads-menu :deep(.el-dropdown-menu__item) {
+  white-space: normal;
+  height: auto;
+  line-height: 1.4;
+  padding: 0 !important;
+  display: block !important;
+  align-items: initial !important;
+}
+.downloads-menu-actions { padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; }
+.downloads-menu-actions-item { cursor: default; }
+.downloads-menu-actions-item:hover { background-color: transparent !important; }
+.downloads-menu .downloads-menu-header { font-weight: 600; color: var(--color-text); }
+.download-row { padding: 10px 14px; display: block; width: 100%; box-sizing: border-box; }
+.download-row-header { display: grid; grid-template-columns: 1fr auto auto; column-gap: 12px; align-items: baseline; margin-bottom: 4px; }
+.download-name { font-size: 13px; color: var(--color-text); font-weight: 600; text-align: left; }
+.download-state, .download-percent { font-size: 12px; color: var(--el-text-color-secondary); text-align: right; }
+.download-row-desc { font-size: 11px; color: var(--el-text-color-secondary); margin: 2px 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.download-progress { display: block; width: 96%; margin: 0 auto; }
+.download-row-actions { display: flex; justify-content: flex-end; padding: 6px 14px 0; }
+.downloads-badge :deep(.el-badge__content) { transform: translate(4px, -6px); }
 
 .header-right .user-info {
   display: flex;
