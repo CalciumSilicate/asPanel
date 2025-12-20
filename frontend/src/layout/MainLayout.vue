@@ -183,6 +183,7 @@
             class="el-menu-vertical-demo"
             :collapse="isCollapse"
             :router="true"
+            @select="handleMenuSelect"
         >
           <!-- 基础功能 -->
           <el-menu-item index="/dashboard">
@@ -469,6 +470,7 @@ import {
   cancelDownload,
   clearFinishedDownloads,
 } from '@/store/downloads'
+import { cancelPendingRequests } from '@/api'
 
 
 // 折叠状态由全局 ui store 提供
@@ -603,6 +605,10 @@ const activeMenu = computed(() => {
   return path;
 });
 
+const handleMenuSelect = () => {
+  cancelPendingRequests()
+}
+
 // 折叠/展开逻辑改为使用全局 ui store 的 toggleAside（此处不再定义同名函数）
 
 const handleCommand = (command) => {
@@ -621,8 +627,14 @@ const handleAvatarSuccess = async () => {
 };
 
 let offTaskEvents = null
+let removeCancelGuard = null
 
 onMounted(() => {
+  removeCancelGuard = router.beforeEach((to, from) => {
+    if (to.fullPath !== from.fullPath) cancelPendingRequests()
+    return true
+  })
+
   fetchUser();
   fetchTasks().catch(() => {})
   connectTasksSocket()
@@ -660,6 +672,11 @@ onMounted(() => {
 onUnmounted(() => {
   try {
     offTaskEvents?.()
+  } catch (e) {
+    // ignore
+  }
+  try {
+    removeCancelGuard?.()
   } catch (e) {
     // ignore
   }

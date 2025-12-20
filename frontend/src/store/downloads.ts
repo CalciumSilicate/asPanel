@@ -1,5 +1,5 @@
 import { computed, reactive } from 'vue'
-import apiClient from '@/api'
+import apiClient, { isRequestCanceled } from '@/api'
 import type { AxiosProgressEvent } from 'axios'
 
 export type DownloadStatus = 'PREPARING' | 'DOWNLOADING' | 'SUCCESS' | 'FAILED' | 'CANCELED'
@@ -28,6 +28,7 @@ const state = reactive({
 })
 
 const controllers = new Map<string, AbortController>()
+const userCanceled = new Set<string>()
 
 const genId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -109,12 +110,15 @@ export const clearDownload = (id: string) => {
 }
 
 export const cancelDownload = (id: string) => {
+  userCanceled.add(id)
   const controller = controllers.get(id)
   try {
-    controller?.abort()
+    controller?.abort('user-canceled')
   } catch (e) {
     // ignore
   }
+  // 立即从列表移除，避免 UI 卡在“下载中”
+  clearDownload(id)
 }
 
 export const downloadArchive = async (archive: ArchiveDownloadSource) => {
@@ -144,8 +148,10 @@ export const downloadArchive = async (archive: ArchiveDownloadSource) => {
   try {
     const res = await apiClient.get(`/api/archives/download/${archive.id}`, {
       responseType: 'blob',
+      timeout: 0,
       signal: controller.signal,
       onDownloadProgress: (evt: AxiosProgressEvent) => {
+        if (userCanceled.has(id) || controller.signal.aborted) return
         const loaded = Number(evt.loaded ?? 0)
         const total = Number.isFinite(Number(evt.total)) ? Number(evt.total) : null
         const progress = total ? Math.min(99, Math.round((loaded / total) * 100)) : 0
@@ -159,6 +165,11 @@ export const downloadArchive = async (archive: ArchiveDownloadSource) => {
         } as any)
       },
     })
+
+    if (userCanceled.has(id) || controller.signal.aborted) {
+      clearDownload(id)
+      return
+    }
 
     const cd = (res.headers as any)?.['content-disposition']
     const filename = getFilenameFromContentDisposition(cd) || fallbackFilename
@@ -184,14 +195,19 @@ export const downloadArchive = async (archive: ArchiveDownloadSource) => {
       error: null,
     } as any)
   } catch (error: any) {
-    const canceled = error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError'
+    const canceled = isRequestCanceled(error) || error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError'
+    if (canceled) {
+      clearDownload(id)
+      return
+    }
     upsert({
       id,
-      status: canceled ? 'CANCELED' : 'FAILED',
-      message: canceled ? '已取消' : '下载失败',
-      error: canceled ? null : await resolveDownloadError(error),
+      status: 'FAILED',
+      message: '下载失败',
+      error: await resolveDownloadError(error),
     } as any)
   } finally {
+    userCanceled.delete(id)
     controllers.delete(id)
   }
 }
