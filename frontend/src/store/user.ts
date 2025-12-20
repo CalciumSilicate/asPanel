@@ -1,5 +1,5 @@
 import { computed, reactive, ref } from 'vue'
-import apiClient from '@/api'
+import apiClient, { isRequestCanceled } from '@/api'
 
 export type UserRole = 'GUEST' | 'USER' | 'HELPER' | 'ADMIN' | 'OWNER'
 
@@ -47,6 +47,7 @@ export const fetchUser = async () => {
     const response = await apiClient.get('/api/users/me')
     Object.assign(user, response.data)
   } catch (error) {
+    if (isRequestCanceled(error)) return
     console.error('Failed to fetch user:', error)
     clearUser()
   }
@@ -64,4 +65,3 @@ export const clearUser = () => {
   user.role = 'GUEST'
   avatarVersion.value = 0
 }
-
