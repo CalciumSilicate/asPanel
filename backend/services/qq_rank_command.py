@@ -182,38 +182,98 @@ def _trend_series_7d(
     if not player_uuids:
         return {}
     start_dt, boundaries, now_dt = _daily_boundaries_ts(days=7)
-    try:
-        series_map = stats_service.get_delta_series(
-            player_uuids=player_uuids,
-            metrics=metrics,
-            granularity="24h",
-            start=start_dt.isoformat(),
-            end=now_dt.isoformat(),
-            server_ids=server_ids,
+    # 说明：stats_service.get_delta_series 会触发入库（save-all + ingest），会导致后端阻塞/SQLite 写锁；
+    # 这里直接查 player_metrics 进行聚合，避免写入。
+    zeros = [0.0 for _ in boundaries]
+
+    # 归一/过滤指标
+    normed: List[str] = []
+    for m in metrics:
+        nm = stats_service._normalize_metric(m)  # type: ignore[attr-defined]
+        try:
+            cat, item = nm.split(".", 1)
+            normed.append(f"{cat}.{item}")
+        except Exception:
+            continue
+    allowed = stats_service._filter_metrics(normed, namespace=stats_service.DEFAULT_NAMESPACE)  # type: ignore[attr-defined]
+    if not allowed:
+        return {uid: list(zeros) for uid in player_uuids}
+
+    start_anchor_ts = int(start_dt.timestamp())
+    end_boundary_ts = int(boundaries[-1]) if boundaries else int(now_dt.timestamp())
+
+    out: Dict[str, List[float]] = {uid: list(zeros) for uid in player_uuids}
+    with get_db_context() as db:
+        pairs = stats_service._normalize_metrics(allowed, stats_service.DEFAULT_NAMESPACE)  # type: ignore[attr-defined]
+        metric_ids = stats_service._resolve_metric_ids(db, pairs)  # type: ignore[attr-defined]
+        if not metric_ids:
+            return out
+
+        # uuid -> player_id
+        rows_p = db.query(models.Player.id, models.Player.uuid).filter(models.Player.uuid.in_(player_uuids)).all()
+        pid_by_uuid = {str(uuid): int(pid) for pid, uuid in rows_p if pid is not None and uuid}
+        player_ids = [pid_by_uuid.get(uid) for uid in player_uuids]
+        player_ids = [int(pid) for pid in player_ids if pid]
+        if not player_ids:
+            return out
+
+        q = (
+            select(
+                models.PlayerMetrics.player_id,
+                models.PlayerMetrics.ts,
+                func.sum(models.PlayerMetrics.delta).label("v"),
+            )
+            .where(
+                models.PlayerMetrics.player_id.in_(player_ids),
+                models.PlayerMetrics.metric_id.in_(metric_ids),
+                models.PlayerMetrics.ts > start_anchor_ts,
+                models.PlayerMetrics.ts <= end_boundary_ts,
+            )
+            .group_by(models.PlayerMetrics.player_id, models.PlayerMetrics.ts)
+            .order_by(models.PlayerMetrics.player_id.asc(), models.PlayerMetrics.ts.asc())
         )
-    except Exception:
-        logger.opt(exception=True).warning("获取趋势数据失败")
-        series_map = {}
-    out: Dict[str, List[float]] = {}
+        if server_ids:
+            q = q.where(models.PlayerMetrics.server_id.in_(server_ids))
+
+        rows = db.execute(q).all()
+
+    # 聚合到每个玩家的 ts->delta
+    delta_by_pid: Dict[int, Dict[int, int]] = {}
+    for pid, ts, v in rows:
+        try:
+            pid_i = int(pid)
+            ts_i = int(ts)
+            v_i = int(v or 0)
+        except Exception:
+            continue
+        delta_by_pid.setdefault(pid_i, {})[ts_i] = v_i
+
+    # 分桶求和：按本地日历边界
     for uid in player_uuids:
-        items = series_map.get(uid, []) or []
-        by_ts: Dict[int, int] = {}
-        for ts, v in items:
-            try:
-                by_ts[int(ts)] = int(v)
-            except Exception:
-                continue
+        pid = pid_by_uuid.get(uid)
+        if not pid:
+            continue
+        by_ts = delta_by_pid.get(int(pid), {})
+        if not by_ts:
+            continue
+        sorted_ts = sorted(by_ts.keys())
         vals: List[float] = []
+        idx = 0
+        prev = start_anchor_ts
         for b in boundaries:
-            raw = by_ts.get(int(b), 0)
-            try:
-                raw_i = int(raw)
-            except Exception:
-                raw_i = 0
-            if raw_i < 0:
-                raw_i = 0
-            vals.append(float(raw_i) * float(scale))
+            bucket = 0
+            b_i = int(b)
+            while idx < len(sorted_ts) and sorted_ts[idx] <= b_i:
+                t = sorted_ts[idx]
+                if t > prev:
+                    bucket += int(by_ts.get(t, 0) or 0)
+                idx += 1
+            if bucket < 0:
+                bucket = 0
+            vals.append(float(bucket) * float(scale))
+            prev = b_i
         out[uid] = vals
+
     return out
 
 
@@ -319,13 +379,6 @@ def build_metric_rank_image_b64(
     pinned_uuid: Optional[str] = None,
     pinned_name: Optional[str] = None,
 ) -> Tuple[bool, str]:
-    try:
-        # 先触发一次入库（防止 leaderboard 与趋势使用不同步的数据）
-        discovered = stats_service.discover_metrics_from_all_servers()
-        stats_service._ingest_for_query("24h", server_ids, discovered)  # type: ignore[attr-defined]
-    except Exception:
-        pass
-
     at_iso = datetime.now(timezone.utc).isoformat()
     rows = stats_service.leaderboard_total(metrics=metrics, at=at_iso, server_ids=server_ids, limit=max(1, int(limit)))
     if not rows:
@@ -644,3 +697,66 @@ def build_last_seen_rank_image_b64(
         pinned_row=pinned_row,
     )
     return True, _image_to_base64(img)
+
+
+def build_rank_image_from_args_b64(
+    args: List[str],
+    server_ids: List[int],
+    limit: int,
+    pinned_uuid: Optional[str] = None,
+    pinned_name: Optional[str] = None,
+) -> Tuple[bool, str]:
+    # 统一入口，便于在后台/进程池里调用
+    args = list(args or [])
+    if not args:
+        args = ["挖掘榜"]
+
+    query = (args[0] or "").strip()
+    board = resolve_board(query) or resolve_board(query + "榜")
+
+    if board and board.name == "航天榜":
+        return build_space_rank_image_b64(
+            server_ids=server_ids,
+            limit=limit,
+            pinned_uuid=pinned_uuid,
+            pinned_name=pinned_name,
+        )
+
+    if board and board.name == "最后在线榜":
+        return build_last_seen_rank_image_b64(
+            server_ids=server_ids,
+            limit=limit,
+            pinned_uuid=pinned_uuid,
+            pinned_name=pinned_name,
+        )
+
+    if board and board.metrics:
+        return build_metric_rank_image_b64(
+            title=board.name,
+            description=board.description,
+            metrics=board.metrics,
+            server_ids=server_ids,
+            limit=limit,
+            scale=board.scale,
+            formatter=board.formatter,
+            pinned_uuid=pinned_uuid,
+            pinned_name=pinned_name,
+        )
+
+    # 自定义指标榜
+    metrics = [t for t in args if t and str(t).strip()]
+    if not metrics:
+        return False, "用法：##rank <榜单名> 或 ##rank <metric1> [metric2] ..."
+    subtitle = " + ".join(metrics)
+    return build_metric_rank_image_b64(
+        title="自定义指标榜",
+        description="自定义指标总量榜",
+        subtitle=subtitle,
+        metrics=metrics,
+        server_ids=server_ids,
+        limit=limit,
+        scale=1.0,
+        formatter=lambda x: f"{int(x):,}",
+        pinned_uuid=pinned_uuid,
+        pinned_name=pinned_name,
+    )
