@@ -30,6 +30,7 @@ class RankRow:
     avatar_big: str
     avatar_small: str
     trend_values: Optional[List[float]] = None
+    is_pinned: bool = False
 
 
 def _create_sparkline(values: Sequence[float], width: int, height: int) -> Image.Image:
@@ -84,7 +85,14 @@ def _create_sparkline(values: Sequence[float], width: int, height: int) -> Image
     return out
 
 
-def render_rank_image(*, title: str, subtitle: str, rows: List[RankRow], show_trend: bool) -> Image.Image:
+def render_rank_image(
+    *,
+    title: str,
+    subtitle: str,
+    rows: List[RankRow],
+    show_trend: bool,
+    pinned_row: Optional[RankRow] = None,
+) -> Image.Image:
     width = 1500 if show_trend else 1200
     padding = 60
     card_radius = 24
@@ -106,7 +114,8 @@ def render_rank_image(*, title: str, subtitle: str, rows: List[RankRow], show_tr
     header_h += 30
 
     row_h = 118
-    total_h = header_h + (row_h + card_gap) * len(rows) - (card_gap if rows else 0) + padding
+    card_count = len(rows) + (1 if pinned_row else 0)
+    total_h = header_h + (row_h + card_gap) * card_count - (card_gap if card_count else 0) + padding
     total_h = max(total_h, header_h + padding + 120)
 
     img = Image.new("RGBA", (width, int(total_h)), Theme.BG_COLOR)
@@ -144,18 +153,27 @@ def render_rank_image(*, title: str, subtitle: str, rows: List[RankRow], show_tr
             return (194, 120, 63)  # bronze
         return Theme.TEXT_SECONDARY
 
-    for row in rows:
+    paint_rows: List[RankRow] = []
+    if pinned_row:
+        paint_rows.append(pinned_row)
+    paint_rows.extend(rows)
+
+    for i, row in enumerate(paint_rows):
         cy = y
         bbox = (padding, cy, padding + card_w, cy + row_h)
         draw_shadow(img, bbox, radius=card_radius, blur=10, offset=(0, 4))
-        draw.rounded_rectangle(bbox, radius=card_radius, fill=Theme.CARD_BG)
+        if row.is_pinned:
+            draw.rounded_rectangle(bbox, radius=card_radius, fill=Theme.CARD_BG, outline=Theme.TEXT_ACCENT, width=4)
+        else:
+            draw.rounded_rectangle(bbox, radius=card_radius, fill=Theme.CARD_BG)
 
         content_x = padding + inner_pad_x
         center_y = cy + row_h / 2
 
         # Rank
         rx_center = content_x + rank_w / 2
-        draw.text((rx_center, center_y), str(row.rank), fill=_rank_color(row.rank), font=font_rank, anchor="mm")
+        rank_text = "—" if (row.rank or 0) <= 0 else str(int(row.rank))
+        draw.text((rx_center, center_y), rank_text, fill=_rank_color(int(row.rank or 0)), font=font_rank, anchor="mm")
         content_x += rank_w + col_gap
 
         # Avatars
@@ -200,7 +218,10 @@ def render_rank_image(*, title: str, subtitle: str, rows: List[RankRow], show_tr
             else:
                 draw.text((content_x + trend_w / 2, center_y), "—", fill=Theme.TEXT_SECONDARY, font=font_sub, anchor="mm")
 
-        y += row_h + card_gap
+        # pinned row adds a slightly larger separation from the top list
+        if row.is_pinned and i == 0:
+            y += row_h + card_gap * 2
+        else:
+            y += row_h + card_gap
 
     return img
-

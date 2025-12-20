@@ -646,7 +646,7 @@ async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, tex
         body = text[2:].strip()
         tokens = body.split()
         if tokens and tokens[0].lower() == "rank":
-            await _cmd_rank(group_id, qq_group, tokens[1:])
+            await _cmd_rank(group_id, qq_group, tokens[1:], sender_qq=sender_qq)
             return True
         online_map = _PLAYERS_PROVIDER() or {}
         success, payload = qq_stats_command.build_report_from_command(
@@ -679,7 +679,7 @@ async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, tex
     return True
 
 
-async def _cmd_rank(group_id: int, qq_group: str, args: List[str]) -> None:
+async def _cmd_rank(group_id: int, qq_group: str, args: List[str], *, sender_qq: Optional[str] = None) -> None:
     settings = _get_rank_settings(group_id)
 
     if not args:
@@ -769,6 +769,22 @@ async def _cmd_rank(group_id: int, qq_group: str, args: List[str]) -> None:
         await _send_group_text(qq_group, f"已设置 server={settings.server_ids}（{', '.join(names)}）")
         return
 
+    # 查询者（若绑定了玩家）：插入“你的排名”卡片
+    pinned_uuid: Optional[str] = None
+    pinned_name: Optional[str] = None
+    if sender_qq:
+        try:
+            with get_db_context() as db:
+                u = db.query(models.User).filter(models.User.qq == str(sender_qq)).first()
+                if u and getattr(u, "bound_player_id", None):
+                    p = db.query(models.Player).filter(models.Player.id == u.bound_player_id).first()
+                    if p and p.uuid:
+                        pinned_uuid = str(p.uuid)
+                        pinned_name = str(p.player_name or "") if p.player_name else None
+        except Exception:
+            pinned_uuid = None
+            pinned_name = None
+
     # 生成榜单（图片）
     query = (args[0] or "").strip()
     board = qq_rank_command.resolve_board(query) or qq_rank_command.resolve_board(query + "榜")
@@ -778,9 +794,19 @@ async def _cmd_rank(group_id: int, qq_group: str, args: List[str]) -> None:
     def _build() -> Tuple[bool, str]:
         try:
             if board and board.name == "航天榜":
-                return qq_rank_command.build_space_rank_image_b64(server_ids=settings.server_ids, limit=settings.limit)
+                return qq_rank_command.build_space_rank_image_b64(
+                    server_ids=settings.server_ids,
+                    limit=settings.limit,
+                    pinned_uuid=pinned_uuid,
+                    pinned_name=pinned_name,
+                )
             if board and board.name == "最后在线榜":
-                return qq_rank_command.build_last_seen_rank_image_b64(server_ids=settings.server_ids, limit=settings.limit)
+                return qq_rank_command.build_last_seen_rank_image_b64(
+                    server_ids=settings.server_ids,
+                    limit=settings.limit,
+                    pinned_uuid=pinned_uuid,
+                    pinned_name=pinned_name,
+                )
             if board and board.metrics:
                 return qq_rank_command.build_metric_rank_image_b64(
                     title=board.name,
@@ -790,6 +816,8 @@ async def _cmd_rank(group_id: int, qq_group: str, args: List[str]) -> None:
                     limit=settings.limit,
                     scale=board.scale,
                     formatter=board.formatter,
+                    pinned_uuid=pinned_uuid,
+                    pinned_name=pinned_name,
                 )
 
             # 自定义指标榜
@@ -806,6 +834,8 @@ async def _cmd_rank(group_id: int, qq_group: str, args: List[str]) -> None:
                 limit=settings.limit,
                 scale=1.0,
                 formatter=lambda x: f"{int(x):,}",
+                pinned_uuid=pinned_uuid,
+                pinned_name=pinned_name,
             )
         except Exception:
             logger.opt(exception=True).warning("生成榜单失败")
