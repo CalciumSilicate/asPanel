@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from backend.core.database import get_db
+from backend.core.constants import BASE_DIR
 from backend.core import crud
 from backend.core.logger import logger
 from backend.core.auth import require_role
@@ -24,21 +25,15 @@ router = APIRouter(prefix="/api/configs", tags=["Configurations"])
 @dataclass
 class PluginSpec:
     key: str
-    fmt: str  # json|yaml|toml
+    fmt: str
     default_repo_path: Path
-    # relative to server.path
     target_rel_path: Path
-    # editable paths list. '*' means all, 'x.*' means subtree
     editable: List[str]
-    # optional field schema for UI (basic)
     ui_fields: List[Dict[str, Any]]
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
 def _p(rel: str) -> Path:
-    return (REPO_ROOT / rel).resolve()
+    return (BASE_DIR / rel).resolve()
 
 
 PLUGIN_SPECS: Dict[str, PluginSpec] = {
@@ -97,7 +92,8 @@ PLUGIN_SPECS: Dict[str, PluginSpec] = {
             {"path": "scheduled_backup.interval", "type": "string", "label": "定时间隔 (如12h)"},
             {"path": "scheduled_backup.crontab", "type": "crontab", "label": "Crontab 表达式"},
             {"path": "scheduled_backup.require_online_players", "type": "bool", "label": "需要在线玩家"},
-            {"path": "scheduled_backup.require_online_players_blacklist", "type": "string_array", "label": "在线玩家黑名单"},
+            {"path": "scheduled_backup.require_online_players_blacklist", "type": "string_array",
+             "label": "在线玩家黑名单"},
             {"path": "prune.enabled", "type": "bool", "label": "清理启用"},
         ],
     ),
@@ -210,12 +206,14 @@ def deep_set(d: Dict[str, Any], path: str, value: Any):
 def deep_merge(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
     # merge dict b onto a (a as base), return new dict
     out: Dict[str, Any] = json.loads(json.dumps(a))  # deep copy
+
     def _merge(tgt, src):
         for k, v in (src or {}).items():
             if isinstance(v, dict) and isinstance(tgt.get(k), dict):
                 _merge(tgt[k], v)
             else:
                 tgt[k] = v
+
     _merge(out, b or {})
     return out
 
@@ -298,7 +296,8 @@ class ConfigUpdatePayload(BaseModel):
 
 
 @router.get("/{plugin}/{server_id}", response_model=ConfigResponse)
-async def get_config(plugin: str, server_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
+async def get_config(plugin: str, server_id: int, db: Session = Depends(get_db),
+                     _user=Depends(require_role(Role.HELPER))):
     spec = _spec_or_404(plugin)
     server = crud.get_server_by_id(db, server_id)
     if not server:
@@ -328,7 +327,8 @@ async def get_config(plugin: str, server_id: int, db: Session = Depends(get_db),
 
 
 @router.patch("/{plugin}/{server_id}")
-async def update_config(plugin: str, server_id: int, payload: ConfigUpdatePayload, db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
+async def update_config(plugin: str, server_id: int, payload: ConfigUpdatePayload, db: Session = Depends(get_db),
+                        _user=Depends(require_role(Role.HELPER))):
     spec = _spec_or_404(plugin)
     server = crud.get_server_by_id(db, server_id)
     if not server:
@@ -396,7 +396,8 @@ async def get_raw(plugin: str, server_id: int, db: Session = Depends(get_db), _u
 
 
 @router.post("/{plugin}/{server_id}/raw")
-async def save_raw(plugin: str, server_id: int, payload: RawPayload, db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
+async def save_raw(plugin: str, server_id: int, payload: RawPayload, db: Session = Depends(get_db),
+                   _user=Depends(require_role(Role.HELPER))):
     spec = _spec_or_404(plugin)
     server = crud.get_server_by_id(db, server_id)
     if not server:

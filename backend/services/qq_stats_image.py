@@ -369,7 +369,7 @@ class PositionMapRenderer:
                 "z": attrs.get("y", 0),
                 "name": self._extract_name(attrs),
                 "visible": attrs.get("visible", True),
-                "is_station": attrs.get("type") == "shmetro-basic",
+                "is_station": attrs.get("type") != "virtual",
             }
 
         for e in raw_edges:
@@ -394,8 +394,8 @@ class PositionMapRenderer:
         return {"nodes": nodes, "edges": edges}
 
     def _extract_name(self, attrs):
-        if attrs.get("type") == "shmetro-basic":
-            names = attrs.get("shmetro-basic", {}).get("names", [])
+        if attrs.get("type") != "virtual":
+            names = attrs.get(attrs.get("type"), {}).get("names", [])
             if names:
                 return names[0].split('\n')[0]
         return None

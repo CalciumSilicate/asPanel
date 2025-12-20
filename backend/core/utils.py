@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 from datetime import timezone, timedelta
 from cachetools import TTLCache, cached
 
-from backend.core.constants import TIMEZONE
+from backend.core.constants import TIMEZONE, COPY_LIMIT_MBPS
 from backend.core.logger import logger
 
 _size_cache = TTLCache(ttl=60, maxsize=1024)
@@ -133,7 +133,7 @@ def is_valid_mc_name(name: str) -> bool:
     return bool(_MC_NAME_RE.match(name))
 
 
-def _read_files_in_zipfile(zip_file_path: Path, *files_name: str) -> List[Optional[bytes]]:
+def _read_files_in_zipfile(zip_file_path: Path, *files_name: str) -> Optional[List[Optional[bytes]]]:
     if not os.path.exists(zip_file_path):
         return None
     try:
@@ -146,68 +146,55 @@ def _read_files_in_zipfile(zip_file_path: Path, *files_name: str) -> List[Option
                     file_bytes.append(jar_file.read(file_name))
     except zipfile.BadZipFile:
         return None
-    except Exception as e:
-        return None
     return file_bytes
 
 
-def _get_version_json_from_vanilla_jar(jar_path: Path) -> Dict | None:
-    _ = _read_files_in_zipfile(jar_path, 'version.json')[0]
-    return json.loads(_.decode('utf-8')) if _ else None
-
-
 def get_vanilla_jar_version(jar_path: Path) -> Optional[str]:
-    js = _get_version_json_from_vanilla_jar(jar_path)
-    if js is None:
-        return None
-    version_id: Optional[str] = js.get("id", None)
-    if version_id is None:
-        return None
-    if '/' in version_id:
-        version_id = version_id.split("/")[0].strip()
-    return version_id
-
-
-def _get_manifest_mf_from_velocity_jar(jar_path: Path) -> str | None:
-    _ = _read_files_in_zipfile(jar_path, 'META-INF/MANIFEST.MF')[0]
-    return _.decode('utf-8') if _ else None
+    _ = _read_files_in_zipfile(jar_path, 'version.json')
+    v = None
+    if _:
+        js = json.loads(_[0].decode('utf-8'))
+        version_id: Optional[str] = js.get("id", None)
+        if version_id is None:
+            return None
+        if '/' in version_id:
+            v = version_id.split("/")[0].strip()
+    return v
 
 
 def get_velocity_jar_version(jar_path: Path) -> Optional[str]:
-    manifest_mf = _get_manifest_mf_from_velocity_jar(jar_path)
-    if manifest_mf is None:
-        return None
-    pattern = r"Implementation-Version:\s+(.+?)\s+\(git-[a-f0-9]+-b(\w+)\)"
-    match = re.search(pattern, manifest_mf)
-    if match:
-        version = match.group(1)
-        build_number = match.group(2)
-        formatted_output = f"{version}#{build_number}"
-        return formatted_output
-    else:
-        return None
+    _ = _read_files_in_zipfile(jar_path, 'META-INF/MANIFEST.MF')
+    v = None
+    if _:
+        manifest_mf = _[0].decode('utf-8')
+        pattern = r"Implementation-Version:\s+(.+?)\s+\(git-[a-f0-9]+-b(\w+)\)"
+        match = re.search(pattern, manifest_mf)
+        if match:
+            version = match.group(1)
+            build_number = match.group(2)
+            formatted_output = f"{version}#{build_number}"
+            v = formatted_output
+    return v
 
 
 def get_fabric_jar_version(jar_path: Path) -> Tuple[Optional[str], Optional[str]]:
     _ = _read_files_in_zipfile(jar_path, 'META-INF/MANIFEST.MF')
-    if _ is None:
-        return None, None
-    manifest_lines = _[0].decode().splitlines()
-
     vanilla_version = None
     fabric_loader_version = None
-    class_string = ""
-    for line in manifest_lines[2:]:
-        class_string += line.replace("Class-Path:", "")[1:]
-    class_entries = class_string.split()
-    for cls in class_entries:
-        split_cls = cls.split("/")
-        if "intermediary" in cls:
-            vanilla_version = split_cls[-2]
-        if "fabric-loader" in cls:
-            fabric_loader_version = split_cls[-2]
-        if vanilla_version and fabric_loader_version:
-            return vanilla_version, fabric_loader_version
+    if _:
+        manifest_lines = _[0].decode().splitlines()
+        class_string = ""
+        for line in manifest_lines[2:]:
+            class_string += line.replace("Class-Path:", "")[1:]
+        class_entries = class_string.split()
+        for cls in class_entries:
+            split_cls = cls.split("/")
+            if "intermediary" in cls:
+                vanilla_version = split_cls[-2]
+            if "fabric-loader" in cls:
+                fabric_loader_version = split_cls[-2]
+            if vanilla_version and fabric_loader_version:
+                return vanilla_version, fabric_loader_version
     return vanilla_version, fabric_loader_version
 
 
@@ -256,35 +243,6 @@ async def poll_copy_progress(source_path: Path, target_path: Path, task, interva
         await asyncio.sleep(interval)
 
 
-class Timer:
-    def __init__(self, name: str = "Timer"):
-        self.name = name
-        self._start_time = None
-
-    def __enter__(self):
-        self._start_time = time.perf_counter()
-        logger.info(f"[{self.name}] 计时开始")
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._start_time is None:
-            logger.warning(f"[{self.name}] 计时尚未开始")
-            return
-        elapsed = time.perf_counter() - self._start_time
-        logger.info(f"[{self.name}] 计时结束，用时 {elapsed:.4f} 秒")
-        self._start_time = None
-
-    def print(self, point: int = None):
-        if self._start_time is None:
-            logger.warning(f"[{self.name}] 计时尚未开始")
-            return
-        elapsed = time.perf_counter() - self._start_time
-        if point is None:
-            logger.info(f"[{self.name}] 当前已用时 {elapsed:.4f} 秒")
-        else:
-            logger.info(f"[{self.name}.{point}] 当前已用时 {elapsed:.4f} 秒")
-
-
 def _bw_sleep(start_ts: float, bytes_written: int, limit_bps: float):
     if limit_bps <= 0:
         return
@@ -294,7 +252,7 @@ def _bw_sleep(start_ts: float, bytes_written: int, limit_bps: float):
         time.sleep(expected - elapsed)
 
 
-def _copy_file_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 1024.0, preserve_stat: bool = True):
+def _copy_file_resumable_throttled(src: Path, dst: Path, *, preserve_stat: bool = True):
     if not src.is_file():
         return
 
@@ -303,7 +261,7 @@ def _copy_file_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 10
     dst_parent.mkdir(parents=True, exist_ok=True)
 
     start = time.perf_counter()
-    limit_bps = max(0.0, float(os.getenv('ASP_IMPORT_BWLIMIT_MBPS', max_mbps)) * 1024 * 1024)
+    limit_bps = max(0.0, float(COPY_LIMIT_MBPS) * 1024 * 1024)
 
     existing = 0
     if dst.exists():
@@ -336,7 +294,7 @@ def _copy_file_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 10
             pass
 
 
-def copytree_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 1024.0):
+def copytree_resumable_throttled(src: Path, dst: Path):
     src = Path(src)
     dst = Path(dst)
     if not src.exists():
@@ -352,7 +310,7 @@ def copytree_resumable_throttled(src: Path, dst: Path, *, max_mbps: float = 1024
                 continue
             dp = (dst / rel / name)
             try:
-                _copy_file_resumable_throttled(sp, dp, max_mbps=max_mbps)
+                _copy_file_resumable_throttled(sp, dp)
             except Exception as e:
                 logger.error(f"复制文件失败: {sp} -> {dp}：{e}")
 
@@ -407,7 +365,7 @@ def check_port(port: int) -> bool:
         try:
             s.bind(('0.0.0.0', port))
             return True
-        except socket.error as e:
+        except socket.error:
             return False
 
 
