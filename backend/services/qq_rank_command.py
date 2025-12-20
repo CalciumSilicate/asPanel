@@ -217,6 +217,95 @@ def _trend_series_7d(
     return out
 
 
+def _metric_total_rank_for_player(
+    db: Session,
+    *,
+    player_uuid: str,
+    metrics: List[str],
+    server_ids: List[int],
+    at_iso: str,
+    namespace: str = stats_service.DEFAULT_NAMESPACE,
+) -> Optional[Tuple[int, int]]:
+    player_uuid = (player_uuid or "").strip()
+    if not player_uuid:
+        return None
+
+    # 归一/过滤指标，保持与 stats_service.leaderboard_total 一致
+    normed: List[str] = []
+    for m in metrics:
+        nm = stats_service._normalize_metric(m)  # type: ignore[attr-defined]
+        try:
+            cat, item = nm.split(".", 1)
+            normed.append(f"{cat}.{item}")
+        except Exception:
+            continue
+    allowed = stats_service._filter_metrics(normed, namespace=namespace)  # type: ignore[attr-defined]
+    if not allowed:
+        return None
+
+    metric_pairs = stats_service._normalize_metrics(allowed, namespace)  # type: ignore[attr-defined]
+    metric_ids = stats_service._resolve_metric_ids(db, metric_pairs)  # type: ignore[attr-defined]
+    if not metric_ids:
+        return None
+
+    player_id = db.scalar(select(models.Player.id).where(models.Player.uuid == player_uuid))
+    if player_id is None:
+        return None
+    player_id = int(player_id)
+
+    at_ts = stats_service._parse_iso(at_iso)  # type: ignore[attr-defined]
+    if at_ts is None:
+        return None
+
+    latest = (
+        select(
+            models.PlayerMetrics.server_id.label("server_id"),
+            models.PlayerMetrics.player_id.label("player_id"),
+            models.PlayerMetrics.metric_id.label("metric_id"),
+            func.max(models.PlayerMetrics.ts).label("ts"),
+        )
+        .where(
+            models.PlayerMetrics.metric_id.in_(metric_ids),
+            models.PlayerMetrics.ts <= int(at_ts),
+        )
+        .group_by(models.PlayerMetrics.server_id, models.PlayerMetrics.player_id, models.PlayerMetrics.metric_id)
+    )
+    if server_ids:
+        latest = latest.where(models.PlayerMetrics.server_id.in_(server_ids))
+    latest = latest.subquery("latest")
+
+    agg_values = (
+        select(
+            latest.c.player_id.label("player_id"),
+            func.sum(models.PlayerMetrics.total).label("value"),
+        )
+        .select_from(latest)
+        .join(
+            models.PlayerMetrics,
+            (models.PlayerMetrics.server_id == latest.c.server_id)
+            & (models.PlayerMetrics.player_id == latest.c.player_id)
+            & (models.PlayerMetrics.metric_id == latest.c.metric_id)
+            & (models.PlayerMetrics.ts == latest.c.ts),
+        )
+        .group_by(latest.c.player_id)
+    ).subquery("agg_values")
+
+    user_val = db.scalar(select(agg_values.c.value).where(agg_values.c.player_id == player_id))
+    if user_val is None:
+        return None
+    try:
+        user_val_i = int(user_val or 0)
+    except Exception:
+        user_val_i = 0
+
+    higher = db.scalar(select(func.count()).select_from(agg_values).where(agg_values.c.value > user_val_i))
+    try:
+        higher_i = int(higher or 0)
+    except Exception:
+        higher_i = 0
+    return (higher_i + 1, user_val_i)
+
+
 def build_metric_rank_image_b64(
     *,
     title: str,
@@ -227,6 +316,8 @@ def build_metric_rank_image_b64(
     scale: float,
     formatter: Callable[[float], str],
     subtitle: Optional[str] = None,
+    pinned_uuid: Optional[str] = None,
+    pinned_name: Optional[str] = None,
 ) -> Tuple[bool, str]:
     try:
         # 先触发一次入库（防止 leaderboard 与趋势使用不同步的数据）
@@ -235,15 +326,21 @@ def build_metric_rank_image_b64(
     except Exception:
         pass
 
-    rows = stats_service.leaderboard_total(metrics=metrics, server_ids=server_ids, limit=max(1, int(limit)))
+    at_iso = datetime.now(timezone.utc).isoformat()
+    rows = stats_service.leaderboard_total(metrics=metrics, at=at_iso, server_ids=server_ids, limit=max(1, int(limit)))
     if not rows:
         return False, "没有查到数据（可能是指标无效，或该服务器暂无统计数据）"
 
     player_uuids: List[str] = [str(r.get("player_uuid") or "") for r in rows if r.get("player_uuid")]
+    pinned_uuid_norm = (pinned_uuid or "").strip()
+    include_pinned = bool(pinned_uuid_norm) and pinned_uuid_norm not in set(player_uuids)
+    all_uuids = list(player_uuids)
+    if include_pinned:
+        all_uuids.append(pinned_uuid_norm)
     with get_db_context() as db:
-        qq_map = _resolve_player_qq_map(db, player_uuids=player_uuids)
+        qq_map = _resolve_player_qq_map(db, player_uuids=all_uuids)
 
-    trend_map = _trend_series_7d(player_uuids=player_uuids, metrics=metrics, server_ids=server_ids, scale=scale)
+    trend_map = _trend_series_7d(player_uuids=all_uuids, metrics=metrics, server_ids=server_ids, scale=scale)
 
     rank_rows: List[RankRow] = []
     for idx, r in enumerate(rows, start=1):
@@ -266,29 +363,91 @@ def build_metric_rank_image_b64(
             )
         )
 
+    pinned_row: Optional[RankRow] = None
+    if include_pinned:
+        with get_db_context() as db:
+            rank_val = _metric_total_rank_for_player(
+                db,
+                player_uuid=pinned_uuid_norm,
+                metrics=metrics,
+                server_ids=server_ids,
+                at_iso=at_iso,
+            )
+            if rank_val is None:
+                pinned_rank = 0
+                raw_val = None
+            else:
+                pinned_rank, raw_val = rank_val
+
+            pname = (pinned_name or "").strip()
+            if not pname:
+                try:
+                    rec = db.query(models.Player).filter(models.Player.uuid == pinned_uuid_norm).first()
+                    pname = str(rec.player_name or "Unknown") if rec else "Unknown"
+                except Exception:
+                    pname = "Unknown"
+
+        qq = qq_map.get(pinned_uuid_norm)
+        big_avatar = _qq_avatar_url(qq) if qq else _mc_avatar_url(pinned_uuid_norm)
+        if raw_val is None:
+            score_text = "暂无数据"
+        else:
+            score_text = formatter(float(int(raw_val)) * float(scale))
+        pinned_row = RankRow(
+            rank=int(pinned_rank or 0),
+            player_name=pname,
+            player_uuid=pinned_uuid_norm,
+            score_text=score_text,
+            avatar_big=big_avatar,
+            avatar_small=_mc_avatar_url(pinned_uuid_norm),
+            trend_values=trend_map.get(pinned_uuid_norm),
+            is_pinned=True,
+        )
+
     img = render_rank_image(
         title=title,
         subtitle=subtitle or description,
         rows=rank_rows,
         show_trend=True,
+        pinned_row=pinned_row,
     )
     return True, _image_to_base64(img)
 
 
-def build_space_rank_image_b64(*, server_ids: List[int], limit: int) -> Tuple[bool, str]:
+def build_space_rank_image_b64(
+    *,
+    server_ids: List[int],
+    limit: int,
+    pinned_uuid: Optional[str] = None,
+    pinned_name: Optional[str] = None,
+) -> Tuple[bool, str]:
+    pinned_uuid_norm = (pinned_uuid or "").strip()
     with get_db_context() as db:
-        q = (
-            select(models.PlayerPosition.player_id, func.max(models.PlayerPosition.y).label("max_y"))
+        maxy = (
+            select(
+                models.PlayerPosition.player_id.label("player_id"),
+                func.max(models.PlayerPosition.y).label("max_y"),
+            )
             .where(models.PlayerPosition.y.isnot(None))
         )
         if server_ids:
-            q = q.where(models.PlayerPosition.server_id.in_(server_ids))
-        q = q.group_by(models.PlayerPosition.player_id).order_by(func.max(models.PlayerPosition.y).desc()).limit(max(1, int(limit)))
-        rows = db.execute(q).all()
+            maxy = maxy.where(models.PlayerPosition.server_id.in_(server_ids))
+        maxy = maxy.group_by(models.PlayerPosition.player_id).subquery("maxy")
+
+        q_top = select(maxy.c.player_id, maxy.c.max_y).order_by(maxy.c.max_y.desc()).limit(max(1, int(limit)))
+        rows = db.execute(q_top).all()
         if not rows:
             return False, "没有查到坐标数据（player_positions）"
 
         player_ids = [int(pid) for pid, _ in rows if pid is not None]
+        pinned_player_id = None
+        if pinned_uuid_norm:
+            pinned_player_id = db.scalar(select(models.Player.id).where(models.Player.uuid == pinned_uuid_norm))
+            if pinned_player_id is not None:
+                pinned_player_id = int(pinned_player_id)
+                if pinned_player_id not in player_ids:
+                    player_ids.append(pinned_player_id)
+
         players = (
             db.query(models.Player.id, models.Player.uuid, models.Player.player_name)
             .filter(models.Player.id.in_(player_ids))
@@ -296,7 +455,40 @@ def build_space_rank_image_b64(*, server_ids: List[int], limit: int) -> Tuple[bo
         )
         pmap = {int(pid): (str(uuid), str(name or "Unknown")) for pid, uuid, name in players}
         uuids = [pmap.get(int(pid), ("", ""))[0] for pid, _ in rows]
-        qq_map = _resolve_player_qq_map(db, player_uuids=uuids)
+        qq_map = _resolve_player_qq_map(db, player_uuids=uuids + ([pinned_uuid_norm] if pinned_uuid_norm else []))
+
+        pinned_row: Optional[RankRow] = None
+        if pinned_uuid_norm and pinned_player_id is not None and pinned_uuid_norm not in set(uuids):
+            pinned_y = db.scalar(select(maxy.c.max_y).where(maxy.c.player_id == pinned_player_id))
+            if pinned_y is None:
+                pinned_rank = 0
+                score_text = "暂无数据"
+            else:
+                try:
+                    pinned_y_f = float(pinned_y or 0.0)
+                except Exception:
+                    pinned_y_f = 0.0
+                higher = db.scalar(select(func.count()).select_from(maxy).where(maxy.c.max_y > pinned_y_f))
+                try:
+                    higher_i = int(higher or 0)
+                except Exception:
+                    higher_i = 0
+                pinned_rank = higher_i + 1
+                score_text = f"{pinned_y_f:.1f}m"
+
+            name = (pinned_name or "").strip() or pmap.get(pinned_player_id, (pinned_uuid_norm, "Unknown"))[1]
+            qq = qq_map.get(pinned_uuid_norm)
+            big_avatar = _qq_avatar_url(qq) if qq else _mc_avatar_url(pinned_uuid_norm)
+            pinned_row = RankRow(
+                rank=int(pinned_rank or 0),
+                player_name=name,
+                player_uuid=pinned_uuid_norm,
+                score_text=score_text,
+                avatar_big=big_avatar,
+                avatar_small=_mc_avatar_url(pinned_uuid_norm),
+                trend_values=None,
+                is_pinned=True,
+            )
 
     rank_rows: List[RankRow] = []
     for idx, (pid, max_y) in enumerate(rows, start=1):
@@ -324,11 +516,18 @@ def build_space_rank_image_b64(*, server_ids: List[int], limit: int) -> Tuple[bo
         subtitle="玩家最高 Y 值（米）",
         rows=rank_rows,
         show_trend=False,
+        pinned_row=pinned_row,
     )
     return True, _image_to_base64(img)
 
 
-def build_last_seen_rank_image_b64(*, server_ids: List[int], limit: int) -> Tuple[bool, str]:
+def build_last_seen_rank_image_b64(
+    *,
+    server_ids: List[int],
+    limit: int,
+    pinned_uuid: Optional[str] = None,
+    pinned_name: Optional[str] = None,
+) -> Tuple[bool, str]:
     tz = get_tz_info()
     now = datetime.now(tz)
     with get_db_context() as db:
@@ -376,6 +575,49 @@ def build_last_seen_rank_image_b64(*, server_ids: List[int], limit: int) -> Tupl
         name_map = {str(u): str(n or "Unknown") for u, n in players}
         qq_map = _resolve_player_qq_map(db, player_uuids=uuids)
 
+        pinned_row: Optional[RankRow] = None
+        pinned_uuid_norm = (pinned_uuid or "").strip()
+        if pinned_uuid_norm and pinned_uuid_norm not in set(uuids):
+            info = last_seen.get(pinned_uuid_norm)
+            if info is None:
+                pinned_rank = 0
+                score_text = "暂无数据"
+                is_online = False
+            else:
+                dt_local, is_online = info
+                higher = 0
+                for _u, (dt2, _on2) in last_seen.items():
+                    if dt2 > dt_local:
+                        higher += 1
+                pinned_rank = higher + 1
+                dt_disp = dt_local.strftime("%Y-%m-%d %H:%M")
+                score_text = f"{dt_disp}（在线）" if is_online else dt_disp
+
+            name = (pinned_name or "").strip()
+            if not name:
+                try:
+                    rec = db.query(models.Player).filter(models.Player.uuid == pinned_uuid_norm).first()
+                    name = str(rec.player_name or "Unknown") if rec else "Unknown"
+                except Exception:
+                    name = "Unknown"
+
+            qq = None
+            try:
+                qq = _resolve_player_qq_map(db, player_uuids=[pinned_uuid_norm]).get(pinned_uuid_norm)
+            except Exception:
+                qq = None
+            big_avatar = _qq_avatar_url(qq) if qq else _mc_avatar_url(pinned_uuid_norm)
+            pinned_row = RankRow(
+                rank=int(pinned_rank or 0),
+                player_name=name,
+                player_uuid=pinned_uuid_norm,
+                score_text=score_text,
+                avatar_big=big_avatar,
+                avatar_small=_mc_avatar_url(pinned_uuid_norm),
+                trend_values=None,
+                is_pinned=True,
+            )
+
     rank_rows: List[RankRow] = []
     for idx, (uuid, (dt_local, is_online)) in enumerate(sorted_items, start=1):
         dt_disp = dt_local.strftime("%Y-%m-%d %H:%M")
@@ -399,5 +641,6 @@ def build_last_seen_rank_image_b64(*, server_ids: List[int], limit: int) -> Tupl
         subtitle="最近一次在线时间（越晚越靠前）",
         rows=rank_rows,
         show_trend=False,
+        pinned_row=pinned_row,
     )
     return True, _image_to_base64(img)
