@@ -3,10 +3,12 @@
 import asyncio
 import json
 import re
+import os
 import httpx
 import base64
 import hashlib
 import mimetypes
+from concurrent.futures import ProcessPoolExecutor
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import FileResponse
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -344,6 +346,71 @@ def _get_rank_settings(group_id: int) -> _RankSettings:
     if not s.server_ids:
         s.server_ids = [1]
     return s
+
+
+_RANK_RENDER_POOL: Optional[ProcessPoolExecutor] = None
+
+try:
+    _rank_concurrency = int((os.getenv("ASPANEL_RANK_RENDER_CONCURRENCY") or "1").strip() or "1")
+except Exception:
+    _rank_concurrency = 1
+_rank_concurrency = max(1, min(_rank_concurrency, 4))
+_RANK_RENDER_SEM = asyncio.Semaphore(_rank_concurrency)
+
+
+def _get_rank_render_pool() -> ProcessPoolExecutor:
+    global _RANK_RENDER_POOL
+    if _RANK_RENDER_POOL is not None:
+        return _RANK_RENDER_POOL
+    try:
+        max_workers = int((os.getenv("ASPANEL_RANK_RENDER_WORKERS") or str(_rank_concurrency)).strip() or str(_rank_concurrency))
+    except Exception:
+        max_workers = _rank_concurrency
+    max_workers = max(1, min(max_workers, 4))
+    _RANK_RENDER_POOL = ProcessPoolExecutor(max_workers=max_workers)
+    return _RANK_RENDER_POOL
+
+
+async def _render_rank_and_send(
+    *,
+    qq_group: str,
+    args: List[str],
+    server_ids: List[int],
+    limit: int,
+    pinned_uuid: Optional[str],
+    pinned_name: Optional[str],
+) -> None:
+    # 说明：排行榜绘制包含大量 PIL/字体/头像下载，CPU+IO 密集；使用进程池避免 GIL 卡死主事件循环。
+    acquired = False
+    try:
+        await _RANK_RENDER_SEM.acquire()
+        acquired = True
+        loop = asyncio.get_running_loop()
+        success, payload = await loop.run_in_executor(
+            _get_rank_render_pool(),
+            qq_rank_command.build_rank_image_from_args_b64,
+            list(args or []),
+            list(server_ids or []),
+            int(limit),
+            pinned_uuid,
+            pinned_name,
+        )
+        if success:
+            await _send_group_image(qq_group, payload)
+        else:
+            await _send_group_text(qq_group, payload)
+    except Exception:
+        logger.opt(exception=True).warning("异步生成榜单失败")
+        try:
+            await _send_group_text(qq_group, "生成榜单失败，请稍后重试")
+        except Exception:
+            pass
+    finally:
+        if acquired:
+            try:
+                _RANK_RENDER_SEM.release()
+            except Exception:
+                pass
 
 
 @dataclass
@@ -785,67 +852,19 @@ async def _cmd_rank(group_id: int, qq_group: str, args: List[str], *, sender_qq:
             pinned_uuid = None
             pinned_name = None
 
-    # 生成榜单（图片）
-    query = (args[0] or "").strip()
-    board = qq_rank_command.resolve_board(query) or qq_rank_command.resolve_board(query + "榜")
-
-    loop = asyncio.get_running_loop()
-
-    def _build() -> Tuple[bool, str]:
-        try:
-            if board and board.name == "航天榜":
-                return qq_rank_command.build_space_rank_image_b64(
-                    server_ids=settings.server_ids,
-                    limit=settings.limit,
-                    pinned_uuid=pinned_uuid,
-                    pinned_name=pinned_name,
-                )
-            if board and board.name == "最后在线榜":
-                return qq_rank_command.build_last_seen_rank_image_b64(
-                    server_ids=settings.server_ids,
-                    limit=settings.limit,
-                    pinned_uuid=pinned_uuid,
-                    pinned_name=pinned_name,
-                )
-            if board and board.metrics:
-                return qq_rank_command.build_metric_rank_image_b64(
-                    title=board.name,
-                    description=board.description,
-                    metrics=board.metrics,
-                    server_ids=settings.server_ids,
-                    limit=settings.limit,
-                    scale=board.scale,
-                    formatter=board.formatter,
-                    pinned_uuid=pinned_uuid,
-                    pinned_name=pinned_name,
-                )
-
-            # 自定义指标榜
-            metrics = [t for t in args if t and t.strip()]
-            if not metrics:
-                return False, "用法：##rank <榜单名> 或 ##rank <metric1> [metric2] ..."
-            subtitle = " + ".join(metrics)
-            return qq_rank_command.build_metric_rank_image_b64(
-                title="自定义指标榜",
-                description="自定义指标总量榜",
-                subtitle=subtitle,
-                metrics=metrics,
-                server_ids=settings.server_ids,
-                limit=settings.limit,
-                scale=1.0,
-                formatter=lambda x: f"{int(x):,}",
-                pinned_uuid=pinned_uuid,
-                pinned_name=pinned_name,
-            )
-        except Exception:
-            logger.opt(exception=True).warning("生成榜单失败")
-            return False, "生成榜单失败，请稍后重试"
-
-    success, payload = await loop.run_in_executor(None, _build)
-    if success:
-        await _send_group_image(qq_group, payload)
-    else:
-        await _send_group_text(qq_group, payload)
+    # 生成榜单（图片）：先提示，再后台绘制，避免阻塞后端
+    await _send_group_text(qq_group, "排行榜绘制中，请稍后")
+    asyncio.create_task(
+        _render_rank_and_send(
+            qq_group=qq_group,
+            args=list(args),
+            server_ids=list(settings.server_ids),
+            limit=int(settings.limit),
+            pinned_uuid=pinned_uuid,
+            pinned_name=pinned_name,
+        )
+    )
+    return
 
 
 async def _cmd_show_players(group_id: int, qq_group: str) -> None:
