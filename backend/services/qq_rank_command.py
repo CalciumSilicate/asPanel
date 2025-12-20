@@ -1,0 +1,403 @@
+import base64
+import io
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+import functools
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from backend.core import crud, models
+from backend.core.database import get_db_context
+from backend.core.logger import logger
+from backend.core.utils import get_tz_info
+from backend.services import stats_service
+from backend.services.qq_rank_image import RankRow, render_rank_image
+
+
+def _to_local_dt(dt: datetime) -> datetime:
+    tz = get_tz_info()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(tz)
+
+
+def _time_formatter(hours: float) -> str:
+    try:
+        total_minutes = int(round(float(hours) * 60))
+    except Exception:
+        return "0"
+    h = total_minutes // 60
+    m = total_minutes % 60
+    parts: List[str] = []
+    if h > 0:
+        parts.append(f"{h:,}h")
+    if m > 0:
+        parts.append(f"{m}m")
+    if h == 0 and m == 0:
+        parts.append("<1m")
+    return "".join(parts) if parts else "0"
+
+
+def _distance_formatter(km: float) -> str:
+    try:
+        km_f = float(km)
+        abs_km = abs(km_f)
+    except Exception:
+        return "0"
+    if abs_km >= 1_000:
+        s = f"{km_f:,.1f}".rstrip("0").rstrip(".")
+        return f"{s}km"
+    if abs_km >= 1:
+        s = f"{km_f:,.2f}".rstrip("0").rstrip(".")
+        return f"{s}km"
+    meters = km_f * 1000
+    return f"{meters:,.2f}".rstrip("0").rstrip(".") + "m"
+
+
+def _fmt_int(val: object) -> str:
+    try:
+        return f"{int(val):,}"
+    except Exception:
+        return str(val)
+
+
+def _image_to_base64(img) -> str:
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def _mc_avatar_url(uuid_str: str, size: int = 128) -> str:
+    uuid_str = (uuid_str or "").strip()
+    return f"https://cravatar.eu/helmavatar/{uuid_str}/{int(size)}.png"
+
+
+def _qq_avatar_url(qq: str, size: int = 100) -> str:
+    qq = (qq or "").strip()
+    return f"http://q1.qlogo.cn/g?b=qq&nk={qq}&s={int(size)}"
+
+
+@dataclass(frozen=True)
+class BuiltinBoard:
+    name: str
+    description: str
+    metrics: List[str]
+    scale: float
+    formatter: Callable[[float], str]
+
+
+@functools.lru_cache(maxsize=1)
+def _builtin_boards() -> Dict[str, BuiltinBoard]:
+    # 复用 qq_stats_command 中的内置 metric 列表，保证含义一致
+    from backend.services.qq_stats_command import _BREAK_METRICS, _WALK_METRICS, _VEHICLE_METRICS
+
+    move_metrics = ["custom.aviate_one_cm", "custom.ender_pearl_one_cm", *_WALK_METRICS, *_VEHICLE_METRICS]
+
+    boards = [
+        BuiltinBoard("上线榜", "统计上线次数（leave_game）", ["custom.leave_game"], 1.0, lambda x: _fmt_int(x)),
+        BuiltinBoard("在线榜", "统计在线时长（play_time / play_one_minute）", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, _time_formatter),
+        BuiltinBoard("挖掘榜", "统计挖掘方块（按工具使用次数汇总）", list(_BREAK_METRICS), 1.0, lambda x: _fmt_int(x)),
+        BuiltinBoard("击杀榜", "统计击杀玩家数（player_kills）", ["custom.player_kills"], 1.0, lambda x: _fmt_int(x)),
+        BuiltinBoard("被击杀榜", "统计被玩家击杀数（killed_by.player）", ["killed_by.player"], 1.0, lambda x: _fmt_int(x)),
+        BuiltinBoard("死亡榜", "统计死亡次数（deaths）", ["custom.deaths"], 1.0, lambda x: _fmt_int(x)),
+        BuiltinBoard("鞘翅榜", "统计鞘翅飞行距离", ["custom.aviate_one_cm"], 0.00001, _distance_formatter),
+        BuiltinBoard("珍珠榜", "统计末影珍珠传送距离", ["custom.ender_pearl_one_cm"], 0.00001, _distance_formatter),
+        BuiltinBoard("步行榜", "统计步行/游泳等距离", list(_WALK_METRICS), 0.00001, _distance_formatter),
+        BuiltinBoard("移动榜", "统计移动距离（含鞘翅/珍珠/步行/交通工具）", move_metrics, 0.00001, _distance_formatter),
+        BuiltinBoard("烟花榜", "统计使用烟花次数", ["custom.firework_boost", "used.firework_rocket"], 1.0, lambda x: _fmt_int(x)),
+        BuiltinBoard("不死图腾榜", "统计消耗不死图腾次数", ["used.totem_of_undying"], 1.0, lambda x: _fmt_int(x)),
+        BuiltinBoard("基岩榜", "统计破基岩次数", ["custom.break_bedrock"], 1.0, lambda x: _fmt_int(x)),
+    ]
+    out: Dict[str, BuiltinBoard] = {}
+    for b in boards:
+        out[b.name] = b
+        if b.name.endswith("榜"):
+            out[b.name[:-1]] = b
+    # 自定义榜单名称也允许省略“榜”
+    out["航天"] = BuiltinBoard("航天榜", "玩家最高 Y 值（米）", [], 1.0, lambda x: f"{float(x):.1f}m")
+    out["航天榜"] = out["航天"]
+    out["最后在线"] = BuiltinBoard("最后在线榜", "最近一次在线时间（越晚越靠前）", [], 1.0, lambda x: str(x))
+    out["最后在线榜"] = out["最后在线"]
+    return out
+
+
+def list_board_names() -> List[str]:
+    names = [
+        "上线榜", "在线榜", "挖掘榜", "击杀榜", "被击杀榜", "死亡榜", "鞘翅榜", "珍珠榜", "步行榜", "移动榜", "烟花榜", "不死图腾榜", "基岩榜",
+        "航天榜", "最后在线榜",
+    ]
+    return names
+
+
+def resolve_board(query: str) -> Optional[BuiltinBoard]:
+    q = (query or "").strip()
+    if not q:
+        return None
+    return _builtin_boards().get(q)
+
+
+def _resolve_player_qq_map(db: Session, *, player_uuids: Sequence[str]) -> Dict[str, Optional[str]]:
+    uuids = [u for u in player_uuids if u]
+    if not uuids:
+        return {}
+    players = db.query(models.Player.id, models.Player.uuid).filter(models.Player.uuid.in_(uuids)).all()
+    pid_by_uuid = {uuid: int(pid) for pid, uuid in players}
+    pids = list(pid_by_uuid.values())
+    if not pids:
+        return {}
+    users = (
+        db.query(models.User.bound_player_id, models.User.qq)
+        .filter(models.User.bound_player_id.in_(pids))
+        .all()
+    )
+    qq_by_pid: Dict[int, Optional[str]] = {}
+    for pid, qq in users:
+        if pid is None or not qq:
+            continue
+        qq_by_pid.setdefault(int(pid), str(qq))
+    return {uuid: qq_by_pid.get(pid_by_uuid.get(uuid, 0)) for uuid in uuids}
+
+
+def _daily_boundaries_ts(*, days: int = 7) -> Tuple[datetime, List[int], datetime]:
+    tz = get_tz_info()
+    now = datetime.now(tz)
+    start_day = (now - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    boundaries: List[int] = []
+    cur = start_day
+    for _ in range(days):
+        cur = cur + timedelta(days=1)
+        boundaries.append(int(cur.timestamp()))
+    return (start_day, boundaries, now)
+
+
+def _trend_series_7d(
+    *,
+    player_uuids: List[str],
+    metrics: List[str],
+    server_ids: List[int],
+    scale: float,
+) -> Dict[str, List[float]]:
+    if not player_uuids:
+        return {}
+    start_dt, boundaries, now_dt = _daily_boundaries_ts(days=7)
+    try:
+        series_map = stats_service.get_delta_series(
+            player_uuids=player_uuids,
+            metrics=metrics,
+            granularity="24h",
+            start=start_dt.isoformat(),
+            end=now_dt.isoformat(),
+            server_ids=server_ids,
+        )
+    except Exception:
+        logger.opt(exception=True).warning("获取趋势数据失败")
+        series_map = {}
+    out: Dict[str, List[float]] = {}
+    for uid in player_uuids:
+        items = series_map.get(uid, []) or []
+        by_ts: Dict[int, int] = {}
+        for ts, v in items:
+            try:
+                by_ts[int(ts)] = int(v)
+            except Exception:
+                continue
+        vals: List[float] = []
+        for b in boundaries:
+            raw = by_ts.get(int(b), 0)
+            try:
+                raw_i = int(raw)
+            except Exception:
+                raw_i = 0
+            if raw_i < 0:
+                raw_i = 0
+            vals.append(float(raw_i) * float(scale))
+        out[uid] = vals
+    return out
+
+
+def build_metric_rank_image_b64(
+    *,
+    title: str,
+    description: str,
+    metrics: List[str],
+    server_ids: List[int],
+    limit: int,
+    scale: float,
+    formatter: Callable[[float], str],
+    subtitle: Optional[str] = None,
+) -> Tuple[bool, str]:
+    try:
+        # 先触发一次入库（防止 leaderboard 与趋势使用不同步的数据）
+        discovered = stats_service.discover_metrics_from_all_servers()
+        stats_service._ingest_for_query("24h", server_ids, discovered)  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+    rows = stats_service.leaderboard_total(metrics=metrics, server_ids=server_ids, limit=max(1, int(limit)))
+    if not rows:
+        return False, "没有查到数据（可能是指标无效，或该服务器暂无统计数据）"
+
+    player_uuids: List[str] = [str(r.get("player_uuid") or "") for r in rows if r.get("player_uuid")]
+    with get_db_context() as db:
+        qq_map = _resolve_player_qq_map(db, player_uuids=player_uuids)
+
+    trend_map = _trend_series_7d(player_uuids=player_uuids, metrics=metrics, server_ids=server_ids, scale=scale)
+
+    rank_rows: List[RankRow] = []
+    for idx, r in enumerate(rows, start=1):
+        puid = str(r.get("player_uuid") or "")
+        pname = str(r.get("player_name") or "Unknown")
+        raw_val = int(r.get("value") or 0)
+        display_val = float(raw_val) * float(scale)
+        score_text = formatter(display_val)
+        qq = qq_map.get(puid)
+        big_avatar = _qq_avatar_url(qq) if qq else _mc_avatar_url(puid)
+        rank_rows.append(
+            RankRow(
+                rank=idx,
+                player_name=pname,
+                player_uuid=puid,
+                score_text=score_text,
+                avatar_big=big_avatar,
+                avatar_small=_mc_avatar_url(puid),
+                trend_values=trend_map.get(puid),
+            )
+        )
+
+    img = render_rank_image(
+        title=title,
+        subtitle=subtitle or description,
+        rows=rank_rows,
+        show_trend=True,
+    )
+    return True, _image_to_base64(img)
+
+
+def build_space_rank_image_b64(*, server_ids: List[int], limit: int) -> Tuple[bool, str]:
+    with get_db_context() as db:
+        q = (
+            select(models.PlayerPosition.player_id, func.max(models.PlayerPosition.y).label("max_y"))
+            .where(models.PlayerPosition.y.isnot(None))
+        )
+        if server_ids:
+            q = q.where(models.PlayerPosition.server_id.in_(server_ids))
+        q = q.group_by(models.PlayerPosition.player_id).order_by(func.max(models.PlayerPosition.y).desc()).limit(max(1, int(limit)))
+        rows = db.execute(q).all()
+        if not rows:
+            return False, "没有查到坐标数据（player_positions）"
+
+        player_ids = [int(pid) for pid, _ in rows if pid is not None]
+        players = (
+            db.query(models.Player.id, models.Player.uuid, models.Player.player_name)
+            .filter(models.Player.id.in_(player_ids))
+            .all()
+        )
+        pmap = {int(pid): (str(uuid), str(name or "Unknown")) for pid, uuid, name in players}
+        uuids = [pmap.get(int(pid), ("", ""))[0] for pid, _ in rows]
+        qq_map = _resolve_player_qq_map(db, player_uuids=uuids)
+
+    rank_rows: List[RankRow] = []
+    for idx, (pid, max_y) in enumerate(rows, start=1):
+        uuid, name = pmap.get(int(pid), ("", "Unknown"))
+        try:
+            y_val = float(max_y or 0.0)
+        except Exception:
+            y_val = 0.0
+        qq = qq_map.get(uuid)
+        big_avatar = _qq_avatar_url(qq) if qq else _mc_avatar_url(uuid)
+        rank_rows.append(
+            RankRow(
+                rank=idx,
+                player_name=name,
+                player_uuid=uuid,
+                score_text=f"{y_val:.1f}m",
+                avatar_big=big_avatar,
+                avatar_small=_mc_avatar_url(uuid),
+                trend_values=None,
+            )
+        )
+
+    img = render_rank_image(
+        title="航天榜",
+        subtitle="玩家最高 Y 值（米）",
+        rows=rank_rows,
+        show_trend=False,
+    )
+    return True, _image_to_base64(img)
+
+
+def build_last_seen_rank_image_b64(*, server_ids: List[int], limit: int) -> Tuple[bool, str]:
+    tz = get_tz_info()
+    now = datetime.now(tz)
+    with get_db_context() as db:
+        # 最近离线时间
+        q_logout = (
+            select(models.PlayerSession.player_uuid, func.max(models.PlayerSession.logout_time).label("t"))
+            .where(models.PlayerSession.logout_time.isnot(None))
+        )
+        if server_ids:
+            q_logout = q_logout.where(models.PlayerSession.server_id.in_(server_ids))
+        q_logout = q_logout.group_by(models.PlayerSession.player_uuid)
+        logout_rows = db.execute(q_logout).all()
+
+        # 当前在线（logout_time 为空）
+        q_online = (
+            select(models.PlayerSession.player_uuid, func.max(models.PlayerSession.login_time).label("t"))
+            .where(models.PlayerSession.logout_time.is_(None))
+        )
+        if server_ids:
+            q_online = q_online.where(models.PlayerSession.server_id.in_(server_ids))
+        q_online = q_online.group_by(models.PlayerSession.player_uuid)
+        online_rows = db.execute(q_online).all()
+
+        last_seen: Dict[str, Tuple[datetime, bool]] = {}
+        for uuid, t in logout_rows:
+            if not uuid or not t:
+                continue
+            last_seen[str(uuid)] = (_to_local_dt(t), False)
+        for uuid, _t in online_rows:
+            if not uuid:
+                continue
+            # 在线玩家：排序值使用 now，展示标注在线
+            last_seen[str(uuid)] = (now, True)
+
+        if not last_seen:
+            return False, "没有查到会话数据（player_sessions）"
+
+        sorted_items = sorted(last_seen.items(), key=lambda kv: kv[1][0], reverse=True)[: max(1, int(limit))]
+        uuids = [u for u, _ in sorted_items]
+        players = (
+            db.query(models.Player.uuid, models.Player.player_name)
+            .filter(models.Player.uuid.in_(uuids))
+            .all()
+        )
+        name_map = {str(u): str(n or "Unknown") for u, n in players}
+        qq_map = _resolve_player_qq_map(db, player_uuids=uuids)
+
+    rank_rows: List[RankRow] = []
+    for idx, (uuid, (dt_local, is_online)) in enumerate(sorted_items, start=1):
+        dt_disp = dt_local.strftime("%Y-%m-%d %H:%M")
+        score_text = f"{dt_disp}（在线）" if is_online else dt_disp
+        qq = qq_map.get(uuid)
+        big_avatar = _qq_avatar_url(qq) if qq else _mc_avatar_url(uuid)
+        rank_rows.append(
+            RankRow(
+                rank=idx,
+                player_name=name_map.get(uuid, "Unknown"),
+                player_uuid=uuid,
+                score_text=score_text,
+                avatar_big=big_avatar,
+                avatar_small=_mc_avatar_url(uuid),
+                trend_values=None,
+            )
+        )
+
+    img = render_rank_image(
+        title="最后在线榜",
+        subtitle="最近一次在线时间（越晚越靠前）",
+        rows=rank_rows,
+        show_trend=False,
+    )
+    return True, _image_to_base64(img)

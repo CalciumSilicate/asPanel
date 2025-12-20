@@ -21,7 +21,7 @@ from backend.core.database import get_db_context
 from backend.core.logger import logger
 from backend.core.ws import sio
 from backend.core.dependencies import mcdr_manager
-from backend.services import qq_stats_command, qq_player_list_command
+from backend.services import qq_stats_command, qq_player_list_command, qq_rank_command
 
 router = APIRouter()
 
@@ -316,6 +316,34 @@ _GROUP_META: Dict[int, Dict[str, Any]] = {}
 _SERVER_TO_GROUPS: Dict[str, List[int]] = {}
 _GROUP_PLAYERS: Dict[int, Set[str]] = {}
 _PLAYER_EVENT_SUPPRESS_WINDOW = 1.0
+
+
+@dataclass
+class _RankSettings:
+    limit: int = 15
+    server_ids: List[int] = field(default_factory=lambda: [1])
+
+
+_RANK_SETTINGS: Dict[int, _RankSettings] = {}
+
+
+def _get_rank_settings(group_id: int) -> _RankSettings:
+    s = _RANK_SETTINGS.get(group_id)
+    if s is None:
+        s = _RankSettings()
+        _RANK_SETTINGS[group_id] = s
+    # 兜底修正
+    try:
+        s.limit = max(1, int(s.limit))
+    except Exception:
+        s.limit = 15
+    try:
+        s.server_ids = [int(x) for x in (s.server_ids or []) if int(x) > 0]
+    except Exception:
+        s.server_ids = [1]
+    if not s.server_ids:
+        s.server_ids = [1]
+    return s
 
 
 @dataclass
@@ -617,6 +645,9 @@ async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, tex
     if text.startswith("##"):
         body = text[2:].strip()
         tokens = body.split()
+        if tokens and tokens[0].lower() == "rank":
+            await _cmd_rank(group_id, qq_group, tokens[1:])
+            return True
         online_map = _PLAYERS_PROVIDER() or {}
         success, payload = qq_stats_command.build_report_from_command(
             tokens,
@@ -646,6 +677,145 @@ async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, tex
     elif cmd == "^":
         await _send_group_text(qq_group, "用法：^ <玩家名> [reason]")
     return True
+
+
+async def _cmd_rank(group_id: int, qq_group: str, args: List[str]) -> None:
+    settings = _get_rank_settings(group_id)
+
+    if not args:
+        args = ["挖掘榜"]
+
+    sub = (args[0] or "").strip().lower()
+
+    if sub in {"help", "h", "?"}:
+        names = "，".join(qq_rank_command.list_board_names())
+        msg = (
+            "##rank 指令帮助：\n"
+            "- ##rank : 默认榜单（挖掘榜）\n"
+            "- ##rank list : 查看有哪些榜单\n"
+            "- ##rank <榜单名> : 例如 ##rank 上线榜（可不带“榜”字）\n"
+            "- ##rank <metric1> [metric2] ... : 自定义指标总量榜\n"
+            "- ##rank limit <amount> : 设置榜单人数上限（默认 15）\n"
+            "- ##rank server <server_id1> [server_id2] ... : 设置要查看的服务器ID（默认 1）\n"
+            f"内置/自定义榜单：{names}\n"
+            f"当前设置：server={settings.server_ids} limit={settings.limit}"
+        )
+        await _send_group_text(qq_group, msg)
+        return
+
+    if sub == "list":
+        names = "，".join(qq_rank_command.list_board_names())
+        msg = (
+            f"可用榜单：{names}\n"
+            "也支持自定义指标：##rank <metric1> [metric2] ...\n"
+            f"当前设置：server={settings.server_ids} limit={settings.limit}"
+        )
+        await _send_group_text(qq_group, msg)
+        return
+
+    if sub == "limit":
+        if len(args) < 2:
+            await _send_group_text(qq_group, f"当前 limit={settings.limit}（用法：##rank limit <amount>）")
+            return
+        try:
+            n = int(args[1])
+        except Exception:
+            await _send_group_text(qq_group, "limit 必须是整数")
+            return
+        if n < 1 or n > 100:
+            await _send_group_text(qq_group, "limit 范围：1~100")
+            return
+        settings.limit = n
+        await _send_group_text(qq_group, f"已设置 limit={settings.limit}")
+        return
+
+    if sub == "server":
+        if len(args) < 2:
+            await _send_group_text(qq_group, f"当前 server={settings.server_ids}（用法：##rank server <id...>）")
+            return
+        raw_ids = args[1:]
+        ids: List[int] = []
+        for t in raw_ids:
+            t = (t or "").strip()
+            if not t or not t.lstrip("-").isdigit():
+                await _send_group_text(qq_group, f"非法 server_id：{t}")
+                return
+            try:
+                sid = int(t)
+            except Exception:
+                await _send_group_text(qq_group, f"非法 server_id：{t}")
+                return
+            if sid <= 0:
+                await _send_group_text(qq_group, f"非法 server_id：{t}")
+                return
+            if sid not in ids:
+                ids.append(sid)
+
+        # 校验 server_id 是否存在
+        with get_db_context() as db:
+            missing: List[int] = []
+            names: List[str] = []
+            for sid in ids:
+                srv = crud.get_server_by_id(db, sid)
+                if not srv:
+                    missing.append(sid)
+                else:
+                    names.append(f"{sid}:{srv.name}")
+        if missing:
+            await _send_group_text(qq_group, f"不存在的 server_id：{missing}")
+            return
+
+        settings.server_ids = ids
+        await _send_group_text(qq_group, f"已设置 server={settings.server_ids}（{', '.join(names)}）")
+        return
+
+    # 生成榜单（图片）
+    query = (args[0] or "").strip()
+    board = qq_rank_command.resolve_board(query) or qq_rank_command.resolve_board(query + "榜")
+
+    loop = asyncio.get_running_loop()
+
+    def _build() -> Tuple[bool, str]:
+        try:
+            if board and board.name == "航天榜":
+                return qq_rank_command.build_space_rank_image_b64(server_ids=settings.server_ids, limit=settings.limit)
+            if board and board.name == "最后在线榜":
+                return qq_rank_command.build_last_seen_rank_image_b64(server_ids=settings.server_ids, limit=settings.limit)
+            if board and board.metrics:
+                return qq_rank_command.build_metric_rank_image_b64(
+                    title=board.name,
+                    description=board.description,
+                    metrics=board.metrics,
+                    server_ids=settings.server_ids,
+                    limit=settings.limit,
+                    scale=board.scale,
+                    formatter=board.formatter,
+                )
+
+            # 自定义指标榜
+            metrics = [t for t in args if t and t.strip()]
+            if not metrics:
+                return False, "用法：##rank <榜单名> 或 ##rank <metric1> [metric2] ..."
+            subtitle = " + ".join(metrics)
+            return qq_rank_command.build_metric_rank_image_b64(
+                title="自定义指标榜",
+                description="自定义指标总量榜",
+                subtitle=subtitle,
+                metrics=metrics,
+                server_ids=settings.server_ids,
+                limit=settings.limit,
+                scale=1.0,
+                formatter=lambda x: f"{int(x):,}",
+            )
+        except Exception:
+            logger.opt(exception=True).warning("生成榜单失败")
+            return False, "生成榜单失败，请稍后重试"
+
+    success, payload = await loop.run_in_executor(None, _build)
+    if success:
+        await _send_group_image(qq_group, payload)
+    else:
+        await _send_group_text(qq_group, payload)
 
 
 async def _cmd_show_players(group_id: int, qq_group: str) -> None:
