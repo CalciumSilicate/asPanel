@@ -2,131 +2,98 @@
   <div class="archive-page">
     <div class="left-wrap">
       <div class="left-panel">
-        <!-- 顶栏操作区：移除“上传新存档”，仅保留批量删除 -->
-        <el-card shadow="never" class="header-card">
-          <div class="flex items-center justify-between">
-            <span>管理您的服务器存档和上传的存档</span>
-            <span>
-              <el-button-group>
-                <el-button
-                    type="danger"
-                    :icon="Delete"
-                    @click="handleBulkDelete"
-                    :disabled="selectedIds.length === 0"
-                >
-                  批量删除 ({{ selectedIds.length }})
-                </el-button>
-              </el-button-group>
-            </span>
+        <el-card shadow="never" class="toolbar-card">
+          <div class="toolbar">
+            <div class="toolbar-text">
+              <div class="toolbar-title">存档管理</div>
+              <div class="toolbar-subtitle">管理您的服务器存档与上传存档</div>
+            </div>
+            <div class="toolbar-actions">
+              <el-input
+                v-model="searchKeyword"
+                class="toolbar-search"
+                placeholder="搜索存档名称 / 版本"
+                clearable
+                :prefix-icon="Search"
+              />
+              <el-button :icon="Refresh" @click="fetchArchives" :loading="loading">刷新</el-button>
+              <el-button
+                type="danger"
+                :icon="Delete"
+                @click="handleBulkDelete"
+                :disabled="selectedIds.length === 0"
+              >
+                删除已选 ({{ selectedIds.length }})
+              </el-button>
+              <el-button v-if="selectedIds.length > 0" text @click="clearSelection">清空选择</el-button>
+            </div>
           </div>
         </el-card>
 
-    <!-- 进行中的任务 (无变化) -->
-        <el-card shadow="never" v-if="processingTasks.length > 0">
-      <template #header>
-        <div class="card-header">
-          <span>进行中的任务</span>
-        </div>
-      </template>
-      <div class="processing-tasks-list">
-        <div v-for="task in processingTasks" :key="task.id" class="task-item">
-          <div class="task-info">
-            <span class="task-message">
-              {{ task.status === 'FAILED' ? task.error : (task.message || `任务 (ID: ${task.id}) 正在排队...`) }}
-            </span>
-            <span class="task-status">{{ task.status }}</span>
+        <el-card shadow="never" class="section-card archives-card" v-loading="loading">
+          <template #header>
+            <div class="section-header">
+              <div class="card-header-left">
+                <span>所有存档</span>
+                <el-tag size="small" effect="plain">{{ filteredArchives.length }}</el-tag>
+              </div>
+              <div class="section-actions">
+                <el-button type="primary" :icon="FolderAdd" @click="openCreateFromServerDialog">从服务器创建</el-button>
+                <el-button type="primary" :icon="Upload" @click="uploadDialogVisible = true">上传新存档</el-button>
+              </div>
+            </div>
+          </template>
+
+          <div v-if="filteredArchives.length === 0" class="empty-state">
+            <el-empty description="暂无存档" />
           </div>
-          <el-progress
-              :percentage="task.progress"
-              :status="task.status === 'FAILED' ? 'exception' : (task.status === 'SUCCESS' ? 'success' : '')"
-              :stroke-width="10"
-              striped
-              striped-flow
-          />
-        </div>
-      </div>
+          <div v-else class="archive-grid">
+            <el-card
+              v-for="a in filteredArchives"
+              :key="a.id"
+              shadow="hover"
+              class="archive-item-card"
+              :class="{ selected: isSelected(a.id) }"
+              :body-style="{ padding: '12px 12px 44px' }"
+              @click="toggleSelected(a.id)"
+            >
+              <div class="archive-item-top">
+                <div class="archive-name-row">
+                  <el-icon class="archive-item-icon">
+                    <Folder v-if="a.type === 'SERVER'" />
+                    <Document v-else />
+                  </el-icon>
+                  <div class="archive-name" :title="a.name">{{ a.name }}</div>
+                </div>
+                <el-checkbox
+                  :model-value="isSelected(a.id)"
+                  @change="(val) => setSelected(a.id, val)"
+                  @click.stop
+                />
+              </div>
+
+              <div class="archive-item-meta">
+                <div class="archive-tags">
+                  <el-tag size="small" effect="plain">{{ a.type === 'SERVER' ? '服务器备份' : '上传' }}</el-tag>
+                  <el-tag v-if="a.mc_version" size="small">{{ a.mc_version }}</el-tag>
+                </div>
+                <div class="archive-time">{{ formatDateTime(a.created_at) }}</div>
+              </div>
+
+              <div class="archive-item-actions" @click.stop>
+                <el-tooltip content="恢复到服务器" placement="top">
+                  <el-button type="success" :icon="Upload" circle @click.stop="openRestoreDialog(a)" />
+                </el-tooltip>
+                <el-tooltip content="下载" placement="top">
+                  <el-button type="primary" :icon="Download" circle @click.stop="handleDownload(a)" />
+                </el-tooltip>
+                <el-tooltip content="删除" placement="top">
+                  <el-button type="danger" :icon="Delete" circle @click.stop="handleDelete(a.id, a.name)" />
+                </el-tooltip>
+              </div>
+            </el-card>
+          </div>
         </el-card>
-
-    <!-- 存档列表 -->
-        <div class="archive-tables-container">
-          <!-- 服务器存档 -->
-          <el-card shadow="never" class="archive-card">
-            <template #header>
-              <div class="flex items-center justify-between">
-                <div class="card-header-left">
-                  <span>服务器存档</span>
-                  <el-tooltip content="这些存档是从您现有服务器的世界文件夹直接打包生成的。" placement="top">
-                    <el-icon>
-                      <QuestionFilled/>
-                    </el-icon>
-                  </el-tooltip>
-                </div>
-                <div>
-                  <el-button type="primary" :icon="FolderAdd" @click="openCreateFromServerDialog">从服务器创建</el-button>
-                </div>
-              </div>
-            </template>
-            <el-table :data="serverArchives" v-loading="loading" row-key="id"
-                      @selection-change="handleServerSelectionChange">
-              <el-table-column type="selection" width="55" :reserve-selection="true"/>
-              <el-table-column prop="name" label="存档名称" min-width="220" show-overflow-tooltip/>
-              <el-table-column prop="created_at" label="创建时间" width="180" align="center">
-                <template #default="scope">{{ formatDateTime(scope.row.created_at) }}</template>
-              </el-table-column>
-              <el-table-column label="操作" width="300" align="center">
-                <template #default="scope">
-                  <el-button-group class="action-buttons">
-                    <el-button type="success" :icon="Upload" size="small" @click="openRestoreDialog(scope.row)">恢复</el-button>
-                    <el-button type="primary" :icon="Download" size="small" @click="handleDownload(scope.row.id)">下载</el-button>
-                    <el-button type="danger" :icon="Delete" size="small" @click="handleDelete(scope.row.id, scope.row.name)">删除</el-button>
-                  </el-button-group>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-card>
-
-          <!-- 上传的存档 -->
-          <el-card shadow="never" class="archive-card">
-            <template #header>
-              <div class="flex items-center justify-between">
-                <div class="card-header-left">
-                  <span>上传的存档</span>
-                  <el-tooltip content="这些是您手动上传并经过验证的存档。" placement="top">
-                    <el-icon>
-                      <QuestionFilled/>
-                    </el-icon>
-                  </el-tooltip>
-                </div>
-                <div>
-                  <el-button type="primary" :icon="Upload" @click="uploadDialogVisible = true">上传新存档</el-button>
-                </div>
-              </div>
-            </template>
-            <el-table :data="uploadedArchives" v-loading="loading" row-key="id"
-                      @selection-change="handleUploadedSelectionChange">
-              <el-table-column type="selection" width="55" :reserve-selection="true"/>
-              <el-table-column prop="name" label="存档名称" min-width="220" show-overflow-tooltip/>
-              <el-table-column prop="mc_version" label="游戏版本" width="120" align="center">
-                <template #default="scope">
-                  <el-tag v-if="scope.row.mc_version" size="small">{{ scope.row.mc_version }}</el-tag>
-                  <span v-else>未指定</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="created_at" label="上传时间" width="180" align="center">
-                <template #default="scope">{{ formatDateTime(scope.row.created_at) }}</template>
-              </el-table-column>
-              <el-table-column label="操作" width="300" align="center">
-                <template #default="scope">
-                  <el-button-group class="action-buttons">
-                    <el-button type="success" :icon="Upload" size="small" @click="openRestoreDialog(scope.row)">恢复</el-button>
-                    <el-button type="primary" :icon="Download" size="small" @click="handleDownload(scope.row.id)">下载</el-button>
-                    <el-button type="danger" :icon="Delete" size="small" @click="handleDelete(scope.row.id, scope.row.name)">删除</el-button>
-                  </el-button-group>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-card>
-        </div>
       </div>
     </div>
 
@@ -242,22 +209,21 @@
 import {ref, onMounted, onUnmounted, computed, reactive} from 'vue';
 import {useRoute} from 'vue-router';
 import {ElMessage, ElMessageBox} from 'element-plus';
-import {Upload, Download, QuestionFilled, Delete, WarningFilled, FolderAdd} from '@element-plus/icons-vue';
+import {Upload, Download, Delete, WarningFilled, FolderAdd, Search, Refresh, Folder, Document} from '@element-plus/icons-vue';
 import apiClient from '@/api';
 import { settings } from '@/store/settings'
+import { fetchTasks, onTaskEvent } from '@/store/tasks'
 
 // --- 状态 ---
 const allArchives = ref([]);
 const loading = ref(true);
 const uploadDialogVisible = ref(false);
-const processingTasks = ref([]);
-const pollers = new Map();
 const minecraftVersions = ref([]);
 const versionsLoading = ref(false);
 const showSnapshots = ref(false); // 是否包含快照版
 const showExperiments = ref(false); // 是否包含实验版本
-const serverSelection = ref([]);
-const uploadedSelection = ref([]);
+const searchKeyword = ref('');
+const selectedArchiveIds = reactive(new Set());
 const allServers = ref([]); // <-- [新增] 用于存储所有服务器列表
 const allServersLoading = ref(false); // <-- [新增] 服务器列表加载状态
 
@@ -277,17 +243,58 @@ const createFromServerDialog = reactive({
   isCreating: false,
 });
 
-const selectedIds = computed(() => [
-  ...serverSelection.value.map(item => item.id),
-  ...uploadedSelection.value.map(item => item.id),
-]);
+const selectedIds = computed(() => Array.from(selectedArchiveIds));
+const isSelected = (archiveId) => selectedArchiveIds.has(archiveId);
+const setSelected = (archiveId, selected) => {
+  if (selected) {
+    selectedArchiveIds.add(archiveId);
+  } else {
+    selectedArchiveIds.delete(archiveId);
+  }
+};
+const toggleSelected = (archiveId) => {
+  if (selectedArchiveIds.has(archiveId)) {
+    selectedArchiveIds.delete(archiveId);
+  } else {
+    selectedArchiveIds.add(archiveId);
+  }
+};
+const clearSelection = () => selectedArchiveIds.clear();
 
 // --- 计算属性 ---
-const serverArchives = computed(() => allArchives.value.filter(a => a.type === 'SERVER'));
-const uploadedArchives = computed(() => allArchives.value.filter(a => a.type === 'UPLOADED'));
-const getDownloadUrl = (archiveId) => {
-  const token = localStorage.getItem('token');
-  return `${apiClient.defaults.baseURL}/api/archives/download/${archiveId}?token=${token}`;
+const toTimestamp = (isoString) => {
+  if (!isoString) return 0;
+  const t = new Date(isoString).getTime();
+  return Number.isFinite(t) ? t : 0;
+};
+const keyword = computed(() => searchKeyword.value.trim().toLowerCase());
+const matchesKeyword = (archive) => {
+  const q = keyword.value;
+  if (!q) return true;
+  const name = String(archive?.name ?? '').toLowerCase();
+  const version = String(archive?.mc_version ?? '').toLowerCase();
+  return name.includes(q) || version.includes(q);
+};
+
+const archives = computed(() => {
+  return allArchives.value
+    .slice()
+    .sort((a, b) => toTimestamp(b.created_at) - toTimestamp(a.created_at));
+});
+const filteredArchives = computed(() => archives.value.filter(matchesKeyword));
+
+const getFilenameFromContentDisposition = (contentDisposition) => {
+  if (!contentDisposition) return null;
+  const utf8Match = String(contentDisposition).match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch (e) {
+      return utf8Match[1];
+    }
+  }
+  const asciiMatch = String(contentDisposition).match(/filename=\"?([^\";]+)\"?/i);
+  return asciiMatch?.[1] || null;
 };
 const formatDateTime = (isoString) => {
   if (!isoString) return 'N/A';
@@ -310,6 +317,10 @@ const fetchArchives = async () => {
   try {
     const {data} = await apiClient.get('/api/archives');
     allArchives.value = data;
+    const validIds = new Set(Array.isArray(data) ? data.map((a) => a.id) : []);
+    Array.from(selectedArchiveIds).forEach((id) => {
+      if (!validIds.has(id)) selectedArchiveIds.delete(id);
+    });
   } catch (error) {
     ElMessage.error('加载存档列表失败');
   } finally {
@@ -355,56 +366,7 @@ const filteredMinecraftVersions = computed(() => {
     if (showExperiments.value && (v.type === 'old_beta' || v.type === 'beta' || v.type === 'old_alpha')) return true;
     return false;
   });
-});
-const fetchActiveTasks = async () => {
-  try {
-    const {data} = await apiClient.get('/api/archives/active-tasks');
-    processingTasks.value = data;
-  } catch (error) {
-    ElMessage.error("获取进行中的任务列表失败");
-  }
-};
-
-// --- 任务轮询 (无变化) ---
-const pollTaskStatus = (taskId) => {
-  if (pollers.has(taskId)) return;
-  const pollerId = setInterval(async () => {
-    try {
-      const {data} = await apiClient.get(`/api/system/task-progress/${taskId}`);
-      const taskIndex = processingTasks.value.findIndex(t => t.id === taskId);
-      if (taskIndex === -1) {
-        clearInterval(pollerId);
-        pollers.delete(taskId);
-        return;
-      }
-      Object.assign(processingTasks.value[taskIndex], data);
-
-      if (data.status === 'SUCCESS' || data.status === 'FAILED') {
-        clearInterval(pollerId);
-        pollers.delete(taskId);
-        if (data.status === 'SUCCESS') {
-          ElMessage.success(data.message || '任务完成！');
-          setTimeout(() => {
-            processingTasks.value.splice(taskIndex, 1);
-            fetchArchives();
-          }, 2000);
-        } else {
-          ElMessage.error(`任务失败: ${data.error || '未知错误'}`);
-          setTimeout(() => processingTasks.value.splice(taskIndex, 1), 5000);
-        }
-      }
-    } catch (error) {
-      clearInterval(pollerId);
-      pollers.delete(taskId);
-    }
-  }, 2000);
-  pollers.set(taskId, pollerId);
-};
-const addTaskAndStartPolling = (task) => {
-  if (processingTasks.value.some(t => t.id === task.id)) return;
-  processingTasks.value.unshift(task);
-  pollTaskStatus(task.id);
-};
+  });
 
 // --- 上传逻辑 ---
 const isUploading = ref(false);
@@ -444,7 +406,7 @@ const handleUpload = async () => {
     });
     ElMessage.info('文件上传成功，正在后台处理...');
     uploadDialogVisible.value = false;
-    addTaskAndStartPolling({id: data.task_id, status: 'PENDING', progress: 0});
+    fetchTasks().catch(() => {});
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || error.message || '上传失败');
   } finally {
@@ -472,11 +434,9 @@ const handleConfirmRestore = async () => {
   }
   restoreDialog.isRestoring = true;
   try {
-    const { data } = await apiClient.post(`/api/archives/restore/${restoreDialog.archiveId}`, {
-      target_server_id: restoreDialog.targetServerId,
-    });
+    const { data } = await apiClient.post(`/api/archives/restore/${restoreDialog.archiveId}/${restoreDialog.targetServerId}`);
     ElMessage.info('恢复任务已开始，请在任务列表查看进度。');
-    addTaskAndStartPolling({ id: data.task_id, status: 'pending', progress: 0 });
+    fetchTasks().catch(() => {});
     restoreDialog.visible = false;
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || '启动恢复任务失败');
@@ -485,9 +445,47 @@ const handleConfirmRestore = async () => {
 };
 
 
-// --- [新增] 下载功能处理 ---
-const handleDownload = (archiveId) => {
-  window.location.href = getDownloadUrl(archiveId);
+// --- 下载功能处理 ---
+const resolveDownloadError = async (error) => {
+  const detail = error?.response?.data?.detail;
+  if (detail) return detail;
+  const data = error?.response?.data;
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text();
+      try {
+        const json = JSON.parse(text);
+        if (json?.detail) return json.detail;
+      } catch (e) {
+        // ignore
+      }
+      if (text) return text;
+    } catch (e) {
+      // ignore
+    }
+  }
+  return error?.message || '下载失败';
+};
+const handleDownload = async (archive) => {
+  try {
+    const res = await apiClient.get(`/api/archives/download/${archive.id}`, {responseType: 'blob'});
+    const cd = res.headers?.['content-disposition'];
+    const filename =
+      getFilenameFromContentDisposition(cd) ||
+      (archive?.type === 'SERVER' ? `${archive.name}.tar.gz` : `${archive.name}.zip`);
+
+    const blob = res.data instanceof Blob ? res.data : new Blob([res.data], {type: res.headers?.['content-type']});
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    ElMessage.error(await resolveDownloadError(error));
+  }
 };
 
 // 从服务器创建存档
@@ -502,7 +500,7 @@ const handleCreateFromServer = async () => {
   try {
     const { data } = await apiClient.post('/api/archives/create/from-server', null, { params: { server_id: createFromServerDialog.serverId } });
     ElMessage.success('创建备份任务已发起！');
-    addTaskAndStartPolling({ id: data.task_id, status: 'pending', progress: 0, message: '任务已接收，正在排队...' });
+    fetchTasks().catch(() => {});
     createFromServerDialog.visible = false;
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || '发起创建任务失败');
@@ -517,6 +515,7 @@ const handleDelete = async (archiveId, archiveName) => {
     await ElMessageBox.confirm(`确定要删除存档 "${archiveName}" 吗？此操作不可逆！`, '警告', {type: 'warning'});
     await apiClient.delete(`/api/archives/delete/${archiveId}`);
     ElMessage.success(`存档 "${archiveName}" 已被删除`);
+    selectedArchiveIds.delete(archiveId);
     fetchArchives();
   } catch (error) {
     if (error !== 'cancel') {
@@ -524,16 +523,13 @@ const handleDelete = async (archiveId, archiveName) => {
     }
   }
 };
-const handleServerSelectionChange = (val) => serverSelection.value = val;
-const handleUploadedSelectionChange = (val) => uploadedSelection.value = val;
 const handleBulkDelete = async () => {
   if (selectedIds.value.length === 0) return;
   try {
     await ElMessageBox.confirm(`确定要删除选中的 ${selectedIds.value.length} 个存档吗？`, '警告', {type: 'warning'});
     await apiClient.post('/api/archives/batch-delete', {ids: selectedIds.value});
     ElMessage.success(`已成功删除 ${selectedIds.value.length} 个存档`);
-    serverSelection.value = [];
-    uploadedSelection.value = [];
+    selectedArchiveIds.clear();
     fetchArchives();
   } catch (error) {
     if (error !== 'cancel') {
@@ -543,19 +539,47 @@ const handleBulkDelete = async () => {
 };
 
 // --- 生命周期 ---
+let offTaskEvents = null;
+let refreshTimer = null;
+const scheduleRefreshArchives = () => {
+  if (refreshTimer) return;
+  refreshTimer = window.setTimeout(async () => {
+    refreshTimer = null;
+    await fetchArchives();
+  }, 800);
+};
+
 onMounted(async () => {
-  await Promise.all([fetchArchives(), fetchActiveTasks()]);
   const route = useRoute();
+  await fetchArchives();
+  fetchTasks().catch(() => {});
+
+  offTaskEvents = onTaskEvent((evt) => {
+    const status = String(evt?.task?.status || '');
+    const type = String(evt?.task?.type || '').toUpperCase();
+    if ((evt.action === 'finished' || evt.action === 'updated') && status === 'SUCCESS' && type.includes('ARCHIVE')) {
+      scheduleRefreshArchives();
+    }
+  });
+
   const newTaskId = route.query.new_task_id;
   if (newTaskId) {
-    addTaskAndStartPolling({id: newTaskId, status: 'pending', progress: 0, message: '任务已接收，正在排队...'});
+    ElMessage.info('已提交任务，可在右上角任务列表查看进度。');
+    fetchTasks().catch(() => {});
     window.history.replaceState({}, document.title, window.location.pathname);
   }
-  processingTasks.value.forEach(task => pollTaskStatus(task.id));
 });
 onUnmounted(() => {
-  pollers.forEach(pollerId => clearInterval(pollerId));
-  pollers.clear();
+  try {
+    offTaskEvents?.();
+  } catch (e) {
+    // ignore
+  }
+  offTaskEvents = null;
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
 });
 //
 </script>
@@ -563,24 +587,69 @@ onUnmounted(() => {
 <style scoped>
 /* 居中收窄布局（参考 SuperFlatWorld.vue） */
 .left-wrap { display: flex; justify-content: center; }
-.left-panel { max-width: 960px; width: 960px; }
-
-.flex { display: flex; }
-.items-center { align-items: center; }
-.justify-between { justify-content: space-between; }
-
-.archive-tables-container { display: grid; grid-template-columns: 1fr; gap: 20px; }
-
-.processing-tasks-list { display: flex; flex-direction: column; gap: 15px; }
-.task-item { padding: 10px; border: 1px solid var(--el-border-color-lighter); border-radius: 4px; }
-.task-info { display: flex; justify-content: space-between; margin-bottom: 8px; }
-.action-buttons { display: inline-flex; flex-wrap: nowrap; gap: 0; }
+.left-panel { width: min(1120px, calc(100vw - 32px)); max-width: 1120px; }
+.archive-page :deep(.left-wrap .left-panel) { overflow-y: auto !important; overflow-x: hidden !important; }
+.archive-page :deep(.left-wrap .left-panel) { min-height: 0; }
 
 .card-header { display: flex; align-items: center; gap: 8px; font-weight: bold; }
 .card-header-left { display: flex; align-items: center; gap: 8px; font-weight: bold; }
 
-/* 顶部标题卡片与首个卡片间距 */
-.header-card { margin-bottom: 16px; }
+/* 顶部工具条 */
+.toolbar-card { margin-bottom: 16px; border-radius: 10px; flex-shrink: 0; }
+.toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.toolbar-text { display: flex; flex-direction: column; gap: 2px; }
+.toolbar-title { font-size: 16px; font-weight: 600; }
+.toolbar-subtitle { font-size: 13px; color: var(--el-text-color-secondary); }
+.toolbar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.toolbar-search { width: 260px; }
+
+/* 分区与卡片网格 */
+.archives-card { flex-shrink: 0; }
+.section-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.section-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.section-card { border-radius: 10px; }
+.section-card :deep(.el-card__header) { padding: 12px 14px; }
+.section-card :deep(.el-card__body) { padding: 14px; }
+
+.empty-state { padding: 16px 0; }
+.archive-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+
+.archive-item-card { border-radius: 12px; cursor: pointer; position: relative; transition: transform 0.16s ease, box-shadow 0.16s ease; }
+.archive-item-card:hover { transform: translateY(-2px); }
+.archive-item-card.selected { box-shadow: 0 0 0 1px var(--el-color-primary) inset; }
+
+.archive-item-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.archive-name-row { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.archive-item-icon { color: var(--el-text-color-secondary); margin-top: 2px; flex: 0 0 auto; }
+.archive-name {
+  font-weight: 600;
+  line-height: 1.35;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.archive-item-meta { margin-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.archive-tags { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.archive-time { font-size: 12px; color: var(--el-text-color-secondary); white-space: nowrap; }
+.archive-item-actions {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.archive-item-card:hover .archive-item-actions { opacity: 1; transform: translateY(0); pointer-events: auto; }
+@media (hover: none) {
+  .archive-item-actions { opacity: 1; transform: translateY(0); pointer-events: auto; }
+}
 
 /* 恢复对话框警告样式 */
 .restore-warning {
