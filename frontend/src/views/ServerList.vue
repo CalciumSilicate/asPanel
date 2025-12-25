@@ -248,32 +248,79 @@
                   </div>
                 </div>
               </el-form-item>
-              <el-divider>JVM 配置</el-divider>
+              <el-divider>启动命令</el-divider>
               <el-form-item>
                 <div class="form-item-wrapper">
-                  <div class="form-item-label"><span>最小内存</span><small>Min Memory</small></div>
+                  <div class="form-item-label"><span>编辑模式</span><small>在 JVM 配置 与 start_command 间切换</small></div>
                   <div class="form-item-control">
-                    <el-input class="input-short" v-model="configFormData.jvm.min_memory" placeholder="128M"></el-input>
+                    <el-radio-group v-model="commandEditMode" size="small">
+                      <el-radio-button label="jvm">JVM 配置</el-radio-button>
+                      <el-radio-button label="start_command">start_command</el-radio-button>
+                    </el-radio-group>
                   </div>
                 </div>
               </el-form-item>
-              <el-form-item>
-                <div class="form-item-wrapper">
-                  <div class="form-item-label"><span>最大内存</span><small>Max Memory</small></div>
-                  <div class="form-item-control">
-                    <el-input class="input-short" v-model="configFormData.jvm.max_memory" placeholder="512M"></el-input>
+              <template v-if="commandEditMode === 'jvm'">
+                <el-form-item>
+                  <div class="form-item-wrapper">
+                    <div class="form-item-label"><span>服务器Java命令</span><small>默认使用全局设置，可单独覆盖</small></div>
+                    <div class="form-item-control">
+                      <el-select
+                        class="input-long"
+                        v-model="configFormData.jvm.java_command"
+                        filterable
+                        allow-create
+                        default-first-option
+                        clearable
+                        placeholder="例如：java 或 /usr/bin/java"
+                      >
+                        <el-option v-for="cmd in javaCmdOptions" :key="cmd" :label="cmd" :value="cmd"/>
+                      </el-select>
+                    </div>
                   </div>
-                </div>
-              </el-form-item>
-              <el-form-item>
-                <div class="form-item-wrapper">
-                  <div class="form-item-label"><span>其他JVM参数</span><small>Extra Args</small></div>
-                  <div class="form-item-control">
-                    <el-input class="input-long" v-model="configFormData.jvm.extra_args"
-                              placeholder="如：-XX:+UseG1GC"></el-input>
+                </el-form-item>
+                <el-form-item>
+                  <div class="form-item-wrapper">
+                    <div class="form-item-label"><span>最小内存</span><small>Min Memory</small></div>
+                    <div class="form-item-control">
+                      <el-input class="input-short" v-model="configFormData.jvm.min_memory" placeholder="128M"></el-input>
+                    </div>
                   </div>
-                </div>
-              </el-form-item>
+                </el-form-item>
+                <el-form-item>
+                  <div class="form-item-wrapper">
+                    <div class="form-item-label"><span>最大内存</span><small>Max Memory</small></div>
+                    <div class="form-item-control">
+                      <el-input class="input-short" v-model="configFormData.jvm.max_memory" placeholder="512M"></el-input>
+                    </div>
+                  </div>
+                </el-form-item>
+                <el-form-item>
+                  <div class="form-item-wrapper">
+                    <div class="form-item-label"><span>其他JVM参数</span><small>Extra Args</small></div>
+                    <div class="form-item-control">
+                      <el-input class="input-long" v-model="configFormData.jvm.extra_args"
+                                placeholder="如：-XX:+UseG1GC"></el-input>
+                    </div>
+                  </div>
+                </el-form-item>
+              </template>
+              <template v-else>
+                <el-form-item>
+                  <div class="form-item-wrapper">
+                    <div class="form-item-label"><span>start_command</span><small>保存时将解析为 JVM 配置</small></div>
+                    <div class="form-item-control">
+                      <el-input
+                        class="input-long"
+                        v-model="configFormData.start_command"
+                        type="textarea"
+                        :rows="3"
+                        placeholder="例如：java -Xms1G -Xmx4G -jar server.jar"
+                      />
+                    </div>
+                  </div>
+                </el-form-item>
+              </template>
 
             </el-form>
           </div>
@@ -356,34 +403,81 @@
                     </div>
                   </div>
                 </el-form-item>
-                <el-divider>JVM 配置</el-divider>
+                <el-divider>启动命令</el-divider>
                 <el-form-item>
                   <div class="form-item-wrapper">
-                    <div class="form-item-label"><span>最小内存</span><small>Min Memory</small></div>
+                    <div class="form-item-label"><span>编辑模式</span><small>在 JVM 配置 与 start_command 间切换</small></div>
                     <div class="form-item-control">
-                      <el-input class="input-short" v-model="configFormData.jvm.min_memory"
-                                placeholder="1G"></el-input>
+                      <el-radio-group v-model="commandEditMode" size="small">
+                        <el-radio-button label="jvm">JVM 配置</el-radio-button>
+                        <el-radio-button label="start_command">start_command</el-radio-button>
+                      </el-radio-group>
                     </div>
                   </div>
                 </el-form-item>
-                <el-form-item>
-                  <div class="form-item-wrapper">
-                    <div class="form-item-label"><span>最大内存</span><small>Max Memory</small></div>
-                    <div class="form-item-control">
-                      <el-input class="input-short" v-model="configFormData.jvm.max_memory"
-                                placeholder="4G"></el-input>
+                <template v-if="commandEditMode === 'jvm'">
+                  <el-form-item>
+                    <div class="form-item-wrapper">
+                      <div class="form-item-label"><span>服务器Java命令</span><small>默认使用全局设置，可单独覆盖</small></div>
+                      <div class="form-item-control">
+                        <el-select
+                          class="input-long"
+                          v-model="configFormData.jvm.java_command"
+                          filterable
+                          allow-create
+                          default-first-option
+                          clearable
+                          placeholder="例如：java 或 /usr/bin/java"
+                        >
+                          <el-option v-for="cmd in javaCmdOptions" :key="cmd" :label="cmd" :value="cmd"/>
+                        </el-select>
+                      </div>
                     </div>
-                  </div>
-                </el-form-item>
-                <el-form-item>
-                  <div class="form-item-wrapper">
-                    <div class="form-item-label"><span>其他JVM参数</span><small>Extra Args</small></div>
-                    <div class="form-item-control">
-                      <el-input class="input-long" v-model="configFormData.jvm.extra_args"
-                                placeholder="如：-XX:+UseG1GC"></el-input>
+                  </el-form-item>
+                  <el-form-item>
+                    <div class="form-item-wrapper">
+                      <div class="form-item-label"><span>最小内存</span><small>Min Memory</small></div>
+                      <div class="form-item-control">
+                        <el-input class="input-short" v-model="configFormData.jvm.min_memory"
+                                  placeholder="1G"></el-input>
+                      </div>
                     </div>
-                  </div>
-                </el-form-item>
+                  </el-form-item>
+                  <el-form-item>
+                    <div class="form-item-wrapper">
+                      <div class="form-item-label"><span>最大内存</span><small>Max Memory</small></div>
+                      <div class="form-item-control">
+                        <el-input class="input-short" v-model="configFormData.jvm.max_memory"
+                                  placeholder="4G"></el-input>
+                      </div>
+                    </div>
+                  </el-form-item>
+                  <el-form-item>
+                    <div class="form-item-wrapper">
+                      <div class="form-item-label"><span>其他JVM参数</span><small>Extra Args</small></div>
+                      <div class="form-item-control">
+                        <el-input class="input-long" v-model="configFormData.jvm.extra_args"
+                                  placeholder="如：-XX:+UseG1GC"></el-input>
+                      </div>
+                    </div>
+                  </el-form-item>
+                </template>
+                <template v-else>
+                  <el-form-item>
+                    <div class="form-item-wrapper">
+                      <div class="form-item-label"><span>start_command</span><small>保存时将解析为 JVM 配置</small></div>
+                      <div class="form-item-control">
+                        <el-input
+                          class="input-long"
+                          v-model="configFormData.start_command"
+                          type="textarea"
+                          :rows="3"
+                          placeholder="例如：java -Xms1G -Xmx4G -jar server.jar"
+                        />
+                      </div>
+                    </div>
+                  </el-form-item>
+                </template>
                 <el-divider>server.properties 配置</el-divider>
                 <el-form-item>
                   <div class="form-item-wrapper">
@@ -537,34 +631,81 @@
                     </div>
                   </div>
                 </el-form-item>
-                <el-divider>JVM 配置</el-divider>
+                <el-divider>启动命令</el-divider>
                 <el-form-item>
                   <div class="form-item-wrapper">
-                    <div class="form-item-label"><span>最小内存</span><small>Min Memory</small></div>
+                    <div class="form-item-label"><span>编辑模式</span><small>在 JVM 配置 与 start_command 间切换</small></div>
                     <div class="form-item-control">
-                      <el-input class="input-short" v-model="configFormData.jvm.min_memory"
-                                placeholder="1G"></el-input>
+                      <el-radio-group v-model="commandEditMode" size="small">
+                        <el-radio-button label="jvm">JVM 配置</el-radio-button>
+                        <el-radio-button label="start_command">start_command</el-radio-button>
+                      </el-radio-group>
                     </div>
                   </div>
                 </el-form-item>
-                <el-form-item>
-                  <div class="form-item-wrapper">
-                    <div class="form-item-label"><span>最大内存</span><small>Max Memory</small></div>
-                    <div class="form-item-control">
-                      <el-input class="input-short" v-model="configFormData.jvm.max_memory"
-                                placeholder="4G"></el-input>
+                <template v-if="commandEditMode === 'jvm'">
+                  <el-form-item>
+                    <div class="form-item-wrapper">
+                      <div class="form-item-label"><span>服务器Java命令</span><small>默认使用全局设置，可单独覆盖</small></div>
+                      <div class="form-item-control">
+                        <el-select
+                          class="input-long"
+                          v-model="configFormData.jvm.java_command"
+                          filterable
+                          allow-create
+                          default-first-option
+                          clearable
+                          placeholder="例如：java 或 /usr/bin/java"
+                        >
+                          <el-option v-for="cmd in javaCmdOptions" :key="cmd" :label="cmd" :value="cmd"/>
+                        </el-select>
+                      </div>
                     </div>
-                  </div>
-                </el-form-item>
-                <el-form-item>
-                  <div class="form-item-wrapper">
-                    <div class="form-item-label"><span>其他JVM参数</span><small>Extra Args</small></div>
-                    <div class="form-item-control">
-                      <el-input class="input-long" v-model="configFormData.jvm.extra_args"
-                                placeholder="如：-XX:+UseG1GC"></el-input>
+                  </el-form-item>
+                  <el-form-item>
+                    <div class="form-item-wrapper">
+                      <div class="form-item-label"><span>最小内存</span><small>Min Memory</small></div>
+                      <div class="form-item-control">
+                        <el-input class="input-short" v-model="configFormData.jvm.min_memory"
+                                  placeholder="1G"></el-input>
+                      </div>
                     </div>
-                  </div>
-                </el-form-item>
+                  </el-form-item>
+                  <el-form-item>
+                    <div class="form-item-wrapper">
+                      <div class="form-item-label"><span>最大内存</span><small>Max Memory</small></div>
+                      <div class="form-item-control">
+                        <el-input class="input-short" v-model="configFormData.jvm.max_memory"
+                                  placeholder="4G"></el-input>
+                      </div>
+                    </div>
+                  </el-form-item>
+                  <el-form-item>
+                    <div class="form-item-wrapper">
+                      <div class="form-item-label"><span>其他JVM参数</span><small>Extra Args</small></div>
+                      <div class="form-item-control">
+                        <el-input class="input-long" v-model="configFormData.jvm.extra_args"
+                                  placeholder="如：-XX:+UseG1GC"></el-input>
+                      </div>
+                    </div>
+                  </el-form-item>
+                </template>
+                <template v-else>
+                  <el-form-item>
+                    <div class="form-item-wrapper">
+                      <div class="form-item-label"><span>start_command</span><small>保存时将解析为 JVM 配置</small></div>
+                      <div class="form-item-control">
+                        <el-input
+                          class="input-long"
+                          v-model="configFormData.start_command"
+                          type="textarea"
+                          :rows="3"
+                          placeholder="例如：java -Xms1G -Xmx4G -jar server.jar"
+                        />
+                      </div>
+                    </div>
+                  </el-form-item>
+                </template>
                 <el-divider>velocity.toml 配置</el-divider>
                 <el-form-item>
                   <div class="form-item-wrapper">
@@ -1260,6 +1401,8 @@ const showSnapshots = ref(false);
 const showExperiments = ref(false);
 const isDownloading = ref(false);
 const downloadProgress = ref(0);
+const javaCmdOptions = ref([]);
+const commandEditMode = ref('jvm'); // 'jvm' | 'start_command'
 	const currentView = ref('select_type');
 	const dialogState = reactive({isNewSetup: false, coreFileExists: false, configFileExists: false});
 	
@@ -1551,6 +1694,7 @@ const fetchServerSizes = async (requestId) => {
 	  isSavingConfig.value = false;
 	  isDownloading.value = false;
 	  downloadProgress.value = 0;
+    commandEditMode.value = 'jvm';
 	  currentView.value = 'select_type';
 	  configFormData.value = {};
 	  selectedServerTypeForSetup.value = '';
@@ -1568,6 +1712,85 @@ const fetchServerSizes = async (requestId) => {
   Object.assign(dialogState, {isNewSetup: false, coreFileExists: false, configFileExists: false,});
 };
 
+const fetchJavaCmdOptions = async () => {
+  const fallback = (() => {
+    const out = [];
+    const seen = new Set();
+    const add = (x) => {
+      const s = (x || '').toString().trim();
+      if (!s || seen.has(s)) return;
+      seen.add(s);
+      out.push(s);
+    };
+    add(settings.java_command || 'java');
+    add('java');
+    return out;
+  })();
+  try {
+    const { data } = await apiClient.get('/api/settings/java-options');
+    const arr = Array.isArray(data) ? data : [];
+    const out = [];
+    const seen = new Set();
+    const add = (x) => {
+      const s = (x || '').toString().trim();
+      if (!s || seen.has(s)) return;
+      seen.add(s);
+      out.push(s);
+    };
+    fallback.forEach(add);
+    arr.forEach(add);
+    javaCmdOptions.value = out;
+  } catch (e) {
+    javaCmdOptions.value = fallback;
+  }
+};
+
+const buildStartCommandFromJvm = (cfg) => {
+  const jvm = cfg?.jvm || {};
+  const core = cfg?.core_config || {};
+
+  const javaCmd = (jvm.java_command || settings.java_command || 'java').toString().trim() || 'java';
+  const minMem = (jvm.min_memory || '1G').toString().trim() || '1G';
+  const maxMem = (jvm.max_memory || '4G').toString().trim() || '4G';
+  const extra = (jvm.extra_args || '').toString().trim();
+  const extraTokens = extra ? extra.split(/\s+/).filter(Boolean) : [];
+
+  const jar = core.launcher_jar || core.server_jar || 'server.jar';
+  return [javaCmd, `-Xms${minMem}`, `-Xmx${maxMem}`, ...extraTokens, '-jar', jar].join(' ');
+};
+
+const parseStartCommandToJvm = (command) => {
+  const raw = (command || '').toString().trim();
+  const tokens = raw ? raw.split(/\s+/).filter(Boolean) : [];
+
+  const javaCmd = (tokens[0] || settings.java_command || 'java').toString().trim() || 'java';
+  const jarIndex = tokens.indexOf('-jar');
+  const jvmPart = jarIndex >= 0 ? tokens.slice(1, jarIndex) : tokens.slice(1);
+
+  let minMem = '1G';
+  let maxMem = '4G';
+  const extraTokens = [];
+  for (const t of jvmPart) {
+    if (typeof t !== 'string') continue;
+    if (t.startsWith('-Xms') && t.length > 4) {
+      minMem = t.slice(4);
+      continue;
+    }
+    if (t.startsWith('-Xmx') && t.length > 4) {
+      maxMem = t.slice(4);
+      continue;
+    }
+    extraTokens.push(t);
+  }
+
+  return {
+    java_command: javaCmd,
+    min_memory: minMem,
+    max_memory: maxMem,
+    extra_args: extraTokens.join(' '),
+  };
+};
+
 	const openConfigDialog = async (server) => {
 	  resetDialogState();
 
@@ -1577,6 +1800,9 @@ const fetchServerSizes = async (requestId) => {
   try {
     const {data} = await apiClient.get(`/api/servers/config?server_id=${server.id}`);
 	    configFormData.value = data.config;
+      if (!configFormData.value?.jvm) configFormData.value.jvm = {};
+      if (!configFormData.value.jvm.java_command) configFormData.value.jvm.java_command = settings.java_command || 'java';
+      if (!configFormData.value.start_command) configFormData.value.start_command = buildStartCommandFromJvm(configFormData.value);
 	    dialogState.isNewSetup = data.is_new_setup;
 	    dialogState.coreFileExists = data.core_file_exists;
 	    dialogState.configFileExists = data.config_file_exists;
@@ -1694,6 +1920,18 @@ const confirmServerType = async () => {
 };
 const handleSaveConfig = async () => {
   isSavingConfig.value = true;
+  if (!configFormData.value?.jvm) configFormData.value.jvm = {};
+  if (commandEditMode.value === 'start_command') {
+    const parsed = parseStartCommandToJvm(configFormData.value.start_command);
+    configFormData.value.jvm.java_command = parsed.java_command;
+    configFormData.value.jvm.min_memory = parsed.min_memory;
+    configFormData.value.jvm.max_memory = parsed.max_memory;
+    configFormData.value.jvm.extra_args = parsed.extra_args;
+    configFormData.value.start_command = (configFormData.value.start_command || '').toString().trim();
+  } else {
+    if (!configFormData.value.jvm.java_command) configFormData.value.jvm.java_command = settings.java_command || 'java';
+    configFormData.value.start_command = buildStartCommandFromJvm(configFormData.value);
+  }
 
   // 在保存前，为 Velocity 配置转换数据格式
   if (configFormData.value.core_config.server_type === 'velocity' && configFormData.value.velocity_toml) {
@@ -2527,6 +2765,7 @@ onMounted(() => {
   fetchServers();
   fetchFabricGameVersions();
   fetchForgeGameVersions();
+  fetchJavaCmdOptions();
 
   // 同源连接 WebSocket（开发环境走 Vite 代理 /ws，生产由反代处理）
   socket = io({ path: '/ws/socket.io' });

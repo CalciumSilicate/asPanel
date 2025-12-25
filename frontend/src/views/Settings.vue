@@ -32,7 +32,17 @@
                   </div>
                 </template>
                 <div class="form-item-control">
-                  <el-input v-model="form.java_command" placeholder="例如：java 或 /usr/bin/java" />
+                  <el-select
+                    v-model="form.java_command"
+                    filterable
+                    allow-create
+                    default-first-option
+                    clearable
+                    style="width: 360px;"
+                    placeholder="例如：java 或 /usr/bin/java"
+                  >
+                    <el-option v-for="cmd in javaOptions" :key="cmd" :label="cmd" :value="cmd" />
+                  </el-select>
                 </div>
               </el-form-item>
 
@@ -72,6 +82,7 @@
 <script setup>
 import { reactive, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import apiClient from '@/api'
 import { settings, loadSettings, updateSettings, COMMON_TIMEZONES } from '@/store/settings'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 
@@ -84,6 +95,7 @@ const form = reactive({
 const tzOptions = COMMON_TIMEZONES
 const saving = ref(false)
 const savedAt = ref('')
+const javaOptions = ref([])
 
 let timer = null
 const autoSave = () => {
@@ -116,6 +128,10 @@ onMounted(async () => {
   await loadSettings()
   Object.assign(form, settings)
   try {
+    const { data } = await apiClient.get('/api/settings/java-options')
+    javaOptions.value = Array.isArray(data) ? data : []
+  } catch (e) { /* no-op */ }
+  try {
     const arr = Array.isArray(settings.stats_ignore_server) ? settings.stats_ignore_server : []
     form.stats_ignore_server_text = arr.join(',')
   } catch (e) { /* no-op */ }
@@ -146,4 +162,3 @@ watch(() => ({...form}), autoSave, { deep: true })
 .form-item-label > small { margin-top: 2px; color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.2; }
 .form-item-control { display: inline-flex; align-items: center; }
 </style>
-

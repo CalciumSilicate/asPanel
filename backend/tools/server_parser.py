@@ -132,16 +132,19 @@ def parse_jvm_args(args_str: str) -> schemas.ServerConfigJvm:
 
 def parse_start_command(command_str: str) -> Tuple[schemas.ServerConfigJvm, str]:
     if not command_str:
-        return schemas.ServerConfigJvm(min_memory="1G", max_memory="4G", extra_args=""), "server.jar"
+        return schemas.ServerConfigJvm(java_command=None, min_memory="1G", max_memory="4G", extra_args=""), "server.jar"
     parts = command_str.split()
+    java_cmd = parts[0] if parts else None
     try:
         jar_index = parts.index('-jar')
         jar_name = parts[jar_index + 1]
         jvm_args_list = parts[1:jar_index]
         jvm_config = parse_jvm_args(' '.join(jvm_args_list))
+        jvm_config.java_command = java_cmd
         return jvm_config, jar_name
     except (ValueError, IndexError):
         jvm_config = parse_jvm_args(' '.join(parts[1:]))
+        jvm_config.java_command = java_cmd
         return jvm_config, "server.jar"
 
 

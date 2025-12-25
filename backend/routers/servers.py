@@ -189,13 +189,23 @@ async def get_server_config(server_id: int, db: Session = Depends(get_db),
     server_dir = mcdr_path / 'server'
     is_new_setup = not server_dir.exists() or (await mcdr_manager.get_status(db_server.id, db_server.path))[0] == schemas.ServerStatus.NEW_SETUP
     if is_new_setup:
+        try:
+            default_java_cmd = (crud.get_system_settings_data(db) or {}).get("java_command") or "java"
+        except Exception:
+            default_java_cmd = "java"
         default_properties = DEFAULT_SERVER_PROPERTIES_CONFIG
         default_properties["server-port"] = get_available_port(41000, 42000)
         default_properties["rcon.port"] = get_available_port(51000, 52000)
+        jar_guess = server.core_config.launcher_jar or server.core_config.server_jar or "server.jar"
+        default_jvm = schemas.ServerConfigJvm(java_command=default_java_cmd)
+        default_start_command = " ".join(
+            [default_java_cmd, f"-Xms{default_jvm.min_memory}", f"-Xmx{default_jvm.max_memory}", "-jar", jar_guess]
+        )
         default_config = schemas.ServerConfigData(
             core_config=server.core_config,
-            jvm=schemas.ServerConfigJvm(),
-            vanilla_server_properties=DEFAULT_SERVER_PROPERTIES_CONFIG
+            jvm=default_jvm,
+            start_command=default_start_command,
+            vanilla_server_properties=DEFAULT_SERVER_PROPERTIES_CONFIG,
         )
         return schemas.ServerConfigResponse(
             is_new_setup=True,
@@ -208,7 +218,8 @@ async def get_server_config(server_id: int, db: Session = Depends(get_db),
         with open(mcdr_config_path, 'r', encoding='utf-8') as f:
             mcdr_config = yaml.safe_load(f) or {}
         server_type = server.core_config.server_type
-        jvm_config, _ = server_parser.parse_start_command(mcdr_config['start_command'])
+        start_command = mcdr_config.get("start_command") or ""
+        jvm_config, _ = server_parser.parse_start_command(start_command)
         launcher_jar = server.core_config.launcher_jar
         launcher_jar_path = server_dir / launcher_jar if launcher_jar else None
 
@@ -222,6 +233,7 @@ async def get_server_config(server_id: int, db: Session = Depends(get_db),
             config = schemas.ServerConfigData(
                 core_config=server.core_config,
                 jvm=jvm_config,
+                start_command=start_command,
                 vanilla_server_properties=server_properties
             )
             return schemas.ServerConfigResponse(
@@ -237,6 +249,7 @@ async def get_server_config(server_id: int, db: Session = Depends(get_db),
             config = schemas.ServerConfigData(
                 core_config=server.core_config,
                 jvm=jvm_config,
+                start_command=start_command,
                 velocity_toml=velocity_toml
             )
             return schemas.ServerConfigResponse(
@@ -297,13 +310,31 @@ async def save_server_config(
 
         jvm = config_data.jvm
         launcher_jar = core_config.launcher_jar
-        jvm_args_list = [f"-Xms{jvm.min_memory}", f"-Xmx{jvm.max_memory}", *filter(None, jvm.extra_args.split())]
-        # 读取系统设置中的 java 命令（默认 'java'）
+        jvm_args_list = [f"-Xms{jvm.min_memory}", f"-Xmx{jvm.max_memory}", *filter(None, (jvm.extra_args or "").split())]
+
+        # 读取系统设置中的 java 命令（默认 'java'），允许每个服务器覆盖
         try:
-            java_cmd = crud.get_system_settings_data(db).get('java_command', 'java')
+            default_java_cmd = (crud.get_system_settings_data(db) or {}).get("java_command") or "java"
         except Exception:
-            java_cmd = 'java'
-        mcdr_config['start_command'] = ' '.join([java_cmd, *jvm_args_list, "-jar", launcher_jar])
+            default_java_cmd = "java"
+        java_cmd = (getattr(jvm, "java_command", None) or "").strip() or default_java_cmd
+
+        # 优先使用前端传入的 start_command（用于保留/自定义完整命令行）
+        start_command = (getattr(config_data, "start_command", None) or "").strip()
+        if not start_command:
+            start_command = " ".join([java_cmd, *jvm_args_list, "-jar", launcher_jar])
+
+        # 保底：确保 -jar 目标为当前 launcher_jar（避免核心切换后仍指向旧 jar）
+        try:
+            parts = start_command.split()
+            jar_index = parts.index("-jar")
+            if jar_index + 1 < len(parts) and launcher_jar:
+                parts[jar_index + 1] = launcher_jar
+                start_command = " ".join(parts)
+        except Exception:
+            pass
+
+        mcdr_config['start_command'] = start_command
         mcdr_config['handler'] = f"{config_data.core_config.server_type.lower()}_handler"
         mcdr_config['working_directory'] = 'server'
         mcdr_config['plugin_directories'] = PUBLIC_PLUGINS_DIRECTORIES

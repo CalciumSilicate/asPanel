@@ -184,6 +184,7 @@ class Server(ServerBase):
 
 
 class ServerConfigJvm(BaseModel):
+    java_command: Optional[str] = Field(None, description="Java 可执行命令/路径（用于构建 start_command）")
     min_memory: Optional[str] = Field("1G", description="Minimum memory (e.g., 512M, 1G)")
     max_memory: Optional[str] = Field("4G", description="Maximum memory (e.g., 2G, 8G)")
     extra_args: Optional[str] = Field("", description="Extra JVM arguments")
@@ -192,6 +193,7 @@ class ServerConfigJvm(BaseModel):
 class ServerConfigData(BaseModel):
     core_config: ServerCoreConfig = Field(default_factory=ServerCoreConfig)
     jvm: ServerConfigJvm = Field(default_factory=ServerConfigJvm)
+    start_command: Optional[str] = Field(None, description="MCDR config.yml 中的 start_command（完整命令行）")
     vanilla_server_properties: Dict[str, Any] = Field(default_factory=dict)
     velocity_toml: Optional[Dict[str, Any]] = Field(None, description="Configuration for velocity.toml")
 

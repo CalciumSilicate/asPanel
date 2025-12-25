@@ -385,3 +385,102 @@ def get_available_port(min_port: int, max_port: int, max_try: int = 10) -> int:
         if check_port(port):
             return port
     return 0
+
+
+_java_cmd_cache = TTLCache(ttl=300, maxsize=1)
+_java_cmd_cache_lock = RLock()
+
+
+def _is_executable_file(path: Path) -> bool:
+    try:
+        return path.is_file() and os.access(path, os.X_OK)
+    except Exception:
+        return False
+
+
+@cached(_java_cmd_cache, lock=_java_cmd_cache_lock)
+def find_local_java_commands() -> List[str]:
+    """在本机中寻找可能的 Java 可执行文件路径/命令。
+
+    返回值用于前端作为候选项展示（允许用户自行输入）。
+    """
+    candidates: List[str] = []
+    seen: set[str] = set()
+
+    def add(item: str | None):
+        if not item:
+            return
+        x = str(item).strip()
+        if not x or x in seen:
+            return
+        seen.add(x)
+        candidates.append(x)
+
+    add("java")
+
+    try:
+        which_java = shutil.which("java")
+        if which_java:
+            add(which_java)
+    except Exception:
+        pass
+
+    try:
+        java_home = os.environ.get("JAVA_HOME") or ""
+        if java_home:
+            java_bin = Path(java_home) / "bin" / ("java.exe" if os.name == "nt" else "java")
+            if _is_executable_file(java_bin):
+                add(str(java_bin))
+    except Exception:
+        pass
+
+    home = None
+    try:
+        home = Path.home()
+    except Exception:
+        home = None
+
+    # 常见安装目录（尽量浅层扫描，避免遍历巨大目录）
+    scan_patterns: List[tuple[Path, List[str]]] = [
+        (Path("/usr/lib/jvm"), ["*/bin/java", "*/jre/bin/java"]),
+        (Path("/usr/java"), ["*/bin/java", "*/jre/bin/java"]),
+        (Path("/Library/Java/JavaVirtualMachines"), ["*/Contents/Home/bin/java"]),
+    ]
+    if home is not None:
+        scan_patterns.extend(
+            [
+                (home / ".sdkman/candidates/java", ["*/bin/java"]),
+                (home / ".asdf/installs/java", ["*/bin/java"]),
+            ]
+        )
+
+    for base, patterns in scan_patterns:
+        try:
+            if not base.is_dir():
+                continue
+            for pat in patterns:
+                for p in base.glob(pat):
+                    if _is_executable_file(p):
+                        add(str(p))
+        except Exception:
+            continue
+
+    # Debian/Ubuntu: update-alternatives --list java
+    try:
+        ua = shutil.which("update-alternatives")
+        if ua:
+            result = subprocess.run(
+                [ua, "--list", "java"],
+                capture_output=True,
+                text=True,
+                timeout=1.0,
+            )
+            if result.returncode == 0:
+                for line in (result.stdout or "").splitlines():
+                    p = Path(line.strip())
+                    if _is_executable_file(p):
+                        add(str(p))
+    except Exception:
+        pass
+
+    return candidates
