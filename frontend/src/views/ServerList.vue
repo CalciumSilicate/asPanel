@@ -248,18 +248,18 @@
                   </div>
                 </div>
               </el-form-item>
-              <el-divider>启动命令</el-divider>
-              <el-form-item>
-                <div class="form-item-wrapper">
-                  <div class="form-item-label"><span>编辑模式</span><small>在 JVM 配置 与 start_command 间切换</small></div>
-                  <div class="form-item-control">
-                    <el-radio-group v-model="commandEditMode" size="small">
-                      <el-radio-button label="jvm">JVM 配置</el-radio-button>
-                      <el-radio-button label="start_command">start_command</el-radio-button>
-                    </el-radio-group>
+                <el-divider>启动命令</el-divider>
+                <el-form-item>
+                  <div class="form-item-wrapper">
+                    <div class="form-item-label"><span>编辑模式</span><small>在 JVM 配置 与 直接编辑启动命令 间切换</small></div>
+                    <div class="form-item-control">
+                      <el-radio-group v-model="commandEditMode" size="small">
+                        <el-radio-button label="start_command">直接编辑启动命令</el-radio-button>
+                        <el-radio-button label="jvm">JVM 配置</el-radio-button>
+                      </el-radio-group>
+                    </div>
                   </div>
-                </div>
-              </el-form-item>
+                </el-form-item>
               <template v-if="commandEditMode === 'jvm'">
                 <el-form-item>
                   <div class="form-item-wrapper">
@@ -406,11 +406,11 @@
                 <el-divider>启动命令</el-divider>
                 <el-form-item>
                   <div class="form-item-wrapper">
-                    <div class="form-item-label"><span>编辑模式</span><small>在 JVM 配置 与 start_command 间切换</small></div>
+                    <div class="form-item-label"><span>编辑模式</span><small>在 JVM 配置 与 直接编辑启动命令 间切换</small></div>
                     <div class="form-item-control">
                       <el-radio-group v-model="commandEditMode" size="small">
+                        <el-radio-button label="start_command">直接编辑启动命令</el-radio-button>
                         <el-radio-button label="jvm">JVM 配置</el-radio-button>
-                        <el-radio-button label="start_command">start_command</el-radio-button>
                       </el-radio-group>
                     </div>
                   </div>
@@ -634,11 +634,11 @@
                 <el-divider>启动命令</el-divider>
                 <el-form-item>
                   <div class="form-item-wrapper">
-                    <div class="form-item-label"><span>编辑模式</span><small>在 JVM 配置 与 start_command 间切换</small></div>
+                    <div class="form-item-label"><span>编辑模式</span><small>在 JVM 配置 与 直接编辑启动命令 间切换</small></div>
                     <div class="form-item-control">
                       <el-radio-group v-model="commandEditMode" size="small">
+                        <el-radio-button label="start_command">直接编辑启动命令</el-radio-button>
                         <el-radio-button label="jvm">JVM 配置</el-radio-button>
-                        <el-radio-button label="start_command">start_command</el-radio-button>
                       </el-radio-group>
                     </div>
                   </div>
@@ -693,7 +693,7 @@
                 <template v-else>
                   <el-form-item>
                     <div class="form-item-wrapper">
-                      <div class="form-item-label"><span>start_command</span><small>保存时将解析为 JVM 配置</small></div>
+                      <div class="form-item-label"><span>直接编辑启动命令</span><small>保存时将解析为 JVM 配置</small></div>
                       <div class="form-item-control">
                         <el-input
                           class="input-long"
@@ -1402,7 +1402,7 @@ const showExperiments = ref(false);
 const isDownloading = ref(false);
 const downloadProgress = ref(0);
 const javaCmdOptions = ref([]);
-const commandEditMode = ref('jvm'); // 'jvm' | 'start_command'
+const commandEditMode = ref('start_command'); // 'jvm' | 'start_command'
 	const currentView = ref('select_type');
 	const dialogState = reactive({isNewSetup: false, coreFileExists: false, configFileExists: false});
 	
@@ -1694,7 +1694,7 @@ const fetchServerSizes = async (requestId) => {
 	  isSavingConfig.value = false;
 	  isDownloading.value = false;
 	  downloadProgress.value = 0;
-    commandEditMode.value = 'jvm';
+    commandEditMode.value = 'start_command';
 	  currentView.value = 'select_type';
 	  configFormData.value = {};
 	  selectedServerTypeForSetup.value = '';
@@ -1713,35 +1713,11 @@ const fetchServerSizes = async (requestId) => {
 };
 
 const fetchJavaCmdOptions = async () => {
-  const fallback = (() => {
-    const out = [];
-    const seen = new Set();
-    const add = (x) => {
-      const s = (x || '').toString().trim();
-      if (!s || seen.has(s)) return;
-      seen.add(s);
-      out.push(s);
-    };
-    add(settings.java_command || 'java');
-    add('java');
-    return out;
-  })();
   try {
     const { data } = await apiClient.get('/api/settings/java-options');
-    const arr = Array.isArray(data) ? data : [];
-    const out = [];
-    const seen = new Set();
-    const add = (x) => {
-      const s = (x || '').toString().trim();
-      if (!s || seen.has(s)) return;
-      seen.add(s);
-      out.push(s);
-    };
-    fallback.forEach(add);
-    arr.forEach(add);
-    javaCmdOptions.value = out;
+    javaCmdOptions.value = Array.isArray(data) ? data : [];
   } catch (e) {
-    javaCmdOptions.value = fallback;
+    javaCmdOptions.value = [];
   }
 };
 
