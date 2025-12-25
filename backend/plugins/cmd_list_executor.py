@@ -9,7 +9,7 @@ import uuid
 
 HELP = (
     '!!execute <x|~dx> <y|~dy> <z|~dz> <filename> [threads]  支持相对坐标 ~dx ~dy ~dz；以执行瞬间位置为固定原点'
-    '（自动生成锚点盔甲架）。流程：add→并发setblock→summon→merge→remove（并发默认4，可自定义)'
+    '（自动生成锚点盔甲架）。流程：add→并发fill→summon→merge→remove（并发默认4，可自定义)'
 )
 
 PLUGIN_METADATA = {
@@ -41,10 +41,10 @@ def _read_command_list(path: str) -> list[str]:
 
 def _classify_commands(cmds: list[str]) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str]]:
     """分类拆分：
-    返回 (adds, setblocks, summons, merges, removes, others)
+    返回 (adds, fills, summons, merges, removes, others)
     """
     adds: list[str] = []
-    setblocks: list[str] = []
+    fills: list[str] = []
     summons: list[str] = []
     merges: list[str] = []
     removes: list[str] = []
@@ -56,15 +56,15 @@ def _classify_commands(cmds: list[str]) -> tuple[list[str], list[str], list[str]
             adds.append(c)
         elif low.startswith('forceload remove'):
             removes.append(c)
-        elif low.startswith('setblock '):
-            setblocks.append(c)
+        elif low.startswith('fill '):
+            fills.append(c)
         elif low.startswith('summon '):
             summons.append(c)
         elif low.startswith('data merge block'):
             merges.append(c)
         else:
             others.append(c)
-    return adds, setblocks, summons, merges, removes, others
+    return adds, fills, summons, merges, removes, others
 
 
 def _chunkify(items: list[str], n_chunks: int) -> list[list[str]]:
@@ -139,12 +139,13 @@ def run_execute(server: ServerInterface, source: CommandSource, ctx: dict):
         source.reply('[CommandListExecuter] 清单为空')
         return
 
-    adds, setblocks, summons, merges, removes, others = _classify_commands(cmds)
+    adds, fills, summons, merges, removes, others = _classify_commands(cmds)
     source.reply(
-        '[CommandListExecuter] 总 {} 条 | add:{} | setblock:{}(并发) | summon:{} | merge:{} | remove:{} | 其它:{}'.format(
-            len(cmds), len(adds), len(setblocks), len(summons), len(merges), len(removes), len(others)
+        '[CommandListExecuter] 总 {} 条 | add:{} | fill:{}(并发) | summon:{} | merge:{} | remove:{} | 其它:{}'.format(
+            len(cmds), len(adds), len(fills), len(summons), len(merges), len(removes), len(others)
         ))
 
+    server.execute("gamerule sendCommandFeedback false")
     # 通过“锚点盔甲架”冻结原点：
     anchor_tag = f"cmdlist_anchor_{uuid.uuid4().hex}"
 
@@ -182,8 +183,8 @@ def run_execute(server: ServerInterface, source: CommandSource, ctx: dict):
     for c in adds:
         server.execute(prefix + c)
 
-    # 2) 并发执行 setblock
-    if setblocks:
+    # 2) 并发执行 fill
+    if fills:
         # 线程数默认 4，可由命令参数覆盖；且不超过任务数
         try:
             req_workers = int(threads) if threads is not None else 4
@@ -191,9 +192,9 @@ def run_execute(server: ServerInterface, source: CommandSource, ctx: dict):
             req_workers = 4
         if req_workers < 1:
             req_workers = 1
-        workers = min(req_workers, len(setblocks))
-        chunks = _chunkify(setblocks, workers)
-        source.reply(f'[CommandListExecuter] 启动 {workers} 个线程并发执行 {len(setblocks)} 条 setblock')
+        workers = min(req_workers, len(fills))
+        chunks = _chunkify(fills, workers)
+        source.reply(f'[CommandListExecuter] 启动 {workers} 个线程并发执行 {len(fills)} 条 fill')
 
         def run_chunk(chunk: list[str]):
             for cmd in chunk:
@@ -220,6 +221,7 @@ def run_execute(server: ServerInterface, source: CommandSource, ctx: dict):
     source.reply(f'[CommandListExecuter] 执行完成，用时 {_format_duration(elapsed)}')
     # 清理锚点
     server.execute(f"kill @e[tag={anchor_tag}]")
+    server.execute("gamerule sendCommandFeedback true")
 
 
 def on_load(server: ServerInterface, old):
