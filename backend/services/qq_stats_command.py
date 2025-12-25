@@ -622,7 +622,7 @@ def _get_session_range_for_last(db: Session, player: models.Player, server_ids: 
         if offset == 0:
             label = f"上次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
         else:
-            label = f"倒数第{offset + 1}次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
+            label = f"倒数第{offset}次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
         c_start = _floor_to_10min(start)
         c_end = _ceil_to_10min(end) if end else None
         

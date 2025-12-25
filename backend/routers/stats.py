@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/stats", tags=["stats"])
 @router.get("/series/delta", response_model=Dict[str, List[Tuple[int, int]]])
 def api_delta_series(
     player_uuid: List[str] = Query(..., description="玩家 UUID 列表，可重复传参，如 ?player_uuid=a&player_uuid=b"),
-    metric: List[str] = Query(..., description="指标列表，可重复传参，如 ?metric=custom.play_one_minute&metric=minecraft:used.minecraft:diamond_pickaxe"),
+    metric: List[str] = Query(..., description="指标列表（支持通配符），可重复传参，如 ?metric=custom.play_one_minute&metric=minecraft:used.minecraft:diamond_pickaxe 或 ?metric=broken.* 或 ?metric=*.diamond_pickaxe"),
     granularity: str = Query("10min", description="粒度：10min,20min,30min,1h,6h,12h,24h,1week,1month,3month,6month,1year"),
     start: Optional[str] = Query(None, description="起始时间 ISO8601，可为空"),
     end: Optional[str] = Query(None, description="结束时间 ISO8601，可为空"),
@@ -33,7 +33,7 @@ def api_delta_series(
 @router.get("/series/total", response_model=Dict[str, List[Tuple[int, int]]])
 def api_total_series(
     player_uuid: List[str] = Query(..., description="玩家 UUID 列表，可重复传参，如 ?player_uuid=a&player_uuid=b"),
-    metric: List[str] = Query(..., description="指标列表，可重复传参，如 ?metric=custom.play_one_minute&metric=minecraft:used.minecraft:diamond_pickaxe"),
+    metric: List[str] = Query(..., description="指标列表（支持通配符），可重复传参，如 ?metric=custom.play_one_minute&metric=minecraft:used.minecraft:diamond_pickaxe 或 ?metric=used.*_pickaxe"),
     granularity: str = Query("10min", description="粒度：10min,20min,30min,1h,6h,12h,24h,1week,1month,3month,6month,1year"),
     start: Optional[str] = Query(None, description="起始时间 ISO8601，可为空"),
     end: Optional[str] = Query(None, description="结束时间 ISO8601，可为空"),
@@ -61,7 +61,7 @@ def list_metrics(q: Optional[str] = Query(None, description="关键字过滤"),
 
 
 @router.get("/leaderboard/total")
-def leaderboard_total(metric: List[str] = Query(..., description="指标列表，多值"),
+def leaderboard_total(metric: List[str] = Query(..., description="指标列表（支持通配符），多值"),
                       at: Optional[str] = Query(None, description="统计时刻，ISO；默认当前"),
                       server_id: Optional[List[int]] = Query(None, description="数据源服务器ID"),
                       namespace: str = Query("minecraft", description="命名空间"),
@@ -71,7 +71,7 @@ def leaderboard_total(metric: List[str] = Query(..., description="指标列表�
 
 
 @router.get("/leaderboard/delta")
-def leaderboard_delta(metric: List[str] = Query(..., description="指标列表，多值"),
+def leaderboard_delta(metric: List[str] = Query(..., description="指标列表（支持通配符），多值"),
                       start: Optional[str] = Query(None, description="起始时间，ISO"),
                       end: Optional[str] = Query(None, description="结束时间，ISO"),
                       server_id: Optional[List[int]] = Query(None, description="数据源服务器ID"),

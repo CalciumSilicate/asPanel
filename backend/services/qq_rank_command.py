@@ -186,24 +186,19 @@ def _trend_series_7d(
     # 这里直接查 player_metrics 进行聚合，避免写入。
     zeros = [0.0 for _ in boundaries]
 
-    # 归一/过滤指标
-    normed: List[str] = []
-    for m in metrics:
-        nm = stats_service._normalize_metric(m)  # type: ignore[attr-defined]
-        try:
-            cat, item = nm.split(".", 1)
-            normed.append(f"{cat}.{item}")
-        except Exception:
-            continue
-    allowed = stats_service._filter_metrics(normed, namespace=stats_service.DEFAULT_NAMESPACE)  # type: ignore[attr-defined]
-    if not allowed:
-        return {uid: list(zeros) for uid in player_uuids}
-
     start_anchor_ts = int(start_dt.timestamp())
     end_boundary_ts = int(boundaries[-1]) if boundaries else int(now_dt.timestamp())
 
     out: Dict[str, List[float]] = {uid: list(zeros) for uid in player_uuids}
     with get_db_context() as db:
+        allowed = stats_service.resolve_metrics(
+            db,
+            metrics,
+            namespace=stats_service.DEFAULT_NAMESPACE,
+            include_discovered=False,
+        )
+        if not allowed:
+            return out
         pairs = stats_service._normalize_metrics(allowed, stats_service.DEFAULT_NAMESPACE)  # type: ignore[attr-defined]
         metric_ids = stats_service._resolve_metric_ids(db, pairs)  # type: ignore[attr-defined]
         if not metric_ids:
@@ -290,16 +285,13 @@ def _metric_total_rank_for_player(
     if not player_uuid:
         return None
 
-    # 归一/过滤指标，保持与 stats_service.leaderboard_total 一致
-    normed: List[str] = []
-    for m in metrics:
-        nm = stats_service._normalize_metric(m)  # type: ignore[attr-defined]
-        try:
-            cat, item = nm.split(".", 1)
-            normed.append(f"{cat}.{item}")
-        except Exception:
-            continue
-    allowed = stats_service._filter_metrics(normed, namespace=namespace)  # type: ignore[attr-defined]
+    # 归一 + 通配符展开 + 白名单/忽略过滤（保持与 stats_service.leaderboard_total 一致）
+    allowed = stats_service.resolve_metrics(
+        db,
+        metrics,
+        namespace=namespace,
+        include_discovered=False,
+    )
     if not allowed:
         return None
 

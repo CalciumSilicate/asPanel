@@ -1,21 +1,23 @@
 # backend/plugins/aspanel_server_link.py
 from __future__ import annotations
 
-import re
 import json
 import os
+import re
 import threading
 import time
-from pathlib import Path
 from datetime import datetime, timezone
-from queue import Queue, Full, Empty
-from typing import Any, Optional, List
+from pathlib import Path
+from queue import Empty, Full, Queue
+from typing import Any, List, Optional
 from urllib.parse import urlparse, urlunparse
+
 from mcdreforged.api.all import *
 
 # Dependency：websocket-client（pip 包名：websocket-client）
 try:
     import websocket
+
     _HAS_WS = True
 except (ModuleNotFoundError, ImportError):
     websocket = None
@@ -34,7 +36,9 @@ _POS_THREAD: Optional[threading.Thread] = None
 _POS_STOP = threading.Event()
 
 # 命令输出解析：data get entity <player> Pos / Dimension
-_POS_PATTERN = re.compile(r"\[([\-0-9\.eE]+)d?,\s*([\-0-9\.eE]+)d?,\s*([\-0-9\.eE]+)d?\]")
+_POS_PATTERN = re.compile(
+    r"\[([\-0-9\.eE]+)d?,\s*([\-0-9\.eE]+)d?,\s*([\-0-9\.eE]+)d?\]"
+)
 _DIM_PATTERN = re.compile(r"data:\s*\"?([A-Za-z0-9_:]+)\"?")
 
 # ----------------------------- 工具函数与配置 -----------------------------
@@ -88,7 +92,9 @@ def _safe_json_dumps(obj: Any) -> str:
         return json.dumps(str(obj), ensure_ascii=False)
 
 
-def _query_pos_by_command(server: ServerInterface, player: str) -> tuple[Optional[tuple[float, float, float]], Optional[str]]:
+def _query_pos_by_command(
+    server: ServerInterface, player: str
+) -> tuple[Optional[tuple[float, float, float]], Optional[str]]:
     """通过 vanilla data 命令获取坐标与维度，运行在服务端线程，无需 Data API。"""
     pos = None
     dim = None
@@ -108,8 +114,6 @@ def _query_pos_by_command(server: ServerInterface, player: str) -> tuple[Optiona
     except Exception:
         dim = None
     return pos, dim
-
-
 
 
 def _read_env_config() -> dict[str, Any]:
@@ -147,6 +151,7 @@ def _read_mcdr_handler() -> str:
 
 # ----------------------------- WS 发送后台线程 -----------------------------
 
+
 class WsSender:
     def __init__(self, server: ServerInterface, cfg: dict[str, Any]):
         self.server = server
@@ -163,7 +168,9 @@ class WsSender:
     def start(self) -> None:
         if self._t and self._t.is_alive():
             return
-        self._t = threading.Thread(target=self._run, name="aspanel-ws-sender", daemon=True)
+        self._t = threading.Thread(
+            target=self._run, name="aspanel-ws-sender", daemon=True
+        )
         self._t.start()
 
     def stop(self, wait_seconds: float = 0.5) -> None:
@@ -191,9 +198,13 @@ class WsSender:
         payload = {"event": event, "ts": _utc_iso(), "data": merged}
         try:
             if hasattr(self.server, "logger") and self.server.logger:
-                self.server.logger.debug(f"[asPanel] 入队事件: {event} | 内容: {_safe_json_dumps(payload)}")
+                self.server.logger.debug(
+                    f"[asPanel] 入队事件: {event} | 内容: {_safe_json_dumps(payload)}"
+                )
             else:
-                print(f"[asPanel] 入队事件: {event} | 内容: {_safe_json_dumps(payload)}")
+                print(
+                    f"[asPanel] 入队事件: {event} | 内容: {_safe_json_dumps(payload)}"
+                )
         except Exception:
             pass
         try:
@@ -212,7 +223,9 @@ class WsSender:
         logger = getattr(self.server, "logger", None)
         if not _HAS_WS:
             if logger:
-                logger.warning("[asPanel] 未检测到 websocket-client 依赖，WS 上报被禁用")
+                logger.warning(
+                    "[asPanel] 未检测到 websocket-client 依赖，WS 上报被禁用"
+                )
             return
         flush_sec = max(0.01, float(self.flush_interval_ms) / 1000.0)
         while not self._stop.is_set():
@@ -242,16 +255,25 @@ class WsSender:
                         msg = self._ws.recv()  # type: ignore
                         if isinstance(msg, (str, bytes)):
                             try:
-                                obj = json.loads(msg if isinstance(msg, str) else msg.decode("utf-8", "ignore"))
+                                obj = json.loads(
+                                    msg
+                                    if isinstance(msg, str)
+                                    else msg.decode("utf-8", "ignore")
+                                )
                                 if isinstance(obj, dict):
                                     ev = obj.get("event")
                                     data = obj.get("data") or {}
                                     if ev == "sl.group_update":
-                                        if isinstance(data, dict) and str(data.get("server")) == _SERVER_NAME:
+                                        if (
+                                            isinstance(data, dict)
+                                            and str(data.get("server")) == _SERVER_NAME
+                                        ):
                                             groups = data.get("server_groups") or []
                                             if isinstance(groups, list):
                                                 global _SERVER_GROUPS
-                                                _SERVER_GROUPS = [str(x) for x in groups]
+                                                _SERVER_GROUPS = [
+                                                    str(x) for x in groups
+                                                ]
                                                 try:
                                                     sid = data.get("server_id")
                                                     if isinstance(sid, int):
@@ -261,7 +283,9 @@ class WsSender:
                                                     pass
                                                 try:
                                                     if logger:
-                                                        logger.info(f"[asPanel] 收到组更新：{_SERVER_GROUPS}")
+                                                        logger.info(
+                                                            f"[asPanel] 收到组更新：{_SERVER_GROUPS}"
+                                                        )
                                                 except Exception:
                                                     pass
                                     # 转发的 mcdr 事件（来自其他同组服务器）
@@ -311,9 +335,12 @@ class WsSender:
                 try:
                     if logger:
                         logger.warning(
-                            f"[asPanel] WS 连接失败或中断，{self.reconnect_interval}s 后重试 | url={self.ws_url}")
+                            f"[asPanel] WS 连接失败或中断，{self.reconnect_interval}s 后重试 | url={self.ws_url}"
+                        )
                     else:
-                        print(f"[asPanel] WS 连接失败或中断，{self.reconnect_interval}s 后重试 | url={self.ws_url}")
+                        print(
+                            f"[asPanel] WS 连接失败或中断，{self.reconnect_interval}s 后重试 | url={self.ws_url}"
+                        )
                 except Exception:
                     pass
                 time.sleep(self.reconnect_interval)
@@ -370,6 +397,7 @@ def _send_event(server: ServerInterface, event: str, data: dict[str, Any]) -> No
 
 # ----------------------------- 位置上报 -----------------------------
 
+
 def _collect_player_positions(server: ServerInterface) -> List[dict[str, Any]]:
     """获取玩家坐标与维度：仅使用 data 命令 + RCON。"""
     if _IS_PROXY_SERVER:
@@ -399,11 +427,13 @@ def _collect_player_positions(server: ServerInterface) -> List[dict[str, Any]]:
                     if pos is None:
                         continue
                     x, y, z = pos
-                    res.append({
-                        "player": p,
-                        "position": {"x": float(x), "y": float(y), "z": float(z)},
-                        "dimension": dim,
-                    })
+                    res.append(
+                        {
+                            "player": p,
+                            "position": {"x": float(x), "y": float(y), "z": float(z)},
+                            "dimension": dim,
+                        }
+                    )
                 except Exception:
                     continue
         finally:
@@ -425,18 +455,26 @@ def _report_positions(server: ServerInterface, reason: str) -> None:
     payload = _collect_player_positions(server)
     if not payload:
         try:
-            server.logger.debug(f"[asPanel] 位置上报跳过：未获取到玩家位置 | reason={reason}")
+            server.logger.debug(
+                f"[asPanel] 位置上报跳过：未获取到玩家位置 | reason={reason}"
+            )
         except Exception:
             pass
         return
     try:
-        server.logger.debug(f"[asPanel] 上报玩家位置：reason={reason} count={len(payload)}")
+        server.logger.debug(
+            f"[asPanel] 上报玩家位置：reason={reason} count={len(payload)}"
+        )
     except Exception:
         pass
-    _send_event(server, "mcdr.player_position", {
-        "reason": reason,
-        "positions": payload,
-    })
+    _send_event(
+        server,
+        "mcdr.player_position",
+        {
+            "reason": reason,
+            "positions": payload,
+        },
+    )
 
 
 def _position_loop(server: ServerInterface):
@@ -457,8 +495,8 @@ def _position_loop(server: ServerInterface):
                 pass
 
 
-
 # ----------------------------- 远端事件处理（转发显示） -----------------------------
+
 
 def _same_group(data_groups: Any) -> bool:
     try:
@@ -579,7 +617,9 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
         label.set_hover_text(display)
         return label
     if seg_type == "share":
-        url = _normalize_media_url(data.get("url") or data.get("jumpUrl") or data.get("file"))
+        url = _normalize_media_url(
+            data.get("url") or data.get("jumpUrl") or data.get("file")
+        )
         title = str(data.get("title") or data.get("content") or url or "")
         label = RText("[链接]", color=RColor.aqua)
         if url:
@@ -618,7 +658,20 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
         if detail:
             label.set_hover_text(detail[:300])
         return label
-    if seg_type in {"rps", "dice", "shake", "anonymous", "contact", "location", "music", "redbag", "poke", "gift", "cardimage", "tts"}:
+    if seg_type in {
+        "rps",
+        "dice",
+        "shake",
+        "anonymous",
+        "contact",
+        "location",
+        "music",
+        "redbag",
+        "poke",
+        "gift",
+        "cardimage",
+        "tts",
+    }:
         return RText(f"[{seg_type}]", color=RColor.gray)
     return RText(f"[{seg_type}]", color=RColor.gray)
 
@@ -644,8 +697,11 @@ def _handle_forward_event(server: ServerInterface, event: str, data: dict[str, A
         return
 
     # 构建可点击的服务器标签 [server]
-    prefix = _rtext_gray("[") + _rtext_gray(src).set_click_event(RAction.suggest_command,
-                                                                 f"/server {src}") + _rtext_gray("] ")
+    prefix = (
+        _rtext_gray("[")
+        + _rtext_gray(src).set_click_event(RAction.suggest_command, f"/server {src}")
+        + _rtext_gray("] ")
+    )
 
     if event == "mcdr.user_info":
         payload = _extract_user_info_payload(data) or {}
@@ -654,21 +710,27 @@ def _handle_forward_event(server: ServerInterface, event: str, data: dict[str, A
         content = str(payload.get("content") or payload.get("raw_content") or "")
         if is_user and player:
             # [server] <player> content
-            p = _rtext_gray(f"<{player}> ").set_click_event(RAction.suggest_command, f"@ {player}")
+            p = _rtext_gray(f"<{player}> ").set_click_event(
+                RAction.suggest_command, f"@ {player}"
+            )
             server.say(prefix + p + _rtext_gray(content))
             # 提及检测：扫描本服在线玩家集合，匹配 @Name 或 @ Name（精确到完整 MC ID，不误匹配前缀）
             try:
-                if '@' in content and _LOCAL_PLAYERS:
+                if "@" in content and _LOCAL_PLAYERS:
                     import re
+
                     notified = set()
                     for name in list(_LOCAL_PLAYERS):
                         # 匹配 @Name 或 @ Name，后面不能再跟字母/数字/下划线，避免匹配到更长的ID前缀
-                        pattern = re.compile(rf"@\s*{re.escape(name)}(?![A-Za-z0-9_])", re.IGNORECASE)
+                        pattern = re.compile(
+                            rf"@\s*{re.escape(name)}(?![A-Za-z0-9_])", re.IGNORECASE
+                        )
                         if pattern.search(content):
                             notified.add(name)
                     for name in notified:
                         server.execute(
-                            f"execute at {name} run playsound minecraft:entity.arrow.hit_player player {name}")
+                            f"execute at {name} run playsound minecraft:entity.arrow.hit_player player {name}"
+                        )
             except Exception:
                 pass
 
@@ -711,23 +773,32 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
     # 打印
     if level == "ALERT":
         # [ALERT] <user> message （红色粗体）
-        t = RText("[ALERT] ", color=RColor.red, styles=RStyle.italic) + RText(f"<{user}> ", color=RColor.red, styles=RStyle.italic) + RText(message, color=RColor.red, styles=RStyle.italic)
+        t = (
+            RText("[ALERT] ", color=RColor.red, styles=RStyle.italic)
+            + RText(f"<{user}> ", color=RColor.red, styles=RStyle.italic)
+            + RText(message, color=RColor.red, styles=RStyle.italic)
+        )
         server.say(t)
     else:
         if source == "qq":
             prefix = "[QQ] "
         else:
             prefix = "[WEB] "
-        content_rtext = _cq_message_to_rtext(message) if source == "qq" else _rtext_gray(message)
+        content_rtext = (
+            _cq_message_to_rtext(message) if source == "qq" else _rtext_gray(message)
+        )
         t = _rtext_gray(prefix) + _rtext_gray(f"<{user}> ") + content_rtext
         server.say(t)
 
 
 # ---- Plugin lifecycle ----
 
+
 def on_load(server: ServerInterface, prev_module: Any):
     try:
-        server.register_help_message("!!aspanel_link", "asPanel Server Link：WS 上报 & 组同步")
+        server.register_help_message(
+            "!!aspanel_link", "asPanel Server Link：WS 上报 & 组同步"
+        )
     except Exception:
         pass
     # 读取 handler，确定是否为代理服
@@ -735,7 +806,9 @@ def on_load(server: ServerInterface, prev_module: Any):
     _HANDLER = _read_mcdr_handler()
     _IS_PROXY_SERVER = _HANDLER in {"velocity_handler", "bungeecord_handler"}
     try:
-        server.logger.info(f"[asPanel] 当前 handler={_HANDLER or '未设置'} proxy={_IS_PROXY_SERVER}")
+        server.logger.info(
+            f"[asPanel] 当前 handler={_HANDLER or '未设置'} proxy={_IS_PROXY_SERVER}"
+        )
     except Exception:
         pass
     cfg = _read_env_config()
@@ -744,12 +817,21 @@ def on_load(server: ServerInterface, prev_module: Any):
     except Exception:
         pass
     _get_sender(server)
-    _send_event(server, "mcdr.plugin_loaded", {"plugin": PLUGIN_METADATA, "reload": prev_module is not None})
+    _send_event(
+        server,
+        "mcdr.plugin_loaded",
+        {"plugin": PLUGIN_METADATA, "reload": prev_module is not None},
+    )
     # 启动位置上报线程（非代理服）
     global _POS_THREAD
     if not _IS_PROXY_SERVER:
         _POS_STOP.clear()
-        _POS_THREAD = threading.Thread(target=_position_loop, args=(server,), name="aspanel-pos-reporter", daemon=True)
+        _POS_THREAD = threading.Thread(
+            target=_position_loop,
+            args=(server,),
+            name="aspanel-pos-reporter",
+            daemon=True,
+        )
         _POS_THREAD.start()
 
 
@@ -771,13 +853,14 @@ def on_unload(server: ServerInterface):
 
 # ---- General / User Info ----
 def on_user_info(server: ServerInterface, info: Info):
-    if info.content == '!test':
+    if info.content == "!test":
         _report_positions(server, "test_command")
         server.say("[asPanel] 测试位置上报已发送")
     _send_event(server, "mcdr.user_info", {"info": _info_to_dict(info)})
 
 
 # ---- Server lifecycle ----
+
 
 def on_server_start_pre(server: ServerInterface):
     _send_event(server, "mcdr.server_start_pre", {"server": _SERVER_NAME})
@@ -797,7 +880,11 @@ def on_server_startup(server: ServerInterface):
 
 
 def on_server_stop(server: ServerInterface, server_return_code: int):
-    _send_event(server, "mcdr.server_stop", {"server": _SERVER_NAME, "return_code": int(server_return_code)})
+    _send_event(
+        server,
+        "mcdr.server_stop",
+        {"server": _SERVER_NAME, "return_code": int(server_return_code)},
+    )
     # 本服玩家列表：停止时清空
     try:
         _LOCAL_PLAYERS.clear()
@@ -806,6 +893,7 @@ def on_server_stop(server: ServerInterface, server_return_code: int):
 
 
 # ---- MCDR lifecycle ----
+
 
 def on_mcdr_start(server: ServerInterface):
     _send_event(server, "mcdr.mcdr_start", {"server": _SERVER_NAME})
@@ -829,12 +917,17 @@ def on_mcdr_stop(server: ServerInterface):
 
 # ---- Player events ----
 
+
 def on_player_joined(server: ServerInterface, player: str, info: Info):
     if _is_bot_joined(info):
         return
     if _IS_PROXY_SERVER:
         return
-    _send_event(server, "mcdr.player_joined", {"player": str(player), "info": _info_to_dict(info)})
+    _send_event(
+        server,
+        "mcdr.player_joined",
+        {"player": str(player), "info": _info_to_dict(info)},
+    )
     try:
         _LOCAL_PLAYERS.add(str(player))
     except Exception:

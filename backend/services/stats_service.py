@@ -586,6 +586,95 @@ def list_metrics(db: Session, q: Optional[str] = None, limit: int = 50,
     return _filter_metrics(uniq, namespace=namespace)
 
 
+_WILDCARD_CHARS = ("*", "?", "[")
+
+
+def _has_wildcard(s: str) -> bool:
+    return any(ch in s for ch in _WILDCARD_CHARS)
+
+
+def _list_all_metrics_from_db(db: Session, *, namespace: str) -> List[str]:
+    """从 MetricsDim 拉取某 namespace 下的所有指标，归一为 'cat.item'。"""
+    stmt = select(models.MetricsDim.category, models.MetricsDim.item).where(
+        models.MetricsDim.category.like(f"{namespace}:%"),
+        models.MetricsDim.item.like(f"{namespace}:%"),
+    )
+    rows = db.execute(stmt).all()
+    out: List[str] = []
+    for cat_key, item_key in rows:
+        try:
+            ns1, cat = str(cat_key).split(":", 1)
+            ns2, item = str(item_key).split(":", 1)
+        except Exception:
+            continue
+        if ns1 != namespace or ns2 != namespace:
+            continue
+        out.append(f"{cat}.{item}")
+    return out
+
+
+def resolve_metrics(
+    db: Session,
+    metrics: Iterable[str],
+    *,
+    namespace: str = DEFAULT_NAMESPACE,
+    include_discovered: bool = True,
+) -> List[str]:
+    """解析输入 metrics：归一、展开通配符，并应用白名单/忽略规则。
+
+    输入支持：
+    - 'custom.play_one_minute'
+    - 'minecraft:custom.minecraft:play_one_minute'
+    - 通配符：'broken.*', '*.diamond_pickaxe', 'used.*_pickaxe'
+
+    返回：已展开且过滤后的 'cat.item' 列表（去重、排序）。
+    """
+    patterns: List[str] = []
+    has_wildcard = False
+    for m in metrics:
+        nm = _normalize_metric(str(m))
+        try:
+            cat, item = nm.split(".", 1)
+        except Exception:
+            continue
+        pat = f"{cat}.{item}"
+        patterns.append(pat)
+        if not has_wildcard and _has_wildcard(pat):
+            has_wildcard = True
+
+    if not patterns:
+        return []
+
+    if not has_wildcard:
+        return _filter_metrics(patterns, namespace=namespace)
+
+    universe: Set[str] = set()
+    try:
+        universe.update(_list_all_metrics_from_db(db, namespace=namespace))
+    except Exception:
+        # 读库失败时，至少保证通配符对 discovered metrics 可用
+        pass
+    if include_discovered and namespace == DEFAULT_NAMESPACE:
+        try:
+            universe.update(discover_metrics_from_all_servers())
+        except Exception:
+            pass
+
+    # 仅在“已存在的指标集合”中展开通配符，再做最终过滤
+    universe_filtered = _filter_metrics(universe, namespace=namespace)
+
+    expanded: Set[str] = set()
+    for pat in patterns:
+        if _has_wildcard(pat):
+            for m in universe_filtered:
+                if fnmatch.fnmatchcase(m, pat):
+                    expanded.add(m)
+        else:
+            expanded.add(pat)
+
+    return _filter_metrics(expanded, namespace=namespace)
+
+
 def _align_down_calendar(ts: int, granularity: str, tz) -> int:
     dt = datetime.fromtimestamp(ts, tz)
     if granularity == "10min":
@@ -812,16 +901,9 @@ def get_delta_series(*, player_uuids: List[str], metrics: List[str], granularity
         if step:
             start_ts = start_ts - step
 
-    # 输入指标按白名单/忽略进行过滤（支持通配符），并归一为 cat.item
-    normed: List[str] = []
-    for m in metrics:
-        nm = _normalize_metric(m)
-        try:
-            cat, item = nm.split('.', 1)
-            normed.append(f"{cat}.{item}")
-        except Exception:
-            continue
-    allowed = _filter_metrics(normed, namespace=namespace)
+    # 归一 + 通配符展开 + 白名单/忽略过滤
+    with SessionLocal() as _db:
+        allowed = resolve_metrics(_db, metrics, namespace=namespace)
     if not allowed:
         return {uid: [] for uid in player_uuids}
 
@@ -890,22 +972,12 @@ def leaderboard_total(*, metrics: List[str], at: Optional[str] = None,
     from time import time as _time
     at_ts = _parse_iso(at) if at else int(_time())
 
-    # 过滤输入指标
-    normed: List[str] = []
-    for m in metrics:
-        nm = _normalize_metric(m)
-        try:
-            cat, item = nm.split('.', 1)
-            normed.append(f"{cat}.{item}")
-        except Exception:
-            continue
-    allowed = _filter_metrics(normed, namespace=namespace)
-    if not allowed:
-        return []
-
-    pairs = _normalize_metrics(allowed, namespace)
     db = SessionLocal()
     try:
+        allowed = resolve_metrics(db, metrics, namespace=namespace, include_discovered=False)
+        if not allowed:
+            return []
+        pairs = _normalize_metrics(allowed, namespace)
         metric_ids = _resolve_metric_ids(db, pairs)
         if not metric_ids:
             return []
@@ -965,22 +1037,12 @@ def leaderboard_delta(*, metrics: List[str], start: Optional[str] = None, end: O
     start_ts = _parse_iso(start) if start else None
     end_ts = _parse_iso(end) if end else None
 
-    # 过滤输入指标
-    normed: List[str] = []
-    for m in metrics:
-        nm = _normalize_metric(m)
-        try:
-            cat, item = nm.split('.', 1)
-            normed.append(f"{cat}.{item}")
-        except Exception:
-            continue
-    allowed = _filter_metrics(normed, namespace=namespace)
-    if not allowed:
-        return []
-
-    pairs = _normalize_metrics(allowed, namespace)
     db = SessionLocal()
     try:
+        allowed = resolve_metrics(db, metrics, namespace=namespace, include_discovered=False)
+        if not allowed:
+            return []
+        pairs = _normalize_metrics(allowed, namespace)
         metric_ids = _resolve_metric_ids(db, pairs)
         if not metric_ids:
             return []
@@ -1025,16 +1087,9 @@ def get_total_series(*, player_uuids: List[str], metrics: List[str], granularity
     start_ts = _parse_iso(start) if start else None
     end_ts = _parse_iso(end) if end else None
 
-    # 输入指标按白名单/忽略进行过滤（支持通配符），并归一为 cat.item
-    normed: List[str] = []
-    for m in metrics:
-        nm = _normalize_metric(m)
-        try:
-            cat, item = nm.split('.', 1)
-            normed.append(f"{cat}.{item}")
-        except Exception:
-            continue
-    allowed = _filter_metrics(normed, namespace=namespace)
+    # 归一 + 通配符展开 + 白名单/忽略过滤
+    with SessionLocal() as _db:
+        allowed = resolve_metrics(_db, metrics, namespace=namespace)
     if not allowed:
         return {uid: [] for uid in player_uuids}
 
