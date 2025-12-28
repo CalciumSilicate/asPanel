@@ -48,19 +48,39 @@ def _ensure_db_schema():
     """
     try:
         with engine.begin() as conn:
+            # ----------------------------
+            # servers: map
+            # ----------------------------
             cols = conn.execute(text("PRAGMA table_info(servers)")).fetchall()
             names = set()
             for row in cols:
                 try:
                     names.add(row._mapping.get("name"))
                 except Exception:
-                    # PRAGMA: cid,name,type,notnull,dflt_value,pk
                     names.add(row[1] if len(row) > 1 else None)
             names.discard(None)
 
             if "map" not in names:
                 conn.execute(text("ALTER TABLE servers ADD COLUMN map TEXT DEFAULT '{}'"))
             conn.execute(text("UPDATE servers SET map='{}' WHERE map IS NULL"))
+
+            # ----------------------------
+            # players: is_bot
+            # ----------------------------
+            cols = conn.execute(text("PRAGMA table_info(players)")).fetchall()
+            names = set()
+            for row in cols:
+                try:
+                    names.add(row._mapping.get("name"))
+                except Exception:
+                    names.add(row[1] if len(row) > 1 else None)
+            names.discard(None)
+
+            if "is_bot" not in names:
+                # SQLite bool 通常用 0/1；这里用 INTEGER + DEFAULT 0
+                conn.execute(text("ALTER TABLE players ADD COLUMN is_bot INTEGER DEFAULT 0"))
+            conn.execute(text("UPDATE players SET is_bot=0 WHERE is_bot IS NULL"))
+
     except Exception:
         # 不阻塞启动；缺列时相关功能会不可用
         pass

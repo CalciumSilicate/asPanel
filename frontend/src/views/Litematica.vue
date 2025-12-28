@@ -302,7 +302,7 @@ const copyToClipboard = async (text: string, okMsg = '已复制') => {
 
 const copyCommand = (row: LtmRow) => {
   const target = row.cl_file_path || `${(row.file_name || '').replace(/\.litematic$/i, '')}.mccl.txt`
-  const content = `!!execute ~ ~ ~ ${target} 1`
+  const content = `!!execute ~ ~ ~ ${target}`
   copyToClipboard(content, '命令已复制')
 }
 
@@ -384,7 +384,7 @@ const doBatchDownloadCL = async () => {
 const doBatchCopy = async () => {
   const targets = multipleSelection.value
   if (!targets.length) return ElMessage.warning('请先选择投影')
-  const lines = targets.map(r => `!!execute ~ ~ ~ ${(r.cl_file_path || `${(r.file_name || '').replace(/\.litematic$/i, '')}.mccl.txt`)} 1`)
+  const lines = targets.map(r => `!!execute ~ ~ ~ ${(r.cl_file_path || `${(r.file_name || '').replace(/\.litematic$/i, '')}.mccl.txt`)}`)
   await copyToClipboard(lines.join('\n'), '命令已复制')
 }
 

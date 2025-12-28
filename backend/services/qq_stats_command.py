@@ -252,7 +252,7 @@ def _DISTANCE_FORMATTER(x: float) -> str:
 
 TOTAL_ITEMS = [
     ("上线次数", ["custom.leave_game"], 1, lambda x: x),
-    ("在线时长(hr)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, _TIME_FORMATTER),
+    ("在线时长", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, _TIME_FORMATTER),
     # ("击杀玩家", ["custom.player_kills"], 1, "count"),
     # ("被玩家击杀", ["killed_by.player"], 1, "count"),
     ("挖掘方块", _BREAK_METRICS, 1, lambda x: int(x)),
@@ -295,6 +295,7 @@ class TimeRange:
     granularity: str
     label: str
     x_labels: List[str]
+    identifyer: Optional[str] = None
 
 
 def _format_number(val: float, formatter: Callable) -> Any:
@@ -401,7 +402,7 @@ def _calc_preset(label: str, offset: int = 0) -> TimeRange:
         start = now - timedelta(days=365 * 5)
         end = now
 
-        return TimeRange(start, end, start, end, "1month", "全部记录", [])
+        return TimeRange(start, end, start, end, "1month", "全部记录", [], "all")
     if label == "last":
         min = (now.minute // 10 + 1) * 10
         end = now.replace(microsecond=0, second=0, minute=min if min != 60 else 0)
@@ -510,6 +511,7 @@ def _build_totals(player_uuid: str, tr: TimeRange, server_ids: List[int]) -> Lis
         )
         series = series_map.get(player_uuid, [])
         total, delta = _metrics_sum(series)
+        delta = delta if tr.identifyer != "all" else 0
         if total:
             out.append({"label": label, "total": total, "delta": delta, "label_total": _format_number(total * unit, formatter), "label_delta": _format_number(delta * unit, formatter)})
     return out
@@ -554,7 +556,7 @@ def _get_last_seen_str(db: Session, player: models.Player, server_ids: List[int]
     
     if last_session_time:
         last_session_time = convert_to_tz(last_session_time)
-        return last_session_time.strftime("%Y-%m-%d %H:%M")
+        return last_session_time.strftime("%Y-%m-%d %H:%M:%S")
     
     # 2. Check Metrics (custom.leave_game)
     cat_key = "minecraft:custom"
@@ -578,12 +580,10 @@ def _get_last_seen_str(db: Session, player: models.Player, server_ids: List[int]
             models.PlayerMetrics.player_id == player.id,
             models.PlayerMetrics.metric_id == metric_id,
             models.PlayerMetrics.ts <= now_ts,
-        ).order_by(models.PlayerMetrics.ts.desc()).limit(2)
+        ).order_by(models.PlayerMetrics.ts.desc()).limit(1)
         
         rows = db.execute(q).scalars().all()
-        # "If the found value is the first value for that player in that server (no earlier values) then discard it."
-        # If we have at least 2 rows, the latest (rows[0]) has a predecessor (rows[1]).
-        if len(rows) >= 2:
+        if len(rows) >= 1:
             ts = rows[0]
             if ts > latest_timestamp:
                 latest_timestamp = ts
@@ -701,7 +701,34 @@ def build_stats_picture(
         # 注意：这里假设 player.uuid 是带连字符的，如果不是需要处理
         # Cravatar 支持无连字符 UUID，但带连字符更标准
         mc_avatar = f"https://cravatar.eu/helmavatar/{player.uuid}/128.png"
+    if not qq_avatar:
+        qq_avatar = mc_avatar  # 双头像都无时，使用 MC 头像作为 QQ 头像备选
 
+    # 默认使用 [1] 如果未提供 server_ids，防止报错
+    effective_server_ids = server_ids if server_ids else [1]
+    if tr.identifyer == "all":
+        with get_db_context() as db:
+            earliest_ts = db.scalar(
+                select(func.min(models.PlayerMetrics.ts))
+                .where(
+                    models.PlayerMetrics.server_id.in_(effective_server_ids),
+                    models.PlayerMetrics.ts.isnot(None),
+                )
+            )
+            tr.start = datetime.fromtimestamp(earliest_ts or 0, tz=timezone.utc).astimezone(get_tz_info())
+            if tr.start.month == 12:
+                tr.start = tr.start.replace(year=tr.start.year + 1, month=1)
+            else:
+                tr.start = tr.start.replace(month=tr.start.month + 1)
+            tr.start = tr.start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            tr.real_start = tr.start
+            if tr.end.month == 12:
+                tr.end = tr.end.replace(year=tr.end.year + 1, month=1)
+            else:
+                tr.end = tr.end.replace(month=tr.end.month + 1)
+            tr.end = tr.end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            tr.real_end = tr.end
+            tr.label == f"全部记录 ({tr.start.strftime('%Y-%m')}~{tr.end.strftime('%Y-%m')})"
     data = {
         "qq_avatar": qq_avatar,
         "mc_avatar": mc_avatar,
@@ -714,9 +741,6 @@ def build_stats_picture(
         "data_source_text": data_source_text,
         "generated_at": get_now_tz().strftime("%Y-%m-%d %H:%M:%S")
     }
-    # 默认使用 [3] 如果未提供 server_ids，防止报错
-    effective_server_ids = server_ids if server_ids else [3]
-
     data["totals"] = _build_totals(player.uuid, tr, effective_server_ids)
     data["charts"] = _build_charts(player.uuid, tr, effective_server_ids)
     # 位置/路径

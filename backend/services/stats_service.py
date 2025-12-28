@@ -194,9 +194,9 @@ def _run_save_all_sync(server: models.Server, debounce_sec: float) -> None:
 
         if loop and loop.is_running():
             # 已在事件循环中：安排异步任务执行，避免 asyncio.run 抛错导致协程未 awaited
-            loop.create_task(mcdr_manager.send_command(server, "save-all"))
+            loop.create_task(mcdr_manager.save_all(server))
         else:
-            asyncio.run(mcdr_manager.send_command(server, "save-all"))
+            asyncio.run(mcdr_manager.save_all(server))
     except Exception:
         logger.exception("发送 save-all 命令失败")
     _SAVEALL_LAST_TS[server.id] = now
@@ -450,7 +450,7 @@ async def ingest_scheduler_loop():
                         now_ts = time.time()
                         if now_ts - last_ts >= 3.0:
                             logger.debug(f"服务器运行中，试发送命令save-all server_id={srv.id}")
-                            await mcdr_manager.send_command(srv, 'save-all')
+                            await mcdr_manager.save_all(srv)
                             _SAVEALL_LAST_TS[srv.id] = now_ts
                             await asyncio.sleep(1.0)
                 except Exception:
@@ -1012,12 +1012,15 @@ def leaderboard_total(*, metrics: List[str], at: Optional[str] = None,
                   (models.PlayerMetrics.ts == latest.c.ts))
             .group_by(latest.c.player_id)
             .order_by(func.sum(models.PlayerMetrics.total).desc())
-            .limit(max(1, int(limit)))
         )
         rows = db.execute(agg).all()
         out: List[Dict[str, object]] = []
         for pid, val in rows:
+            if len(out) >= limit:
+                break
             rec = db.query(models.Player).filter(models.Player.id == pid).first()
+            if rec is None or rec.is_bot or rec.player_name in ["Steve", "Alex", "Bot"] or str(rec.player_name).lower().startswith("bot_") or rec.player_name is None:
+                continue
             out.append({
                 'player_uuid': rec.uuid if rec else None,
                 'player_name': rec.player_name if rec else None,

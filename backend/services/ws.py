@@ -427,6 +427,13 @@ async def _handle_single(payload: Dict[str, Any]):
     try:
         from backend.services import player_manager as _pm
         _ensure_playtime_task()
+        if event == "mcdr.bot_joined" and isinstance(data, dict):
+            # 为机器人玩家标记is_bot
+            server_name = str(data.get("server") or "")
+            player = str(data.get("player") or "")
+            if server_name and player:
+                with get_db_context() as db:
+                    crud.set_player_is_bot(db, player, True)
         if event in {"mcdr.player_joined", "mcdr.player_left", "mcdr.player_position"} and isinstance(data, dict):
             server_name = str(data.get("server") or "")
             if server_name and _is_proxy_server(server_name):
@@ -737,6 +744,7 @@ async def _forward_event_to_plugins(event: str, data: Dict[str, Any], original_p
         "mcdr.server_startup",
         "mcdr.server_stop",
         "mcdr.player_joined",
+        "mcdr.bot_joined",
         "mcdr.player_left",
     }
     if event not in FORWARD_EVENTS:
@@ -871,6 +879,32 @@ async def broadcast_server_link_update(server_name: str, group_names: List[str])
     except Exception:
         pass
 
+async def broadcast_save_all(server_name: str):
+    server_id: Optional[int] = None
+    try:
+        with get_db_context() as db:
+            for s in crud.get_all_servers(db):
+                if Path(s.path).name == server_name:
+                    server_id = s.id
+                    break
+    except Exception:
+        server_id = None
+    msg = json.dumps({
+        "event": "sl.save_all",
+        "ts": "-",
+        "data": {"server": server_name, "server_id": server_id}
+    }, ensure_ascii=False)
+    for ws, bound in list(_PLUGIN_CLIENTS.items()):
+        try:
+            if bound == server_name:
+                await ws.send_text(msg)
+        except Exception:
+            _PLUGIN_CLIENTS.pop(ws, None)
+    try:
+        logger.debug(f"[MCDR-WS] 推送保存世界请求 | server={server_name}")
+    except Exception:
+        pass
+mcdr_manager.save_all_method = broadcast_save_all # type: ignore
 
 def get_group_players(group_id: int) -> List[dict]:
     """获取某个组内的所有在线玩家（聚合所有服务器）。

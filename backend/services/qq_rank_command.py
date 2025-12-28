@@ -16,6 +16,58 @@ from backend.services import stats_service
 from backend.services.qq_rank_image import RankRow, render_rank_image
 
 
+_BAD_FOOD_METRICS = [
+    "used.poisonous_potato",
+    "used.rotten_flesh",
+    "used.spider_eye",
+    "used.pufferfish",
+    "used.suspicious_stew"
+]
+
+_EAT_METRICS = [
+    "used.apple",
+    "used.golden_apple",
+    "used.enchanted_golden_apple",
+    "used.baked_potato",
+    "used.beetroot",
+    "used.beetroot_soup",
+    "used.bread",
+    "custom.eat_cake_slice",
+    "used.carrot",
+    "used.chorus_fruit",
+    "used.cooked_chicken",
+    "used.cooked_cod",
+    "used.cooked_mutton",
+    "used.cooked_porkchop",
+    "used.cooked_rabbit",
+    "used.cooked_salmon",
+    "used.cookie",
+    "used.dried_kelp",
+    "used.glow_berries",
+    "used.golden_carrot",
+    "used.honey_bottle",
+    "used.melon_slice",
+    "used.mushroom_stew",
+    "used.potato",
+    "used.poisonous_potato",
+    "used.pufferfish",
+    "used.pumpkin_pie",
+    "used.rabbit_stew",
+    "used.raw_beef",
+    "used.raw_chicken",
+    "used.raw_cod",
+    "used.raw_mutton",
+    "used.raw_porkchop",
+    "used.raw_rabbit",
+    "used.raw_salmon",
+    "used.rotten_flesh",
+    "used.spider_eye",
+    "used.steak",
+    "used.suspicious_stew",
+    "used.sweet_berries",
+    "used.tropical_fish",
+]
+
 def _to_local_dt(dt: datetime) -> datetime:
     tz = get_tz_info()
     if dt.tzinfo is None:
@@ -96,12 +148,13 @@ def _builtin_boards() -> Dict[str, BuiltinBoard]:
     move_metrics = ["custom.aviate_one_cm", "custom.ender_pearl_one_cm", *_WALK_METRICS, *_VEHICLE_METRICS]
 
     boards = [
-        BuiltinBoard("上线榜", "统计上线次数（leave_game）", ["custom.leave_game"], 1.0, lambda x: _fmt_int(x)),
-        BuiltinBoard("在线榜", "统计在线时长（play_time / play_one_minute）", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, _time_formatter),
+        BuiltinBoard("上线榜", "统计上线次数", ["custom.leave_game"], 1.0, lambda x: _fmt_int(x)),
+        BuiltinBoard("在线榜", "统计在线时长", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, _time_formatter),
         BuiltinBoard("挖掘榜", "统计挖掘方块（按工具使用次数汇总）", list(_BREAK_METRICS), 1.0, lambda x: _fmt_int(x)),
-        BuiltinBoard("击杀榜", "统计击杀玩家数（player_kills）", ["custom.player_kills"], 1.0, lambda x: _fmt_int(x)),
-        BuiltinBoard("被击杀榜", "统计被玩家击杀数（killed_by.player）", ["killed_by.player"], 1.0, lambda x: _fmt_int(x)),
-        BuiltinBoard("死亡榜", "统计死亡次数（deaths）", ["custom.deaths"], 1.0, lambda x: _fmt_int(x)),
+        BuiltinBoard("真挖掘榜", "统计挖掘方块（按方块挖掘次数汇总）", ["mined.*"], 1.0, lambda x: _fmt_int(x)),
+        BuiltinBoard("击杀榜", "统计击杀玩家数", ["custom.player_kills"], 1.0, lambda x: _fmt_int(x)),
+        BuiltinBoard("被击杀榜", "统计被玩家击杀数", ["killed_by.player"], 1.0, lambda x: _fmt_int(x)),
+        BuiltinBoard("死亡榜", "统计死亡次数", ["custom.deaths"], 1.0, lambda x: _fmt_int(x)),
         BuiltinBoard("鞘翅榜", "统计鞘翅飞行距离", ["custom.aviate_one_cm"], 0.00001, _distance_formatter),
         BuiltinBoard("珍珠榜", "统计末影珍珠传送距离", ["custom.ender_pearl_one_cm"], 0.00001, _distance_formatter),
         BuiltinBoard("步行榜", "统计步行/游泳等距离", list(_WALK_METRICS), 0.00001, _distance_formatter),
@@ -109,6 +162,8 @@ def _builtin_boards() -> Dict[str, BuiltinBoard]:
         BuiltinBoard("烟花榜", "统计使用烟花次数", ["custom.firework_boost", "used.firework_rocket"], 1.0, lambda x: _fmt_int(x)),
         BuiltinBoard("不死图腾榜", "统计消耗不死图腾次数", ["used.totem_of_undying"], 1.0, lambda x: _fmt_int(x)),
         BuiltinBoard("基岩榜", "统计破基岩次数", ["custom.break_bedrock"], 1.0, lambda x: _fmt_int(x)),
+        BuiltinBoard("吃货榜", "统计吃各类食物次数", list(_EAT_METRICS), 1.0, lambda x: _fmt_int(x)),
+        BuiltinBoard("小馋猫榜", "统计吃各类会提供负面效果食物的次数", list(_BAD_FOOD_METRICS), 1.0, lambda x: _fmt_int(x)),
     ]
     out: Dict[str, BuiltinBoard] = {}
     for b in boards:
@@ -126,7 +181,7 @@ def _builtin_boards() -> Dict[str, BuiltinBoard]:
 def list_board_names() -> List[str]:
     names = [
         "上线榜", "在线榜", "挖掘榜", "击杀榜", "被击杀榜", "死亡榜", "鞘翅榜", "珍珠榜", "步行榜", "移动榜", "烟花榜", "不死图腾榜", "基岩榜",
-        "航天榜", "最后在线榜",
+        "航天榜", "最后在线榜", "吃货榜", "小馋猫榜"
     ]
     return names
 
@@ -375,7 +430,6 @@ def build_metric_rank_image_b64(
     rows = stats_service.leaderboard_total(metrics=metrics, at=at_iso, server_ids=server_ids, limit=max(1, int(limit)))
     if not rows:
         return False, "没有查到数据（可能是指标无效，或该服务器暂无统计数据）"
-
     player_uuids: List[str] = [str(r.get("player_uuid") or "") for r in rows if r.get("player_uuid")]
     pinned_uuid_norm = (pinned_uuid or "").strip()
     include_pinned = bool(pinned_uuid_norm) and pinned_uuid_norm not in set(player_uuids)
@@ -390,7 +444,7 @@ def build_metric_rank_image_b64(
     rank_rows: List[RankRow] = []
     for idx, r in enumerate(rows, start=1):
         puid = str(r.get("player_uuid") or "")
-        pname = str(r.get("player_name") or "Unknown")
+        pname = str(r.get("player_name"))
         raw_val = int(r.get("value") or 0)
         display_val = float(raw_val) * float(scale)
         score_text = formatter(display_val)
@@ -575,8 +629,12 @@ def build_last_seen_rank_image_b64(
 ) -> Tuple[bool, str]:
     tz = get_tz_info()
     now = datetime.now(tz)
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+
     with get_db_context() as db:
-        # 最近离线时间
+        # ----------------------------
+        # 1) PlayerSession: 最近离线时间
+        # ----------------------------
         q_logout = (
             select(models.PlayerSession.player_uuid, func.max(models.PlayerSession.logout_time).label("t"))
             .where(models.PlayerSession.logout_time.isnot(None))
@@ -586,7 +644,9 @@ def build_last_seen_rank_image_b64(
         q_logout = q_logout.group_by(models.PlayerSession.player_uuid)
         logout_rows = db.execute(q_logout).all()
 
-        # 当前在线（logout_time 为空）
+        # ----------------------------
+        # 2) PlayerSession: 当前在线（logout_time 为空）
+        # ----------------------------
         q_online = (
             select(models.PlayerSession.player_uuid, func.max(models.PlayerSession.login_time).label("t"))
             .where(models.PlayerSession.logout_time.is_(None))
@@ -596,22 +656,81 @@ def build_last_seen_rank_image_b64(
         q_online = q_online.group_by(models.PlayerSession.player_uuid)
         online_rows = db.execute(q_online).all()
 
+        # last_seen: uuid -> (dt_local, is_online)
         last_seen: Dict[str, Tuple[datetime, bool]] = {}
+        # source_map: uuid -> "session" | "online" | "metric"
+        source_map: Dict[str, str] = {}
+
         for uuid, t in logout_rows:
             if not uuid or not t:
                 continue
-            last_seen[str(uuid)] = (_to_local_dt(t), False)
+            u = str(uuid)
+            last_seen[u] = (_to_local_dt(t), False)
+            source_map[u] = "session"
+
         for uuid, _t in online_rows:
             if not uuid:
                 continue
+            u = str(uuid)
             # 在线玩家：排序值使用 now，展示标注在线
-            last_seen[str(uuid)] = (now, True)
+            last_seen[u] = (now, True)
+            source_map[u] = "online"
+
+        # ----------------------------
+        # 3) Metrics 兜底：minecraft:custom / minecraft:leave_game
+        #    只补“没有 session 记录”的玩家（不覆盖 session/online）
+        # ----------------------------
+        cat_key = "minecraft:custom"
+        item_key = "minecraft:leave_game"
+        metric_id = db.scalar(
+            select(models.MetricsDim.metric_id).where(
+                models.MetricsDim.category == cat_key,
+                models.MetricsDim.item == item_key,
+            )
+        )
+
+        if metric_id:
+            q_metric = (
+                select(models.Player.uuid, func.max(models.PlayerMetrics.ts).label("ts"))
+                .select_from(models.PlayerMetrics)
+                .join(models.Player, models.Player.id == models.PlayerMetrics.player_id)
+                .where(
+                    models.PlayerMetrics.metric_id == metric_id,
+                    models.PlayerMetrics.ts.isnot(None),
+                    models.PlayerMetrics.ts <= now_ts,
+                )
+            )
+            if server_ids:
+                q_metric = q_metric.where(models.PlayerMetrics.server_id.in_(server_ids))
+
+            q_metric = q_metric.group_by(models.Player.uuid)
+            metric_rows = db.execute(q_metric).all()
+
+            for uuid, ts in metric_rows:
+                if not uuid or not ts:
+                    continue
+                u = str(uuid)
+                if u in last_seen:
+                    continue  # session/online 已经更可信，不覆盖
+                dt_local = datetime.fromtimestamp(int(ts), tz=timezone.utc).astimezone(tz)
+                last_seen[u] = (dt_local, False)
+                source_map[u] = "metric"
 
         if not last_seen:
-            return False, "没有查到会话数据（player_sessions）"
+            return False, "没有查到会话数据（player_sessions），且也没有查到离线指标（metrics leave_game）"
+        last_seen_copy = dict(last_seen)  # type: ignore[var-annotated]
+        for u, (dt, is_online) in last_seen_copy.items():
+            rec = db.query(models.Player).filter(models.Player.uuid == u).first()
+            if rec is None or rec.is_bot or rec.player_name in ["Steve", "Alex", "Bot"] or str(rec.player_name).lower().startswith("bot_") or rec.player_name is None:
+                # 过滤掉默认名和疑似机器人玩家
+                last_seen.pop(u, None)
 
+        # ----------------------------
+        # 4) 排序 & 名字/QQ映射
+        # ----------------------------
         sorted_items = sorted(last_seen.items(), key=lambda kv: kv[1][0], reverse=True)[: max(1, int(limit))]
         uuids = [u for u, _ in sorted_items]
+
         players = (
             db.query(models.Player.uuid, models.Player.player_name)
             .filter(models.Player.uuid.in_(uuids))
@@ -620,6 +739,9 @@ def build_last_seen_rank_image_b64(
         name_map = {str(u): str(n or "Unknown") for u, n in players}
         qq_map = _resolve_player_qq_map(db, player_uuids=uuids)
 
+        # ----------------------------
+        # 5) pinned 逻辑（保持原样，但 score_text 增强：识别 metric）
+        # ----------------------------
         pinned_row: Optional[RankRow] = None
         pinned_uuid_norm = (pinned_uuid or "").strip()
         if pinned_uuid_norm and pinned_uuid_norm not in set(uuids):
@@ -636,7 +758,13 @@ def build_last_seen_rank_image_b64(
                         higher += 1
                 pinned_rank = higher + 1
                 dt_disp = dt_local.strftime("%Y-%m-%d %H:%M")
-                score_text = f"{dt_disp}（在线）" if is_online else dt_disp
+                src = source_map.get(pinned_uuid_norm, "session")
+                if is_online:
+                    score_text = f"{dt_disp}（在线）"
+                elif src == "metric":
+                    score_text = f"至少于 {dt_disp} 前"
+                else:
+                    score_text = dt_disp
 
             name = (pinned_name or "").strip()
             if not name:
@@ -663,10 +791,24 @@ def build_last_seen_rank_image_b64(
                 is_pinned=True,
             )
 
+    # ----------------------------
+    # 6) 渲染 rows：同样识别 metric 的 score_text
+    # ----------------------------
     rank_rows: List[RankRow] = []
     for idx, (uuid, (dt_local, is_online)) in enumerate(sorted_items, start=1):
-        dt_disp = dt_local.strftime("%Y-%m-%d %H:%M")
-        score_text = f"{dt_disp}（在线）" if is_online else dt_disp
+        src = source_map.get(uuid, "session")
+        if src == "metric":
+            dt_disp = dt_local.strftime("%Y-%m-%d %H:%M")
+        else:
+            dt_disp = dt_local.strftime("%Y-%m-%d %H:%M:%S")
+
+        if is_online:
+            score_text = f"当前在线"
+        elif src == "metric":
+            score_text = f"至少于 {dt_disp} 前"
+        else:
+            score_text = dt_disp
+
         qq = qq_map.get(uuid)
         big_avatar = _qq_avatar_url(qq) if qq else _mc_avatar_url(uuid)
         rank_rows.append(
@@ -689,7 +831,6 @@ def build_last_seen_rank_image_b64(
         pinned_row=pinned_row,
     )
     return True, _image_to_base64(img)
-
 
 def build_rank_image_from_args_b64(
     args: List[str],

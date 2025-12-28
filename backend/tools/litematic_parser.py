@@ -10,7 +10,8 @@ from litemapy import Schematic
 
 from backend.core.constants import LITEMATIC_COMMAND_LIST_PATH
 
-MAX_FILL_VOLUME = 32768
+MAX_FILL_VOLUME = 1024
+MAX_FORCELOAD_CHUNKS_PER_RANGE = 256  # 语法 x1 z1 x2 z2 最大覆盖 256 chunks
 
 
 def _ensure_dir(p: Path) -> None:
@@ -193,7 +194,6 @@ def _split_cuboid_to_limit(
     if vol <= limit:
         return [cuboid]
 
-    # 优先找一个轴：切成若干段，每段长度 <= max_len 就能保证子块 <=limit（other <= limit）
     axes = [
         ("x", lx, ly * lz),
         ("y", ly, lx * lz),
@@ -210,7 +210,6 @@ def _split_cuboid_to_limit(
         candidates.sort()
         _, _, axis, max_len = candidates[0]
     else:
-        # 三个 other 都 > limit：对最长轴对半切，递归继续（保证收敛）
         axis = "x" if lx >= ly and lx >= lz else ("y" if ly >= lx and ly >= lz else "z")
         longest = lx if axis == "x" else (ly if axis == "y" else lz)
         max_len = max(1, longest // 2)
@@ -257,7 +256,6 @@ def _blocks_to_fill_cmds(
         for c in cuboids:
             final_cuboids.extend(_split_cuboid_to_limit(c, limit))
 
-        # 稳定排序，避免输出顺序漂移（不保证等同原 setblock 顺序）
         final_cuboids.sort(key=lambda t: (t[2], t[4], t[0], t[3], t[5], t[1]))  # y1,z1,x1,y2,z2,x2
 
         for (x1, x2, y1, y2, z1, z2) in final_cuboids:
@@ -266,18 +264,97 @@ def _blocks_to_fill_cmds(
     return out
 
 
+# --------------------------
+# 关键新增：forceload 压缩
+# --------------------------
+
+def _chunks_to_forceload_rects(
+    chunks: set[Tuple[int, int]],
+    max_area: int = MAX_FORCELOAD_CHUNKS_PER_RANGE,
+) -> List[Tuple[int, int, int, int]]:
+    """
+    把“需要 forceload 的 chunk 集合 (cx,cz)”压缩为若干个【不重叠】矩形范围：
+      forceload add/remove cx1 cz1 cx2 cz2
+    要求：
+      - 每个矩形覆盖 chunk 数 <= max_area (默认 256)
+      - 矩形之间不重叠 => 保证每个 chunk 只会被 add 一次
+      - 只覆盖输入集合本身，不会额外 forceload 不需要的 chunk
+    """
+    if not chunks:
+        return []
+
+    remaining = set(chunks)
+    rects: List[Tuple[int, int, int, int]] = []
+
+    # 为了稳定输出：总是从最小 (cz, cx) 的 chunk 开始贪心扩张
+    def _pick_start() -> Tuple[int, int]:
+        return min(remaining, key=lambda t: (t[1], t[0]))  # (cx,cz) => sort by z then x
+
+    while remaining:
+        cx0, cz0 = _pick_start()
+
+        # 在起点行 cz0 上计算最大连续宽度 run（只向 +x）
+        run = 0
+        while (cx0 + run, cz0) in remaining:
+            run += 1
+
+        best_w, best_h, best_area = 1, 1, 1
+
+        # 枚举宽度，从大到小找最大面积矩形（锚定左上角 cx0,cz0）
+        max_w = min(run, max_area)
+        for w in range(max_w, 0, -1):
+            max_h = max_area // w
+            if max_h <= 0:
+                continue
+
+            h = 0
+            while h < max_h:
+                z = cz0 + h
+                ok = True
+                for dx in range(w):
+                    if (cx0 + dx, z) not in remaining:
+                        ok = False
+                        break
+                if not ok:
+                    break
+                h += 1
+
+            area = w * h
+            if area > best_area:
+                best_w, best_h, best_area = w, h, area
+                if best_area == max_area:
+                    break  # 已经满 256 了，再大也不可能
+
+        cx1, cz1 = cx0, cz0
+        cx2, cz2 = cx0 + best_w - 1, cz0 + best_h - 1
+        rects.append((cx1, cz1, cx2, cz2))
+
+        # 从 remaining 中移除该矩形覆盖的 chunk（保证不重叠 => 每 chunk 只 add 一次）
+        for zz in range(cz1, cz2 + 1):
+            for xx in range(cx1, cx2 + 1):
+                remaining.remove((xx, zz))
+
+    return rects
+
+
+def _rect_area(rect: Tuple[int, int, int, int]) -> int:
+    x1, z1, x2, z2 = rect
+    return (abs(x2 - x1) + 1) * (abs(z2 - z1) + 1)
+
+
 def _gather_commands_relative(
     schem: "Schematic",  # type: ignore[name-defined]
     offset: Tuple[int, int, int] = (0, 0, 0),
     place_air: bool = False,
     compress_blocks_to_fill: bool = True,
-) -> Tuple[List[str], List[str], List[str], List[Tuple[int, int]]]:
+) -> Tuple[List[str], List[str], List[str], List[Tuple[int, int, int, int]], int]:
     """
-    生成相对坐标的命令序列：fill(or setblock) / summon / data merge 及 forceload 区块偏移列表。
-    返回：blocks_cmds, summons_cmds, merges_cmds, chunk_offsets
+    生成相对坐标的命令序列：fill(or setblock) / summon / data merge 及 forceload 范围列表。
+    返回：blocks_cmds, summons_cmds, merges_cmds, forceload_rects, unique_chunk_count
 
-    注意：按你的要求，这里的 forceload add/remove 使用的是 x z（不是 chunkX chunkZ）。
-    （保持你原来“对齐到 16 并在周围 +-1”的行为）
+    forceload 使用语法：
+      forceload add/remove x1 z1 x2 z2
+    这里的 x/z 表示“chunk 坐标”（对应你提示的：x1,z1所在区块 到 x2,z2所在区块 的矩形）。
     """
     ox, oy, oz = offset
 
@@ -285,11 +362,10 @@ def _gather_commands_relative(
     summons_cmds: List[str] = []
     merges_cmds: List[str] = []
 
-    # 收集 blockstate -> 坐标点
     blocks_by_state: dict[str, set[Tuple[int, int, int]]] = defaultdict(set)
 
-    # 用于 forceload：记录“16 对齐后的基准 x/z”（等价于你原来的 dx//16*16, dz//16*16）
-    used_core_xz: set[Tuple[int, int]] = set()
+    # 收集需要 forceload 的“chunk 坐标”
+    used_core_chunks: set[Tuple[int, int]] = set()
 
     # 计算 schematic 全局最小坐标
     global_min_x = None
@@ -325,10 +401,8 @@ def _gather_commands_relative(
             else:
                 blocks_cmds.append(f"setblock ~{dx} ~{dy} ~{dz} {state_id} replace")
 
-            # 按你的要求：forceload 用 x z（保持你原对齐方式）
-            base_x = (dx // 16) * 16
-            base_z = (dz // 16) * 16
-            used_core_xz.add((base_x, base_z))
+            # 记录方块所在 chunk（floorDiv 语义：Python // 对负数也正确）
+            used_core_chunks.add((dx // 16, dz // 16))
 
         # 实体
         for ent in getattr(reg, "entities", []) or []:
@@ -354,12 +428,9 @@ def _gather_commands_relative(
             snbt = _to_snbt(nbt)
             summons_cmds.append(f"summon {eid} ~{dx_f} ~{dy_f} ~{dz_f} {snbt}")
 
-            # forceload x z：这里用实体坐标的“落方块”位置来对齐
             edx = int(math.floor(dx_f))
             edz = int(math.floor(dz_f))
-            base_x = (edx // 16) * 16
-            base_z = (edz // 16) * 16
-            used_core_xz.add((base_x, base_z))
+            used_core_chunks.add((edx // 16, edz // 16))
 
         # 方块实体
         for te in getattr(reg, "tile_entities", []) or []:
@@ -378,23 +449,36 @@ def _gather_commands_relative(
             snbt = _to_snbt(tnbt)
             merges_cmds.append(f"data merge block ~{dx} ~{dy} ~{dz} {snbt}")
 
-            base_x = (dx // 16) * 16
-            base_z = (dz // 16) * 16
-            used_core_xz.add((base_x, base_z))
+            used_core_chunks.add((dx // 16, dz // 16))
 
     # 压缩输出 fill
     if compress_blocks_to_fill:
         blocks_cmds = _blocks_to_fill_cmds(blocks_by_state, limit=MAX_FILL_VOLUME)
 
-    # 生成 forceload 的 x z 列表：保持你原来的 (base + ux/uz)，ux/uz = -1,0,1
-    used_xz: set[Tuple[int, int]] = set()
-    for (bx, bz) in used_core_xz:
+    # 你原来是 3x3 邻居（-1,0,1）。这里继续保留：对 chunk 坐标扩一圈
+    used_chunks: set[Tuple[int, int]] = set()
+    for (cx, cz) in used_core_chunks:
         for ux in (-1, 0, 1):
             for uz in (-1, 0, 1):
-                used_xz.add((bx + ux, bz + uz))
+                used_chunks.add((cx + ux, cz + uz))
 
-    chunk_offsets = sorted(list(used_xz))
-    return blocks_cmds, summons_cmds, merges_cmds, chunk_offsets
+    unique_chunk_count = len(used_chunks)
+
+    # 关键：把 used_chunks 压缩为多个不重叠矩形，每个矩形 <= 256 chunks
+    forceload_rects = _chunks_to_forceload_rects(
+        used_chunks,
+        max_area=MAX_FORCELOAD_CHUNKS_PER_RANGE,
+    )
+
+    # 额外保险：检查每个范围是否合法（<=256 chunks）
+    for r in forceload_rects:
+        if _rect_area(r) > MAX_FORCELOAD_CHUNKS_PER_RANGE:
+            raise ValueError(f"forceload range too large (>256 chunks): {r}, area={_rect_area(r)}")
+
+    # 由于 rects 是“从 remaining 移除”的方式生成 => 天然不重叠
+    # 所以保证：每个 chunk 只会被 add 一次（不会重复计算导致卡顿）
+
+    return blocks_cmds, summons_cmds, merges_cmds, forceload_rects, unique_chunk_count
 
 
 def generate_command_list(
@@ -415,20 +499,42 @@ def generate_command_list(
     _ensure_dir(output_txt.parent)
 
     schem = _load_schematic_robust(input_litematic)
-    blocks_cmds, summons_cmds, merges_cmds, chunk_offsets = _gather_commands_relative(
+    blocks_cmds, summons_cmds, merges_cmds, forceload_rects, unique_chunk_count = _gather_commands_relative(
         schem,
         offset=offset,
         place_air=place_air,
         compress_blocks_to_fill=compress_blocks_to_fill,
     )
 
-    add_cmds = [f"forceload add ~{cx} ~{cz}" for (cx, cz) in chunk_offsets]
-    remove_cmds = [f"forceload remove ~{cx} ~{cz}" for (cx, cz) in chunk_offsets]
+    # forceload 使用矩形范围：forceload add/remove x1 z1 x2 z2
+    def _chunk_rect_to_block_rect(cx1: int, cz1: int, cx2: int, cz2: int) -> Tuple[int, int, int, int]:
+        bx1 = cx1 * 16
+        bz1 = cz1 * 16
+        bx2 = cx2 * 16 + 15
+        bz2 = cz2 * 16 + 15
+        return bx1, bz1, bx2, bz2
+
+    add_cmds = []
+    remove_cmds = []
+    for (cx1, cz1, cx2, cz2) in forceload_rects:
+        x1, z1, x2, z2 = _chunk_rect_to_block_rect(cx1, cz1, cx2, cz2)
+        add_cmds.append(f"forceload add ~{x1} ~{z1} ~{x2} ~{z2}")
+        remove_cmds.append(f"forceload remove ~{x1} ~{z1} ~{x2} ~{z2}")
+
+
+    # 统计：rect 覆盖 chunk 总数（因为不重叠，所以等于 unique_chunk_count）
+    covered = sum(_rect_area(r) for r in forceload_rects)
 
     lines: List[str] = []
     lines.append("# Generated by backend.tools.litematic_parser")
     lines.append("# Order: forceload add -> fill(or setblock) -> summon -> data merge -> forceload remove")
     lines.append("# Coordinates are relative (~dx ~dy ~dz) to execution origin")
+    lines.append(f"# Forceload unique chunks: {unique_chunk_count}")
+    lines.append(f"# Forceload ranges: {len(forceload_rects)} (each <= {MAX_FORCELOAD_CHUNKS_PER_RANGE} chunks)")
+    lines.append(f"# Forceload covered chunks (sum of range areas): {covered}")
+    if covered != unique_chunk_count:
+        lines.append("# WARNING: covered != unique_chunk_count (should not happen); check rectangle packing logic")
+
     lines.extend(add_cmds)
     lines.extend(blocks_cmds)
     lines.extend(summons_cmds)

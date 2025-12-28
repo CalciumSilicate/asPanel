@@ -531,13 +531,13 @@ class PositionMapRenderer:
                             break
 
         if markers:
-            font_mk = load_font(18 * ss, True)
+            # font_mk = load_font(6 * ss, True)
             for m in markers:
                 mx, mz = m["pos"]
                 sx, sy = self._world_to_screen(mx, mz, center_x, center_z, s_scale, w, h)
-                r = 12 * ss
+                r = 6 * ss
                 draw.ellipse((sx - r, sy - r, sx + r, sy + r), fill=m.get("color", Theme.DIM_END_COLOR), outline=(255, 255, 255), width=2 * ss)
-                draw.text((sx, sy - 1 * ss), m.get("label", ""), font=font_mk, fill=(255, 255, 255), anchor="mm")
+                # draw.text((sx, sy - 1 * ss), m.get("label", ""), font=font_mk, fill=(255, 255, 255), anchor="mm")
 
         if player_marker:
             pm = player_marker

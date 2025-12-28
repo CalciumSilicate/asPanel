@@ -122,7 +122,7 @@ class Player(Base):
     player_name = Column(String, nullable=True)
     play_time = Column(String, default="{}")
     is_offline = Column(Boolean, default=False, nullable=False)
-
+    is_bot = Column(Boolean, default=False, nullable=False)
 
 class MetricsDim(Base):
     __tablename__ = "metrics_dim"

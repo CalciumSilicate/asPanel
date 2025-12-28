@@ -1,26 +1,28 @@
 # backend/plugins/cmd_list_executor.py
 
 from mcdreforged.api.all import *
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from math import ceil
 from time import perf_counter
 from pathlib import Path
 import uuid
 
 HELP = (
     '!!execute <x|~dx> <y|~dy> <z|~dz> <filename> [threads]  支持相对坐标 ~dx ~dy ~dz；以执行瞬间位置为固定原点'
-    '（自动生成锚点盔甲架）。流程：add→并发fill→summon→merge→remove（并发默认4，可自定义)'
+    '（自动生成锚点盔甲架）。流程：add→fill→summon→merge→remove'
 )
+
 
 PLUGIN_METADATA = {
     "id": "cmd_list_executor",
-    "version": "0.3.1",
+    "version": "0.3.2",
     "author": "CalciumSilicate",
     "name": "CommandListExecutorINNER",
     "description": "批量执行指令清单",
     "dependencies": {},
-    "requirements": ["mcdreforged>=2.0.0"]
+    "requirements": ["mcdreforged>=2.14.0"]  # schedule_task 从 v2.14.0 起提供（Beta API） :contentReference[oaicite:1]{index=1}
 }
+
+# 每个 task 执行多少条 fill（按你服的承受能力调大/调小）
+FILL_BATCH_SIZE = 64
 
 
 def _read_command_list(path: str) -> list[str]:
@@ -67,13 +69,6 @@ def _classify_commands(cmds: list[str]) -> tuple[list[str], list[str], list[str]
     return adds, fills, summons, merges, removes, others
 
 
-def _chunkify(items: list[str], n_chunks: int) -> list[list[str]]:
-    if n_chunks <= 1 or len(items) == 0:
-        return [items] if items else []
-    size = ceil(len(items) / n_chunks)
-    return [items[i:i + size] for i in range(0, len(items), size)]
-
-
 def _format_duration(seconds: float) -> str:
     s = int(seconds)
     ms = int((seconds - s) * 1000)
@@ -103,22 +98,6 @@ def _get_player_name_from_source(source: CommandSource) -> str | None:
     return None
 
 
-def _parse_coord(token: str, base: int) -> int:
-    s = str(token).strip()
-    if s.startswith('~'):
-        if s == '~':
-            return base
-        try:
-            delta = float(s[1:]) if len(s) > 1 else 0.0
-        except Exception:
-            delta = 0.0
-        return int((base + delta) // 1)
-    try:
-        return int(float(s))
-    except Exception:
-        return base
-
-
 def run_execute(server: ServerInterface, source: CommandSource, ctx: dict):
     if not source.has_permission(PermissionLevel.ADMIN):
         source.reply(RText('[CommandListExecuter] 权限不足：需要 MCDR ADMIN 权限').set_color(RColor.red))
@@ -128,7 +107,6 @@ def run_execute(server: ServerInterface, source: CommandSource, ctx: dict):
     y = ctx.get('y')
     z = ctx.get('z')
     path = ctx.get('path')
-    threads = ctx.get('threads')
     try:
         cmds = _read_command_list(path)
     except Exception as e:
@@ -141,87 +119,115 @@ def run_execute(server: ServerInterface, source: CommandSource, ctx: dict):
 
     adds, fills, summons, merges, removes, others = _classify_commands(cmds)
     source.reply(
-        '[CommandListExecuter] 总 {} 条 | add:{} | fill:{}(并发) | summon:{} | merge:{} | remove:{} | 其它:{}'.format(
+        '[CommandListExecuter] 总 {} 条 | add:{} | fill:{} | summon:{} | merge:{} | remove:{} | 其它:{}'.format(
             len(cmds), len(adds), len(fills), len(summons), len(merges), len(removes), len(others)
         ))
 
     server.execute("gamerule sendCommandFeedback false")
-    # 通过“锚点盔甲架”冻结原点：
     anchor_tag = f"cmdlist_anchor_{uuid.uuid4().hex}"
+
+    def _cleanup():
+        # 清理锚点 + 恢复 gamerule（尽量保证最后能恢复）
+        server.execute(f"kill @e[tag={anchor_tag}]")
+        server.execute("gamerule sendCommandFeedback true")
 
     def _is_rel(tok: object) -> bool:
         return isinstance(tok, str) and tok.strip().startswith('~')
 
+    # 计算执行前缀（固定原点锚点）
     if _is_rel(x) or _is_rel(y) or _is_rel(z):
         player_name = _get_player_name_from_source(source)
         if not player_name:
             source.reply(RText('[CommandListExecuter] 相对坐标需要玩家来源').set_color(RColor.red))
+            _cleanup()
             return
-        # 在玩家当前位置对齐整块并生成锚点
         server.execute(
-            f"execute as {player_name} at @s align xyz run summon armor_stand ~ ~ ~ {{Invisible:1b,NoGravity:1b,Marker:1b,Invulnerable:1b,Tags:[\"{anchor_tag}\"]}}"
+            f"execute as {player_name} at @s align xyz run summon armor_stand ~ ~ ~ "
+            f"{{Invisible:1b,NoGravity:1b,Marker:1b,Invulnerable:1b,Tags:[\"{anchor_tag}\"]}}"
         )
-        # 将传入的 x y z 作为 positioned 偏移应用到锚点，再执行清单命令
         prefix = f"execute as @e[tag={anchor_tag},limit=1] at @s positioned {x} {y} {z} run "
     else:
-        # 绝对坐标：直接在目标位置生成锚点
         try:
-            ax = int(float(str(x)));
-            ay = int(float(str(y)));
+            ax = int(float(str(x)))
+            ay = int(float(str(y)))
             az = int(float(str(z)))
         except Exception:
             source.reply(RText('[CommandListExecuter] 无法解析绝对坐标').set_color(RColor.red))
+            _cleanup()
             return
         server.execute(
-            f"summon armor_stand {ax} {ay} {az} {{Invisible:1b,NoGravity:1b,Marker:1b,Invulnerable:1b,Tags:[\"{anchor_tag}\"]}}"
+            f"summon armor_stand {ax} {ay} {az} "
+            f"{{Invisible:1b,NoGravity:1b,Marker:1b,Invulnerable:1b,Tags:[\"{anchor_tag}\"]}}"
         )
         prefix = f"execute as @e[tag={anchor_tag},limit=1] at @s run "
 
+    # 用闭包贯穿计时（跨 task）
     t0 = perf_counter()
 
-    # 1) 顺序执行 forceload add
-    for c in adds:
-        server.execute(prefix + c)
+    def _final_success():
+        elapsed = perf_counter() - t0
+        source.reply(f'[CommandListExecuter] 执行完成，用时 {_format_duration(elapsed)}')
+        _cleanup()
 
-    # 2) 并发执行 fill
-    if fills:
-        # 线程数默认 4，可由命令参数覆盖；且不超过任务数
+    def _final_error(e: Exception):
+        source.reply(RText(f'[CommandListExecuter] 执行中断: {e}').set_color(RColor.red))
+        _cleanup()
+
+    def _after_fills():
+        """fill 全部跑完后，继续 summon/merge/remove（保持原来的顺序约束）"""
         try:
-            req_workers = int(threads) if threads is not None else 4
-        except Exception:
-            req_workers = 4
-        if req_workers < 1:
-            req_workers = 1
-        workers = min(req_workers, len(fills))
-        chunks = _chunkify(fills, workers)
-        source.reply(f'[CommandListExecuter] 启动 {workers} 个线程并发执行 {len(fills)} 条 fill')
+            # 3) 顺序执行 summon
+            for c in summons:
+                server.execute(prefix + c)
 
-        def run_chunk(chunk: list[str]):
-            for cmd in chunk:
-                server.execute(prefix + cmd)
+            # 4) 顺序执行 data merge block
+            for c in merges:
+                server.execute(prefix + c)
 
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='cmdlist') as exe:
-            futures = [exe.submit(run_chunk, ch) for ch in chunks]
-            for fut in as_completed(futures):
-                _ = fut.result()
+            # 5) 顺序执行 forceload remove（必须最后）
+            for c in removes:
+                server.execute(prefix + c)
 
-    # 3) 顺序执行 summon
-    for c in summons:
-        server.execute(prefix + c)
+            _final_success()
+        except Exception as e:
+            _final_error(e)
 
-    # 4) 顺序执行 data merge block
-    for c in merges:
-        server.execute(prefix + c)
+    def _run_fill_batch(start_idx: int = 0):
+        """用 schedule_task 分批执行 fill，避免一次性在同一个回调里跑完"""
+        try:
+            end = min(start_idx + FILL_BATCH_SIZE, len(fills))
+            for c in fills[start_idx:end]:
+                server.execute(prefix + c)
 
-    # 5) 顺序执行 forceload remove（必须最后）
-    for c in removes:
-        server.execute(prefix + c)
+            if end < len(fills):
+                # 继续排队下一批
+                server.schedule_task(lambda: _run_fill_batch(end))  # :contentReference[oaicite:2]{index=2}
+            else:
+                # fill 结束，排队后续阶段
+                server.schedule_task(_after_fills)  # :contentReference[oaicite:3]{index=3}
+        except Exception as e:
+            _final_error(e)
 
-    elapsed = perf_counter() - t0
-    source.reply(f'[CommandListExecuter] 执行完成，用时 {_format_duration(elapsed)}')
-    # 清理锚点
-    server.execute(f"kill @e[tag={anchor_tag}]")
-    server.execute("gamerule sendCommandFeedback true")
+    try:
+        # 1) 顺序执行 forceload add
+        for c in adds:
+            server.execute(prefix + c)
+
+        # 2) fill：改为 schedule_task 分批处理
+        if fills:
+            if hasattr(server, 'schedule_task'):
+                server.schedule_task(lambda: _run_fill_batch(0))  # :contentReference[oaicite:4]{index=4}
+            else:
+                # 兼容极老版本：直接执行（但你既然要 schedule_task，建议直接提高 requirements）
+                for c in fills:
+                    server.execute(prefix + c)
+                _after_fills()
+        else:
+            # 没有 fill，直接进入后续阶段
+            _after_fills()
+
+    except Exception as e:
+        _final_error(e)
 
 
 def on_load(server: ServerInterface, old):
@@ -236,9 +242,7 @@ def on_load(server: ServerInterface, old):
             Text('x').then(
                 Text('y').then(
                     Text('z').then(
-                        Text('path').runs(lambda src, ctx: run_execute(server, src, ctx)).then(
-                            Integer('threads').runs(lambda src, ctx: run_execute(server, src, ctx))
-                        )
+                        Text('path').runs(lambda src, ctx: run_execute(server, src, ctx))
                     )
                 )
             )

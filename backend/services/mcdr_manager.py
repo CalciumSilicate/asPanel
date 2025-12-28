@@ -38,8 +38,8 @@ class MCDRManager:
         self.log_file_handles: dict[int, TextIO] = {}
 
         self.sio = sio
+        self.save_all_method = None
         self.server_service: 'Optional[ServerService]' = None
-
         self.log_buffers: dict[int, List[str]] = {}
         self.log_emitter_tasks: dict[int, asyncio.Task] = {}
         self.LOG_EMIT_INTERVAL = LOG_EMIT_INTERVAL_MS / 1000
@@ -409,6 +409,9 @@ class MCDRManager:
         if process and process.returncode is None:
             process.stdin.write((command + '\n').encode('utf-8'))
             await process.stdin.drain()
+
+    async def save_all(self, server: models.Server):
+        await self.save_all_method(server.name)
 
     async def start_for_a_while(self, server: models.Server, delay: int = 3):
         await self.start(server)

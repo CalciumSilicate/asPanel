@@ -116,6 +116,17 @@ def _query_pos_by_command(
     return pos, dim
 
 
+def _query_save_all(server: ServerInterface) -> bool:
+    """通过 rcon 强制保存世界。"""
+    try:
+        out = server.rcon_query("save-off")
+        if "Saving is already turned off" not in str(out):
+            server.rcon_query("save-all")
+            server.rcon_query("save-on")
+            return True
+    except Exception:
+        return False
+
 def _read_env_config() -> dict[str, Any]:
     def _int_env(name: str, default: int) -> int:
         v = os.getenv(name)
@@ -288,6 +299,34 @@ class WsSender:
                                                         )
                                                 except Exception:
                                                     pass
+                                    elif ev == "sl.save_all":
+                                        if (
+                                            isinstance(data, dict)
+                                            and str(data.get("server")) == _SERVER_NAME
+                                        ):
+                                            if _query_save_all(self.server):
+                                                logger.info("[asPanel] 收到保存世界请求，已执行 save-all")
+                                                _send_event(
+                                                    self.server,
+                                                    "mcdr.save_all_executed",
+                                                    {"server": _SERVER_NAME},
+                                                )
+                                            else:
+                                                logger.warning("[asPanel] 收到保存世界请求，但执行 save-all 失败 (saving 可能被pb关闭)， 将延迟15秒后重试")
+                                                # 15秒后再次尝试保存(非阻塞)
+                                                def _delayed_save():
+                                                    time.sleep(15)
+                                                    if _query_save_all(self.server):
+                                                        logger.info("[asPanel] 延迟保存世界请求已执行 save-all")
+                                                    else:
+                                                        logger.warning("[asPanel] 延迟保存世界请求执行 save-all 失败 (saving 可能被pb关闭)")
+                                                    _send_event(
+                                                        self.server,
+                                                        "mcdr.save_all_executed",
+                                                        {"server": _SERVER_NAME},
+                                                    )
+                                                threading.Thread(target=_delayed_save, daemon=True).start()
+                                        
                                     # 转发的 mcdr 事件（来自其他同组服务器）
                                     elif isinstance(ev, str) and ev.startswith("mcdr."):
                                         try:
@@ -742,7 +781,7 @@ def _handle_forward_event(server: ServerInterface, event: str, data: dict[str, A
         # [server] OFF
         server.say(prefix + _rtext_gray("OFF"))
 
-    elif event == "mcdr.player_joined":
+    elif event in [ "mcdr.player_joined", "mcdr.bot_joined" ]:
         # [server] player joined
         player = str(data.get("player") or "?")
         p = _rtext_gray(player).set_click_event(RAction.suggest_command, f"@ {player}")
@@ -920,6 +959,11 @@ def on_mcdr_stop(server: ServerInterface):
 
 def on_player_joined(server: ServerInterface, player: str, info: Info):
     if _is_bot_joined(info):
+        _send_event(
+            server,
+            "mcdr.bot_joined",
+            {"player": str(player), "info": _info_to_dict(info)},
+        )
         return
     if _IS_PROXY_SERVER:
         return

@@ -816,6 +816,16 @@ def get_player_by_name(db: Session, name: str) -> Optional[models.Player]:
     return db.query(models.Player).filter(models.Player.player_name == name).first()
 
 
+def set_player_is_bot(db: Session, name: str, is_bot: bool = True) -> Optional[models.Player]:
+    rec = get_player_by_name(db, name)
+    if rec:
+        rec.is_bot = is_bot
+        db.add(rec)
+        db.commit()
+        db.refresh(rec)
+    return rec
+
+
 def list_players(db: Session, *, scope: str = "all") -> list[models.Player]:
     q = db.query(models.Player)
     if scope == "official_only":
