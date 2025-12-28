@@ -51,7 +51,18 @@ class Theme:
     DIM_OVERWORLD_COLOR = (16, 185, 129)
     DIM_END_COLOR = (168, 85, 247)
     PATH_DEFAULT_COLOR = (96, 165, 250)
+    PATH_COLORS = [
+        (59, 130, 246),
+        (16, 185, 129),
+        (239, 68, 68),
+        (245, 158, 11),
+        (14, 165, 233),
+        (168, 85, 247),
+        (236, 72, 153),
+        (34, 197, 94),
+    ]
     ARROW_NETHER = (127, 29, 29)
+
     ARROW_OVERWORLD = (6, 78, 59)
     ARROW_END = (88, 28, 135)
     ARROW_DEFAULT = (30, 58, 138)
@@ -240,6 +251,11 @@ def hex_to_rgb(hex_str: str) -> Tuple[int, int, int]:
     except Exception:
         return (200, 200, 200)
 
+
+def _darken_color(color: Tuple[int, int, int], factor: float = 0.7) -> Tuple[int, int, int]:
+    return tuple(max(0, min(255, int(c * factor))) for c in color)
+
+
 def _extract_map_json_paths(map_config: Any) -> Tuple[Optional[str], Optional[str]]:
     if not map_config:
         return None, None
@@ -317,14 +333,12 @@ def create_smooth_chart(width: int, height: int, x_labels: List[str], values: Li
     ax.spines['bottom'].set_color('#E0E0E0')
 
     def large_num_formatter(x_val, pos):
-        if x_val >= 100_000:
-            return f'{x_val * 1e-4:,.2f}'.rstrip('0').rstrip('.') + 'W'
-        if x_val >= 1_000:
-            return f'{x_val * 1e-3:,.2f}'.rstrip('0').rstrip('.') + 'K'
-        return f'{x_val:,.2f}'.rstrip('0').rstrip('.')
+        if x_val >= 10_000:
+            return f'{x_val * 1e-4:.2f}W'
+        return f'{x_val: .2f}'
 
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(large_num_formatter))
-    ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=5))
+    ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=4))
 
     mpl_text_color = tuple(c / 255.0 for c in Theme.TEXT_SECONDARY)
     ax.grid(axis='y', linestyle='--', alpha=0.3, color='#B0B0B0')
@@ -424,7 +438,30 @@ class PositionMapRenderer:
     def create_arrow_marker(self, angle_deg: float, size: int, color: Tuple[int, int, int]) -> Image.Image:
         return _cached_arrow_marker(angle_deg, size, color).copy()
 
-    def _render_layer(self, ctx_w, ctx_h, center_x, center_z, scale, path_segments: List[dict], group_id: int, markers: List[dict] = None, player_marker: dict = None):
+    def _draw_player_marker(self, draw, img, pm, center_x, center_z, scale, w, h, ss):
+        sx, sy = self._world_to_screen(pm["x"], pm["z"], center_x, center_z, scale, w, h)
+        p_dim = pm.get("dim", 0)
+        p_color = pm.get("color") or self._get_dim_color(p_dim)
+        point_r = 6 * ss
+        draw.ellipse((sx - point_r, sy - point_r / 2, sx + point_r, sy + point_r / 2), fill=(0, 0, 0, 100))
+        draw.ellipse((sx - point_r, sy - point_r, sx + point_r, sy + point_r), fill=p_color, outline=(255, 255, 255), width=2 * ss)
+        if pm.get("avatar"):
+            avatar_size = 64 * ss
+            offset_y = 60 * ss
+            av_cx, av_cy = sx, sy - offset_y
+            draw.polygon(
+                [(sx, sy - point_r - 2 * ss), (sx - 10 * ss, av_cy + avatar_size / 2 - 2 * ss), (sx + 10 * ss, av_cy + avatar_size / 2 - 2 * ss)],
+                fill=(255, 255, 255)
+            )
+            avatar = crop_circle_avatar(pm["avatar"], avatar_size)
+            img.paste(avatar, (int(av_cx - avatar_size / 2), int(av_cy - avatar_size / 2)), avatar)
+            draw.ellipse(
+                (av_cx - avatar_size / 2, av_cy - avatar_size / 2, av_cx + avatar_size / 2, av_cy + avatar_size / 2),
+                outline=(255, 255, 255), width=4 * ss
+            )
+
+    def _render_layer(self, ctx_w, ctx_h, center_x, center_z, scale, path_segments: List[dict], group_id: int, markers: List[dict] = None, player_marker: dict = None, player_markers: List[dict] = None):
+
         ss = 4
         w, h = ctx_w * ss, ctx_h * ss
         s_scale = scale * ss
@@ -502,9 +539,18 @@ class PositionMapRenderer:
         for segment in path_segments:
             coords = segment["coords"]
             seg_dim = segment.get("dim", 0)
-            seg_color = self._get_dim_color(seg_dim)
-            arrow_color = self._get_arrow_color(seg_dim)
+            seg_color = segment.get("color")
+            if isinstance(seg_color, str):
+                seg_color = hex_to_rgb(seg_color)
+            if not seg_color:
+                seg_color = self._get_dim_color(seg_dim)
+            arrow_color = segment.get("arrow_color")
+            if isinstance(arrow_color, str):
+                arrow_color = hex_to_rgb(arrow_color)
+            if not arrow_color:
+                arrow_color = seg_color if segment.get("color") is not None else self._get_arrow_color(seg_dim)
             screen_pts = [self._world_to_screen(wx, wz, center_x, center_z, s_scale, w, h) for wx, wz in coords]
+
 
             if len(screen_pts) > 1:
                 draw.line(screen_pts, fill=seg_color, width=1 * ss, joint="curve")
@@ -531,30 +577,21 @@ class PositionMapRenderer:
                             break
 
         if markers:
-            # font_mk = load_font(6 * ss, True)
+            font_mk = load_font(18 * ss, True)
             for m in markers:
                 mx, mz = m["pos"]
                 sx, sy = self._world_to_screen(mx, mz, center_x, center_z, s_scale, w, h)
-                r = 6 * ss
+                r = 12 * ss
                 draw.ellipse((sx - r, sy - r, sx + r, sy + r), fill=m.get("color", Theme.DIM_END_COLOR), outline=(255, 255, 255), width=2 * ss)
-                # draw.text((sx, sy - 1 * ss), m.get("label", ""), font=font_mk, fill=(255, 255, 255), anchor="mm")
+                draw.text((sx, sy - 1 * ss), m.get("label", ""), font=font_mk, fill=(255, 255, 255), anchor="mm")
+
+        if player_markers:
+            for pm in player_markers:
+                self._draw_player_marker(draw, img, pm, center_x, center_z, s_scale, w, h, ss)
 
         if player_marker:
-            pm = player_marker
-            sx, sy = self._world_to_screen(pm["x"], pm["z"], center_x, center_z, s_scale, w, h)
-            p_dim = pm.get("dim", 0)
-            p_color = self._get_dim_color(p_dim)
-            point_r = 6 * ss
-            draw.ellipse((sx - point_r, sy - point_r / 2, sx + point_r, sy + point_r / 2), fill=(0, 0, 0, 100))
-            draw.ellipse((sx - point_r, sy - point_r, sx + point_r, sy + point_r), fill=p_color, outline=(255, 255, 255), width=2 * ss)
-            if pm.get("avatar"):
-                avatar_size = 64 * ss
-                offset_y = 60 * ss
-                av_cx, av_cy = sx, sy - offset_y
-                draw.polygon([(sx, sy - point_r - 2 * ss), (sx - 10 * ss, av_cy + avatar_size / 2 - 2 * ss), (sx + 10 * ss, av_cy + avatar_size / 2 - 2 * ss)], fill=(255, 255, 255))
-                avatar = crop_circle_avatar(pm["avatar"], avatar_size)
-                img.paste(avatar, (int(av_cx - avatar_size / 2), int(av_cy - avatar_size / 2)), avatar)
-                draw.ellipse((av_cx - avatar_size / 2, av_cy - avatar_size / 2, av_cx + avatar_size / 2, av_cy + avatar_size / 2), outline=(255, 255, 255), width=4 * ss)
+            self._draw_player_marker(draw, img, player_marker, center_x, center_z, s_scale, w, h, ss)
+
 
         self._draw_scale_bar(draw, w, h, s_scale, ss)
         return img.resize((ctx_w, ctx_h), Image.LANCZOS)
@@ -735,7 +772,105 @@ class PositionMapRenderer:
         if has_end: return _render_sub(pts_end, width, height, 1, markers_end, pm_end)
         return _render_sub(pts_other, width, height, 0, markers_other, pm_other)
 
+    def generate_paths_image(self, width: int, height: int, paths: List[List[Tuple[float, float, int]]]) -> Image.Image:
+        if not paths:
+            return Image.new("RGBA", (width, height), Theme.BG_COLOR)
+
+        path_items = []
+        for idx, pts in enumerate(paths):
+            if not pts:
+                continue
+            color = Theme.PATH_COLORS[idx % len(Theme.PATH_COLORS)] if Theme.PATH_COLORS else Theme.PATH_DEFAULT_COLOR
+            path_items.append({"points": pts, "color": color})
+
+        if not path_items:
+            return Image.new("RGBA", (width, height), Theme.BG_COLOR)
+
+        has_end = any(p[2] == 1 for item in path_items for p in item["points"])
+        has_other = any(p[2] != 1 for item in path_items for p in item["points"])
+
+        def _render_sub_multi(items, w_, h_, gid):
+            if not items:
+                return Image.new("RGBA", (w_, h_), Theme.BG_COLOR)
+
+            segments = []
+            player_markers = []
+            xs, zs = [], []
+            for item in items:
+                pts = item["points"]
+                color = item["color"]
+                group_pts = [p for p in pts if (p[2] == 1) == (gid == 1)]
+                if not group_pts:
+                    continue
+
+                curr_seg = []
+                last_dim = group_pts[0][2]
+                for x, z, d in group_pts:
+                    mx, mz = self._transform_coord(x, z, d)
+                    xs.append(mx)
+                    zs.append(mz)
+                    if d != last_dim:
+                        if curr_seg:
+                            segments.append({
+                                "coords": curr_seg,
+                                "dim": last_dim,
+                                "color": color,
+                                "arrow_color": _darken_color(color),
+                            })
+                        curr_seg = []
+                        last_dim = d
+                    curr_seg.append((mx, mz))
+                if curr_seg:
+                    segments.append({
+                        "coords": curr_seg,
+                        "dim": last_dim,
+                        "color": color,
+                        "arrow_color": _darken_color(color),
+                    })
+
+                last = pts[-1]
+                if (last[2] == 1) == (gid == 1):
+                    lx, lz = self._transform_coord(last[0], last[1], last[2])
+                    player_markers.append({"x": lx, "z": lz, "dim": last[2], "color": color})
+
+            if not xs or not zs:
+                return Image.new("RGBA", (w_, h_), Theme.BG_COLOR)
+
+            min_x, max_x, min_z, max_z = min(xs), max(xs), min(zs), max(zs)
+            geo_w = max_x - min_x
+            geo_h = max_z - min_z
+            MIN_VIEW_SPAN = 20
+
+            effective_w = max(geo_w, MIN_VIEW_SPAN)
+            effective_h = max(geo_h, MIN_VIEW_SPAN)
+            center_x = (min_x + max_x) / 2
+            center_z = (min_z + max_z) / 2
+
+            PADDING_FACTOR = 0.95
+            scale_x = (w_ * PADDING_FACTOR) / effective_w
+            scale_z = (h_ * PADDING_FACTOR) / effective_h
+            scale_ = min(scale_x, scale_z)
+
+            img_ = self._render_layer(w_, h_, center_x, center_z, scale_, segments, gid, markers=[], player_markers=player_markers)
+            d_ = ImageDraw.Draw(img_)
+            lbl = "THE END" if gid == 1 else "NETHER & OVERWORLD"
+            d_.text((w_ - 30, h_ - 30), lbl, fill=Theme.TEXT_SECONDARY, font=load_font(24, True), anchor="rb")
+            return img_
+
+        if has_end and has_other:
+            h1 = int(height * 0.55)
+            h2 = height - h1
+            img = Image.new("RGBA", (width, height), Theme.BG_COLOR)
+            img.paste(_render_sub_multi(path_items, width, h1, 0), (0, 0))
+            img.paste(_render_sub_multi(path_items, width, h2, 1), (0, h1))
+            ImageDraw.Draw(img).line([(0, h1), (width, h1)], fill=(200, 200, 200), width=2)
+            return img
+        if has_end:
+            return _render_sub_multi(path_items, width, height, 1)
+        return _render_sub_multi(path_items, width, height, 0)
+
 # ========= 主渲染流程 (Stats + Map) =========
+
 
 def render_combined_view(
         data: Dict,
@@ -918,7 +1053,8 @@ def render_combined_view(
 
 
     # === 4. 绘制右侧栏 (Map Panel) ===
-    has_map = "location" in data or "path" in data
+    has_map = "location" in data or "path" in data or "paths" in data
+
     
     # 计算右侧栏位置
     right_x = Theme.PADDING + Theme.LEFT_PANEL_WIDTH + Theme.COLUMN_GAP
@@ -953,6 +1089,11 @@ def render_combined_view(
             )
             map_img = map_raw
             title = "Location"
+        elif "paths" in data:
+            path_groups = data["paths"]
+            map_raw = renderer.generate_paths_image(right_w, right_h, path_groups)
+            map_img = map_raw
+            title = "Paths"
         elif "path" in data:
             path_pts = data["path"]
             map_raw = renderer.generate_path_image(right_w, right_h, path_pts, data.get("mc_avatar", ""))
@@ -973,6 +1114,7 @@ def render_combined_view(
                         "nearest_dist": nearest[1],
                     }
             except Exception: pass
+
 
         if map_img:
             container = Image.new("RGBA", (right_w, right_h), (0, 0, 0, 0))

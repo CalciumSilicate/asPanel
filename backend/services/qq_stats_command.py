@@ -8,7 +8,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Callable
 
 from PIL import Image
-from sqlalchemy import select, desc, func, and_
+from sqlalchemy import select, desc, func, and_, text
+
 from sqlalchemy.orm import Session
 
 
@@ -252,7 +253,7 @@ def _DISTANCE_FORMATTER(x: float) -> str:
 
 TOTAL_ITEMS = [
     ("上线次数", ["custom.leave_game"], 1, lambda x: x),
-    ("在线时长", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, _TIME_FORMATTER),
+    ("在线时长(hr)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, _TIME_FORMATTER),
     # ("击杀玩家", ["custom.player_kills"], 1, "count"),
     # ("被玩家击杀", ["killed_by.player"], 1, "count"),
     ("挖掘方块", _BREAK_METRICS, 1, lambda x: int(x)),
@@ -295,7 +296,6 @@ class TimeRange:
     granularity: str
     label: str
     x_labels: List[str]
-    identifyer: Optional[str] = None
 
 
 def _format_number(val: float, formatter: Callable) -> Any:
@@ -402,7 +402,7 @@ def _calc_preset(label: str, offset: int = 0) -> TimeRange:
         start = now - timedelta(days=365 * 5)
         end = now
 
-        return TimeRange(start, end, start, end, "1month", "全部记录", [], "all")
+        return TimeRange(start, end, start, end, "1month", "全部记录", [])
     if label == "last":
         min = (now.minute // 10 + 1) * 10
         end = now.replace(microsecond=0, second=0, minute=min if min != 60 else 0)
@@ -502,7 +502,20 @@ def _metrics_sum(series: List[Tuple[int, int]]) -> Tuple[int, int]:
     return end_val, end_val - start_val
 
 
+def _combine_series(series_map: Dict[str, List[Tuple[int, int]]]) -> List[Tuple[int, int]]:
+    combined: Dict[int, int] = {}
+    for series in series_map.values():
+        for ts, val in series:
+            try:
+                ts_int = int(ts)
+            except Exception:
+                continue
+            combined[ts_int] = combined.get(ts_int, 0) + int(val or 0)
+    return sorted(combined.items())
+
+
 def _build_totals(player_uuid: str, tr: TimeRange, server_ids: List[int]) -> List[Dict[str, object]]:
+
     out: List[Dict[str, object]] = []
     for label, metrics, unit, formatter in TOTAL_ITEMS:
         series_map = stats_service.get_total_series(
@@ -511,7 +524,6 @@ def _build_totals(player_uuid: str, tr: TimeRange, server_ids: List[int]) -> Lis
         )
         series = series_map.get(player_uuid, [])
         total, delta = _metrics_sum(series)
-        delta = delta if tr.identifyer != "all" else 0
         if total:
             out.append({"label": label, "total": total, "delta": delta, "label_total": _format_number(total * unit, formatter), "label_delta": _format_number(delta * unit, formatter)})
     return out
@@ -543,7 +555,98 @@ def _build_charts(player_uuid: str, tr: TimeRange, server_ids: List[int]) -> Lis
     return charts
 
 
+def _build_totals_for_players(player_uuids: List[str], tr: TimeRange, server_ids: List[int]) -> List[Dict[str, object]]:
+    if not player_uuids:
+        return []
+    out: List[Dict[str, object]] = []
+    for label, metrics, unit, formatter in TOTAL_ITEMS:
+        series_map = stats_service.get_total_series(
+            player_uuids=player_uuids, metrics=metrics, granularity=tr.granularity,
+            start=tr.start.isoformat(), end=tr.end.isoformat(), server_ids=server_ids
+        )
+        series = _combine_series(series_map)
+        total, delta = _metrics_sum(series)
+        if total:
+            out.append({
+                "label": label,
+                "total": total,
+                "delta": delta,
+                "label_total": _format_number(total * unit, formatter),
+                "label_delta": _format_number(delta * unit, formatter),
+            })
+    return out
+
+
+def _build_charts_for_players(player_uuids: List[str], tr: TimeRange, server_ids: List[int]) -> List[Dict[str, object]]:
+    if not player_uuids:
+        return []
+    boundaries = _build_boundaries(tr)
+    charts: List[Dict[str, object]] = []
+    for label, metrics, unit, is_delta in CHART_ITEMS:
+        if is_delta:
+            series_map = stats_service.get_delta_series(
+                player_uuids=player_uuids, metrics=metrics, granularity=tr.granularity,
+                start=tr.start.isoformat(), end=tr.end.isoformat(), server_ids=server_ids
+            )
+            series = _combine_series(series_map)
+            x, y = _series_to_xy(series, boundaries, unit, tr)
+            total = round(sum(val for val in y), 2)
+            if not any(y):
+                continue
+        else:
+            series_map = stats_service.get_total_series(
+                player_uuids=player_uuids, metrics=metrics, granularity=tr.granularity,
+                start=tr.start.isoformat(), end=tr.end.isoformat(), fill_missing=True, server_ids=server_ids
+            )
+            series = _combine_series(series_map)
+            x, y = _series_to_xy(series, boundaries, unit, tr)
+            total = y[-1] if y else 0
+        charts.append({"label": label, "x": x, "y": y, "total": total})
+    return charts
+
+
+def _get_all_players_for_stats(db: Session) -> List[Tuple[int, str]]:
+    base_q = db.query(models.Player.id, models.Player.uuid).filter(models.Player.uuid.isnot(None))
+    base_q = base_q.filter(models.Player.is_offline != False)  # noqa: E712
+    if hasattr(models.Player, "is_bot"):
+        rows = base_q.filter(models.Player.is_bot != False).order_by(models.Player.id.asc()).all()  # noqa: E712
+        return [(pid, uuid) for pid, uuid in rows if uuid]
+    try:
+        rows = base_q.filter(text("is_bot != FALSE")).order_by(models.Player.id.asc()).all()
+    except Exception:
+        rows = base_q.order_by(models.Player.id.asc()).all()
+    return [(pid, uuid) for pid, uuid in rows if uuid]
+
+
+def _collect_paths_for_players(
+    db: Session,
+    player_ids: List[int],
+    tr: TimeRange,
+    server_ids: List[int],
+) -> List[List[Tuple[float, float, int]]]:
+    if not player_ids:
+        return []
+    start = tr.real_start.astimezone(timezone.utc)
+    end = tr.real_end.astimezone(timezone.utc)
+    q = db.query(models.PlayerPosition).filter(
+        models.PlayerPosition.player_id.in_(player_ids),
+        models.PlayerPosition.ts >= start,
+        models.PlayerPosition.ts <= end,
+    )
+    if server_ids:
+        q = q.filter(models.PlayerPosition.server_id.in_(server_ids))
+    q = q.order_by(models.PlayerPosition.player_id.asc(), models.PlayerPosition.ts.asc())
+    rows = q.all()
+    paths_by_id: Dict[int, List[Tuple[float, float, int]]] = {pid: [] for pid in player_ids}
+    for row in rows:
+        if row.x is None or row.z is None:
+            continue
+        paths_by_id[row.player_id].append((float(row.x), float(row.z), _dim_to_int(row.dim)))
+    return [paths_by_id[pid] for pid in player_ids if paths_by_id.get(pid)]
+
+
 def _get_last_seen_str(db: Session, player: models.Player, server_ids: List[int]) -> str:
+
     # 1. Check PlayerSession
     stmt = select(models.PlayerSession.logout_time).where(
         models.PlayerSession.player_uuid == player.uuid,
@@ -556,7 +659,7 @@ def _get_last_seen_str(db: Session, player: models.Player, server_ids: List[int]
     
     if last_session_time:
         last_session_time = convert_to_tz(last_session_time)
-        return last_session_time.strftime("%Y-%m-%d %H:%M:%S")
+        return last_session_time.strftime("%Y-%m-%d %H:%M")
     
     # 2. Check Metrics (custom.leave_game)
     cat_key = "minecraft:custom"
@@ -580,10 +683,12 @@ def _get_last_seen_str(db: Session, player: models.Player, server_ids: List[int]
             models.PlayerMetrics.player_id == player.id,
             models.PlayerMetrics.metric_id == metric_id,
             models.PlayerMetrics.ts <= now_ts,
-        ).order_by(models.PlayerMetrics.ts.desc()).limit(1)
+        ).order_by(models.PlayerMetrics.ts.desc()).limit(2)
         
         rows = db.execute(q).scalars().all()
-        if len(rows) >= 1:
+        # "If the found value is the first value for that player in that server (no earlier values) then discard it."
+        # If we have at least 2 rows, the latest (rows[0]) has a predecessor (rows[1]).
+        if len(rows) >= 2:
             ts = rows[0]
             if ts > latest_timestamp:
                 latest_timestamp = ts
@@ -622,7 +727,7 @@ def _get_session_range_for_last(db: Session, player: models.Player, server_ids: 
         if offset == 0:
             label = f"上次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
         else:
-            label = f"倒数第{offset}次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
+            label = f"倒数第{offset + 1}次在线({start.strftime('%Y-%m-%d %H:%M')} ~ {end.strftime('%Y-%m-%d %H:%M')})"
         c_start = _floor_to_10min(start)
         c_end = _ceil_to_10min(end) if end else None
         
@@ -701,34 +806,7 @@ def build_stats_picture(
         # 注意：这里假设 player.uuid 是带连字符的，如果不是需要处理
         # Cravatar 支持无连字符 UUID，但带连字符更标准
         mc_avatar = f"https://cravatar.eu/helmavatar/{player.uuid}/128.png"
-    if not qq_avatar:
-        qq_avatar = mc_avatar  # 双头像都无时，使用 MC 头像作为 QQ 头像备选
 
-    # 默认使用 [1] 如果未提供 server_ids，防止报错
-    effective_server_ids = server_ids if server_ids else [1]
-    if tr.identifyer == "all":
-        with get_db_context() as db:
-            earliest_ts = db.scalar(
-                select(func.min(models.PlayerMetrics.ts))
-                .where(
-                    models.PlayerMetrics.server_id.in_(effective_server_ids),
-                    models.PlayerMetrics.ts.isnot(None),
-                )
-            )
-            tr.start = datetime.fromtimestamp(earliest_ts or 0, tz=timezone.utc).astimezone(get_tz_info())
-            if tr.start.month == 12:
-                tr.start = tr.start.replace(year=tr.start.year + 1, month=1)
-            else:
-                tr.start = tr.start.replace(month=tr.start.month + 1)
-            tr.start = tr.start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            tr.real_start = tr.start
-            if tr.end.month == 12:
-                tr.end = tr.end.replace(year=tr.end.year + 1, month=1)
-            else:
-                tr.end = tr.end.replace(month=tr.end.month + 1)
-            tr.end = tr.end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            tr.real_end = tr.end
-            tr.label == f"全部记录 ({tr.start.strftime('%Y-%m')}~{tr.end.strftime('%Y-%m')})"
     data = {
         "qq_avatar": qq_avatar,
         "mc_avatar": mc_avatar,
@@ -741,6 +819,9 @@ def build_stats_picture(
         "data_source_text": data_source_text,
         "generated_at": get_now_tz().strftime("%Y-%m-%d %H:%M:%S")
     }
+    # 默认使用 [3] 如果未提供 server_ids，防止报错
+    effective_server_ids = server_ids if server_ids else [3]
+
     data["totals"] = _build_totals(player.uuid, tr, effective_server_ids)
     data["charts"] = _build_charts(player.uuid, tr, effective_server_ids)
     # 位置/路径
@@ -804,7 +885,57 @@ def build_stats_picture(
     return _image_to_base64(img)
 
 
+def build_stats_picture_all(
+    player_uuids: List[str],
+    player_ids: List[int],
+    tr: TimeRange,
+    server_ids: List[int] = None,
+    data_source_text: str = "",
+) -> str:
+    data = {
+        "qq_avatar": "",
+        "mc_avatar": "",
+        "player_name": "ALL",
+        "uuid": "ALL",
+        "last_seen": "N/A",
+        "time_range_label": tr.label,
+        "is_online": False,
+        "in_server": None,
+        "data_source_text": data_source_text,
+        "generated_at": get_now_tz().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    effective_server_ids = server_ids if server_ids else [3]
+
+    data["totals"] = _build_totals_for_players(player_uuids, tr, effective_server_ids)
+    data["charts"] = _build_charts_for_players(player_uuids, tr, effective_server_ids)
+
+    map_config = {
+        "nether_json": _resolve_map_json_path(DEFAULT_MAP_CONFIG.get("nether_json")),
+        "end_json": _resolve_map_json_path(DEFAULT_MAP_CONFIG.get("end_json")),
+    }
+    paths: List[List[Tuple[float, float, int]]] = []
+    with get_db_context() as db:
+        try:
+            paths = _collect_paths_for_players(db, player_ids, tr, effective_server_ids)
+        except Exception:
+            paths = []
+        try:
+            map_config = _pick_map_config(db, effective_server_ids, None, None)
+        except Exception:
+            pass
+
+    if paths:
+        data["paths"] = paths
+
+    img = render_combined_view(data, map_config)
+    logger.debug(
+        f"生成统计图成功 | player=ALL range={tr.start}~{tr.end} path_count={len(paths)}"
+    )
+    return _image_to_base64(img)
+
+
 def bind_player_for_user(sender_qq: str, target_name: str) -> str:
+
     with get_db_context() as db:
         user = db.query(models.User).filter(models.User.qq == str(sender_qq)).first()
         if not user:
@@ -865,9 +996,34 @@ def build_report_from_command(
                 except Exception:
                     logger.warning(f"解析服务器组 {group_id} 配置失败，使用默认配置")
 
+        if tokens and tokens[0].lower() == "&all":
+            range_tokens = [t.lower() for t in tokens[1:]]
+            allowed_ranges = {"1d", "1w", "1m", "1y", "all"}
+            if range_tokens and range_tokens[0] not in allowed_ranges:
+                return False, "用法：## &ALL [1d/1w/1m/1y/all]"
+            player_refs = _get_all_players_for_stats(db)
+            if not player_refs:
+                return False, "未找到可用玩家数据"
+            player_ids = [pid for pid, _ in player_refs]
+            player_uuids = [uid for _, uid in player_refs]
+            tr = _time_range_from_tokens(range_tokens)
+            avatars.pop("sender_qq", None)
+            avatars.pop("qq", None)
+            avatars.pop("mc", None)
+            try:
+                img_b64 = build_stats_picture_all(
+                    player_uuids, player_ids, tr,
+                    server_ids=server_ids, data_source_text=data_source_text
+                )
+            except Exception as exc:
+                logger.opt(exception=exc).warning("生成统计图失败")
+                return False, "生成统计图失败，请稍后重试"
+            return True, img_b64
+
         target_qq = None
         player = None
         range_tokens = []
+
 
         # 尝试解析目标玩家
         if not tokens and sender_qq:
