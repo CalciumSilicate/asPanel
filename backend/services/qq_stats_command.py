@@ -251,20 +251,27 @@ def _DISTANCE_FORMATTER(x: float) -> str:
     meters = km * 1000
     return f"{meters:,.2f}".rstrip("0").rstrip(".") + "m"
 
+def _COUNT_FORMATTER(x: int) -> str:
+    try:
+        cnt = int(x)
+    except Exception:
+        return "0"
+    return f"{cnt:,}"
+
 TOTAL_ITEMS = [
-    ("上线次数", ["custom.leave_game"], 1, lambda x: x),
+    ("上线次数", ["custom.leave_game"], 1, _COUNT_FORMATTER),
     ("在线时长(hr)", ["custom.play_one_minute", "custom.play_time"], 1 / 20 / 3600, _TIME_FORMATTER),
     # ("击杀玩家", ["custom.player_kills"], 1, "count"),
     # ("被玩家击杀", ["killed_by.player"], 1, "count"),
-    ("挖掘方块", _BREAK_METRICS, 1, lambda x: int(x)),
-    ("死亡次数", ["custom.deaths"], 1, lambda x: int(x)),
+    ("挖掘方块", _BREAK_METRICS, 1, _COUNT_FORMATTER),
+    ("死亡次数", ["custom.deaths"], 1, _COUNT_FORMATTER),
     ("鞘翅飞行", ["custom.aviate_one_cm"], 0.00001, _DISTANCE_FORMATTER),
     ("珍珠传送", ["custom.ender_pearl_one_cm"], 0.00001, _DISTANCE_FORMATTER),
     ("步行前进", _WALK_METRICS, 0.00001, _DISTANCE_FORMATTER),
     ("交通工具", _VEHICLE_METRICS, 0.00001, _DISTANCE_FORMATTER),
-    ("使用烟花", ["custom.firework_boost", "used.firework_rocket"], 1, lambda x: int(x)),
-    ("消耗不死图腾", ["used.totem_of_undying"], 1, lambda x: int(x)),
-    ("破基岩", ["custom.break_bedrock"], 1, lambda x: int(x)),
+    ("使用烟花", ["custom.firework_boost", "used.firework_rocket"], 1, _COUNT_FORMATTER),
+    ("消耗不死图腾", ["used.totem_of_undying"], 1, _COUNT_FORMATTER),
+    ("破基岩", ["custom.break_bedrock"], 1, _COUNT_FORMATTER),
 ]
 
 CHART_ITEMS = [
@@ -399,8 +406,12 @@ def _calc_preset(label: str, offset: int = 0) -> TimeRange:
 
         return TimeRange(start, end, start, end, "1month", f"{prefix}（{target_year}年）", [])
     if label == "all":
-        start = now - timedelta(days=365 * 5)
+        start = datetime(2023, 8, 1, 0, 0, 0, 0).astimezone(get_tz_info())
         end = now
+        if end.month == 12:
+            end = end.replace(year=end.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            end = end.replace(month=end.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
 
         return TimeRange(start, end, start, end, "1month", "全部记录", [])
     if label == "last":
@@ -562,7 +573,7 @@ def _build_totals_for_players(player_uuids: List[str], tr: TimeRange, server_ids
     for label, metrics, unit, formatter in TOTAL_ITEMS:
         series_map = stats_service.get_total_series(
             player_uuids=player_uuids, metrics=metrics, granularity=tr.granularity,
-            start=tr.start.isoformat(), end=tr.end.isoformat(), server_ids=server_ids
+            start=tr.start.isoformat(), end=tr.end.isoformat(), server_ids=server_ids, fill_missing=True
         )
         series = _combine_series(series_map)
         total, delta = _metrics_sum(series)
@@ -607,9 +618,9 @@ def _build_charts_for_players(player_uuids: List[str], tr: TimeRange, server_ids
 
 def _get_all_players_for_stats(db: Session) -> List[Tuple[int, str]]:
     base_q = db.query(models.Player.id, models.Player.uuid).filter(models.Player.uuid.isnot(None))
-    base_q = base_q.filter(models.Player.is_offline != False)  # noqa: E712
+    base_q = base_q.filter(models.Player.is_offline != True)  # noqa: E712
     if hasattr(models.Player, "is_bot"):
-        rows = base_q.filter(models.Player.is_bot != False).order_by(models.Player.id.asc()).all()  # noqa: E712
+        rows = base_q.filter(models.Player.is_bot != True).order_by(models.Player.id.asc()).all()  # noqa: E712
         return [(pid, uuid) for pid, uuid in rows if uuid]
     try:
         rows = base_q.filter(text("is_bot != FALSE")).order_by(models.Player.id.asc()).all()
@@ -891,12 +902,13 @@ def build_stats_picture_all(
     tr: TimeRange,
     server_ids: List[int] = None,
     data_source_text: str = "",
+    qq_group_id: Optional[int] = None
 ) -> str:
     data = {
-        "qq_avatar": "",
-        "mc_avatar": "",
-        "player_name": "ALL",
-        "uuid": "ALL",
+        "qq_avatar": f"https://p.qlogo.cn/gh/{qq_group_id}/{qq_group_id}/640" if qq_group_id else "",
+        "mc_avatar": f"https://p.qlogo.cn/gh/{qq_group_id}/{qq_group_id}/640" if qq_group_id else "",
+        "player_name": "全服玩家数据",
+        "uuid": "Sum of All Players",
         "last_seen": "N/A",
         "time_range_label": tr.label,
         "is_online": False,
@@ -904,6 +916,7 @@ def build_stats_picture_all(
         "data_source_text": data_source_text,
         "generated_at": get_now_tz().strftime("%Y-%m-%d %H:%M:%S"),
     }
+    logger.debug(f"使用头像链接 | qq_avatar={data['qq_avatar']} mc_avatar={data['mc_avatar']}")
     effective_server_ids = server_ids if server_ids else [3]
 
     data["totals"] = _build_totals_for_players(player_uuids, tr, effective_server_ids)
@@ -962,7 +975,8 @@ def build_report_from_command(
     sender_qq: Optional[str],
     avatars: Dict[str, str],
     online_players_map: Optional[Dict[str, Any]] = None,
-    group_id: Optional[int] = None
+    group_id: Optional[int] = None,
+    qq_group_id: Optional[int] = None
 ) -> Tuple[bool, str]:
     # if tokens and tokens[0].lower() == "bind":
     #     if len(tokens) < 2:
@@ -1013,7 +1027,7 @@ def build_report_from_command(
             try:
                 img_b64 = build_stats_picture_all(
                     player_uuids, player_ids, tr,
-                    server_ids=server_ids, data_source_text=data_source_text
+                    server_ids=server_ids, data_source_text=data_source_text, qq_group_id=qq_group_id
                 )
             except Exception as exc:
                 logger.opt(exception=exc).warning("生成统计图失败")
@@ -1037,6 +1051,8 @@ def build_report_from_command(
             # Case 2: 有参数，可能是 "## 玩家名 [args]" 或 "## [args]" (查自己)
             possible_name = tokens[0]
             found_player = crud.get_player_by_name(db, possible_name)
+            if found_player is None:
+                found_player = crud.get_player_by_name_non_sensitive(db, possible_name)
             
             if found_player:
                 # tokens[0] 是有效的玩家名 -> ## 玩家名 [args]

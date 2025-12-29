@@ -670,7 +670,7 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
     sender_qq = str(payload.get("user_id") or "") or None
 
     # 命令检测
-    if await _maybe_handle_command(group_id, qq_group, nickname, plain_text, sender_qq=sender_qq):
+    if await _maybe_handle_command(group_id, qq_group, nickname, plain_text, sender_qq=sender_qq, qq_group_id=int(qq_group)) :
         return
 
     # QQ 号
@@ -703,7 +703,7 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
         )
 
 
-async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, text: str, *, sender_qq: Optional[str] = None) -> bool:
+async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, text: str, *, sender_qq: Optional[str] = None, qq_group_id: Optional[int] = None) -> bool:
     if not text:
         return False
     text = text.strip()
@@ -721,7 +721,8 @@ async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, tex
             sender_qq,
             {"qq": None, "mc": None},
             online_players_map=online_map,
-            group_id=group_id
+            group_id=group_id,
+            qq_group_id=qq_group_id
         )
         if success:
             await _send_group_image(qq_group, payload)

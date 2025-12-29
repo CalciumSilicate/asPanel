@@ -915,7 +915,7 @@ def render_combined_view(
 
     # 字体加载
     font_h1 = load_font(48, is_bold=True)
-    font_h2 = load_font(30, is_bold=True)
+    font_h2 = load_font(24, is_bold=True)
     font_label = load_font(20, is_bold=False)
     font_sub = load_font(22, is_bold=False)
     font_info = load_font(18, is_bold=False)

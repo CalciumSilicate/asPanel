@@ -815,6 +815,8 @@ def get_player_by_uuid(db: Session, uuid: str) -> Optional[models.Player]:
 def get_player_by_name(db: Session, name: str) -> Optional[models.Player]:
     return db.query(models.Player).filter(models.Player.player_name == name).first()
 
+def get_player_by_name_non_sensitive(db: Session, name: str) -> Optional[models.Player]:
+    return db.query(models.Player).filter(models.Player.player_name.ilike(name)).first()
 
 def set_player_is_bot(db: Session, name: str, is_bot: bool = True) -> Optional[models.Player]:
     rec = get_player_by_name(db, name)
