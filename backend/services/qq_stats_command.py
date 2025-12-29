@@ -343,7 +343,7 @@ def _build_boundaries(tr: TimeRange) -> List[datetime]:
     return pts
 
 
-def _calc_preset(label: str, offset: int = 0) -> TimeRange:
+def _calc_preset(label: str, offset: int = 0, server_ids: Optional[List[int]] = None) -> TimeRange:
     now = get_now_tz()
     if label == "1d":
         start = (now - timedelta(days=offset)).replace(hour=1, minute=0, second=0, microsecond=0)
@@ -399,7 +399,17 @@ def _calc_preset(label: str, offset: int = 0) -> TimeRange:
 
         return TimeRange(start, end, start, end, "1month", f"{prefix}（{target_year}年）", [])
     if label == "all":
-        start = now - timedelta(days=365 * 5)
+        # 查询表中最早的记录时间（根据指定的服务器）
+        with get_db_context() as db:
+            query = db.query(func.min(models.PlayerMetrics.ts))
+            if server_ids:
+                query = query.filter(models.PlayerMetrics.server_id.in_(server_ids))
+            min_ts = query.scalar()
+        if min_ts:
+            tz = get_tz_info()
+            start = datetime.fromtimestamp(min_ts, tz=tz)
+        else:
+            start = now - timedelta(days=365 * 5)
         end = now
 
         return TimeRange(start, end, start, end, "1month", "全部记录", [])
@@ -433,20 +443,20 @@ def _parse_custom_range(start_text: str, end_text: str) -> TimeRange:
     return TimeRange(start, end, start, end, granularity, f"{start_text} ~ {end_text}", [])
 
 
-def _time_range_from_tokens(tokens: List[str]) -> TimeRange:
+def _time_range_from_tokens(tokens: List[str], server_ids: Optional[List[int]] = None) -> TimeRange:
     if not tokens:
-        return _calc_preset("1d", 0)
+        return _calc_preset("1d", 0, server_ids)
     if len(tokens) == 1:
-        return _calc_preset(tokens[0], 0)
+        return _calc_preset(tokens[0], 0, server_ids)
     if len(tokens) == 2 and tokens[0] in {"1d", "1w", "1m", "1y", "all", "last"}:
         try:
             offset = int(tokens[1])
         except Exception:
             offset = 0
-        return _calc_preset(tokens[0], offset)
+        return _calc_preset(tokens[0], offset, server_ids)
     if len(tokens) >= 2:
         return _parse_custom_range(tokens[0], tokens[1])
-    return _calc_preset("1d", 0)
+    return _calc_preset("1d", 0, server_ids)
 
 
 def _series_to_xy(series: List[Tuple[int, int]], boundaries: List[datetime], unit: float, tr: TimeRange) -> Tuple[List[str], List[float]]:
@@ -770,12 +780,12 @@ def _calculate_time_range(tokens: List[str], player: models.Player, is_online: b
         label = f"本次在线({start.strftime('%Y-%m-%d %H:%M')} ~ 现在)"
         c_start = _floor_to_10min(start)
         return TimeRange(c_start, end, start, get_now_tz(), "10min", label, [])
-    
+
     # Offline default or specific tokens
     if not tokens:
-        return _calc_preset("1d", 0)
-        
-    return _time_range_from_tokens(tokens)
+        return _calc_preset("1d", 0, server_ids)
+
+    return _time_range_from_tokens(tokens, server_ids)
 
 
 def _image_to_base64(img: Image.Image) -> str:
@@ -1006,7 +1016,7 @@ def build_report_from_command(
                 return False, "未找到可用玩家数据"
             player_ids = [pid for pid, _ in player_refs]
             player_uuids = [uid for _, uid in player_refs]
-            tr = _time_range_from_tokens(range_tokens)
+            tr = _time_range_from_tokens(range_tokens, server_ids)
             avatars.pop("sender_qq", None)
             avatars.pop("qq", None)
             avatars.pop("mc", None)
