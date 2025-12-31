@@ -334,11 +334,13 @@ def create_smooth_chart(width: int, height: int, x_labels: List[str], values: Li
 
     def large_num_formatter(x_val, pos):
         if x_val >= 10_000:
-            return f'{x_val * 1e-4:.2f}W'
-        return f'{x_val: .2f}'
+            return f'{x_val * 1e-4:.2f}'.rstrip('0').rstrip('.') + 'W'
+        if x_val >= 1_000:
+            return f'{x_val * 1e-3:.2f}'.rstrip('0').rstrip('.') + 'K'
+        return f'{x_val: .2f}'.rstrip('0').rstrip('.')
 
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(large_num_formatter))
-    ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=4))
+    ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=5))
 
     mpl_text_color = tuple(c / 255.0 for c in Theme.TEXT_SECONDARY)
     ax.grid(axis='y', linestyle='--', alpha=0.3, color='#B0B0B0')
