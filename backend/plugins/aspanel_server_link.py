@@ -643,12 +643,221 @@ def _normalize_media_url(url: Any) -> str:
     return cleaned
 
 
+def _parse_share_card(seg_type: str, data_str: str) -> dict[str, Any] | None:
+    """解析 XML/JSON 分享卡片，提取标题、描述、链接等信息。
+    
+    支持：B站视频分享、网易云音乐、微博、公众号文章等常见分享格式。
+    """
+    if not data_str:
+        return None
+    
+    result: dict[str, Any] = {}
+    
+    try:
+        if seg_type == "json":
+            # 尝试解析 JSON 格式
+            import json as _json
+            try:
+                obj = _json.loads(data_str)
+            except _json.JSONDecodeError:
+                return None
+            
+            # B站视频分享格式 (新版)
+            # {"app":"com.tencent.structmsg", "meta":{"news":{"title":"...", "desc":"...", "jumpUrl":"..."}}}
+            # 或 {"app":"com.tencent.miniapp_01", "meta":{"detail_1":{"title":"...", "desc":"...", "qqdocurl":"..."}}}
+            meta = obj.get("meta") or {}
+            
+            # 尝试多种可能的结构
+            for key in ["news", "detail_1", "detail", "music", "video"]:
+                if key in meta:
+                    item = meta[key]
+                    result["title"] = item.get("title") or item.get("desc") or ""
+                    result["desc"] = item.get("desc") or item.get("preview") or ""
+                    result["url"] = (
+                        item.get("jumpUrl") or 
+                        item.get("qqdocurl") or 
+                        item.get("url") or 
+                        item.get("musicUrl") or
+                        ""
+                    )
+                    # 来源标识
+                    tag = item.get("tag") or item.get("source") or ""
+                    if "bilibili" in str(result.get("url", "")).lower() or "b23.tv" in str(result.get("url", "")).lower():
+                        result["source"] = "B站"
+                    elif "music.163" in str(result.get("url", "")).lower():
+                        result["source"] = "网易云"
+                    elif "weibo" in str(result.get("url", "")).lower():
+                        result["source"] = "微博"
+                    elif "mp.weixin" in str(result.get("url", "")).lower():
+                        result["source"] = "公众号"
+                    elif "douyin" in str(result.get("url", "")).lower():
+                        result["source"] = "抖音"
+                    elif tag:
+                        result["source"] = tag
+                    else:
+                        result["source"] = "分享"
+                    break
+            
+            # B站小程序格式
+            if not result.get("title") and obj.get("prompt"):
+                result["title"] = obj.get("prompt") or ""
+                result["source"] = "分享"
+            
+            # 直接在顶层的格式
+            if not result.get("title"):
+                result["title"] = obj.get("title") or obj.get("prompt") or ""
+                result["desc"] = obj.get("desc") or ""
+                result["url"] = obj.get("url") or obj.get("jumpUrl") or ""
+        
+        elif seg_type == "xml":
+            # 尝试解析 XML 格式
+            # 常见格式: <msg><item><title>...</title><summary>...</summary><url>...</url></item></msg>
+            import re as _re
+            
+            # 提取标题
+            title_match = _re.search(r'<title[^>]*>([^<]*)</title>', data_str, _re.IGNORECASE)
+            if title_match:
+                result["title"] = _cq_unescape(title_match.group(1))
+            
+            # 提取摘要/描述
+            summary_match = _re.search(r'<summary[^>]*>([^<]*)</summary>', data_str, _re.IGNORECASE)
+            if summary_match:
+                result["desc"] = _cq_unescape(summary_match.group(1))
+            else:
+                desc_match = _re.search(r'<des[^>]*>([^<]*)</des>', data_str, _re.IGNORECASE)
+                if desc_match:
+                    result["desc"] = _cq_unescape(desc_match.group(1))
+            
+            # 提取链接
+            url_match = _re.search(r'<url[^>]*>([^<]*)</url>', data_str, _re.IGNORECASE)
+            if url_match:
+                result["url"] = _cq_unescape(url_match.group(1))
+            else:
+                # 尝试从属性中提取
+                action_match = _re.search(r'action="([^"]*)"', data_str)
+                if action_match:
+                    result["url"] = _cq_unescape(action_match.group(1))
+            
+            # 来源
+            source_match = _re.search(r'<source[^>]*name="([^"]*)"', data_str, _re.IGNORECASE)
+            if source_match:
+                result["source"] = source_match.group(1)
+            else:
+                name_match = _re.search(r'name="([^"]*)"', data_str)
+                if name_match:
+                    result["source"] = name_match.group(1)
+            
+            # 根据 URL 判断来源
+            url = result.get("url", "")
+            if "bilibili" in url.lower() or "b23.tv" in url.lower():
+                result["source"] = "B站"
+            elif "music.163" in url.lower():
+                result["source"] = "网易云"
+        
+        # 确保有标题才返回
+        if result.get("title"):
+            return result
+        return None
+    
+    except Exception:
+        return None
+
+
+def _get_url_source(url: str) -> str | None:
+    """根据 URL 识别来源平台"""
+    if not url:
+        return None
+    url_lower = url.lower()
+    if "bilibili.com" in url_lower or "b23.tv" in url_lower:
+        return "B站"
+    elif "music.163.com" in url_lower:
+        return "网易云"
+    elif "weibo.com" in url_lower or "weibo.cn" in url_lower:
+        return "微博"
+    elif "mp.weixin.qq.com" in url_lower:
+        return "公众号"
+    elif "douyin.com" in url_lower:
+        return "抖音"
+    elif "xiaohongshu.com" in url_lower or "xhslink.com" in url_lower:
+        return "小红书"
+    elif "youtube.com" in url_lower or "youtu.be" in url_lower:
+        return "YouTube"
+    elif "twitter.com" in url_lower or "x.com" in url_lower:
+        return "X"
+    elif "github.com" in url_lower:
+        return "GitHub"
+    elif "zhihu.com" in url_lower:
+        return "知乎"
+    elif "taobao.com" in url_lower or "tb.cn" in url_lower:
+        return "淘宝"
+    elif "jd.com" in url_lower:
+        return "京东"
+    elif "qq.com" in url_lower:
+        return "腾讯"
+    return None
+
+
+# URL 匹配正则
+_URL_PATTERN = re.compile(r'(https?://[^\s<>\[\]]+)')
+
+
+def _text_to_rtext_with_urls(text: str) -> RText:
+    """将文本转换为 RText，识别其中的 URL 并添加点击事件和来源标识"""
+    if not text:
+        return _rtext_gray("")
+    
+    # 查找所有 URL
+    matches = list(_URL_PATTERN.finditer(text))
+    if not matches:
+        return _rtext_gray(text)
+    
+    result: RText | None = None
+    last_end = 0
+    
+    for match in matches:
+        start, end = match.span()
+        url = match.group(1)
+        
+        # 添加 URL 前的普通文本
+        if start > last_end:
+            prefix_text = text[last_end:start]
+            part = _rtext_gray(prefix_text)
+            result = part if result is None else result + part
+        
+        # 处理 URL
+        source = _get_url_source(url)
+        if source:
+            # 有来源标识的 URL
+            source_part = RText(f"[{source}]", color=RColor.aqua)
+            source_part.set_click_event(RAction.open_url, url)
+            source_part.set_hover_text(f"点击打开链接\n{url}")
+            result = source_part if result is None else result + source_part
+        else:
+            # 普通 URL
+            url_part = RText("[链接]", color=RColor.aqua)
+            url_part.set_click_event(RAction.open_url, url)
+            url_part.set_hover_text(f"点击打开链接\n{url}")
+            result = url_part if result is None else result + url_part
+        
+        last_end = end
+    
+    # 添加最后一段普通文本
+    if last_end < len(text):
+        suffix_text = text[last_end:]
+        part = _rtext_gray(suffix_text)
+        result = part if result is None else result + part
+    
+    return result if result is not None else _rtext_gray(text)
+
+
 def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
     seg_type = str(segment.get("type") or "")
     data = segment.get("data") or {}
     raw = segment.get("raw")
     if seg_type == "text":
-        return _rtext_gray(str(segment.get("text") or ""))
+        text_content = str(segment.get("text") or "")
+        # 解析文本中的 URL
+        return _text_to_rtext_with_urls(text_content)
     if seg_type == "face":
         label = RText("[表情]", color=RColor.yellow)
         if raw:
@@ -659,7 +868,7 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
         url = str(data.get("url") or data.get("file") or "")
         label = RText("[语音]", color=RColor.aqua)
         if url:
-            label.set_click_event(RAction.open_url, url)
+            label.set_click_event(RAction.suggest_command, url)
             label.set_hover_text(f"点击播放 {url}")
         else:
             label.set_hover_text("语音内容缺失")
@@ -691,14 +900,14 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
         title = str(data.get("title") or data.get("content") or url or "")
         label = RText("[链接]", color=RColor.aqua)
         if url:
-            label.set_click_event(RAction.open_url, url)
+            label.set_click_event(RAction.suggest_command, url)
         label.set_hover_text(title or "链接")
         return label
     if seg_type == "image":
         url = _normalize_media_url(data.get("url") or data.get("file"))
         label = RText("[图片]", color=RColor.aqua)
         if url:
-            label.set_click_event(RAction.open_url, url)
+            label.set_click_event(RAction.suggest_command, url)
             label.set_hover_text(f"点击打开图片 {url}")
         else:
             label.set_hover_text("图片地址缺失")
@@ -707,7 +916,7 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
         url = _normalize_media_url(data.get("url") or data.get("file"))
         label = RText("[文件]", color=RColor.aqua)
         if url:
-            label.set_click_event(RAction.open_url, url)
+            label.set_click_event(RAction.suggest_command, url)
             label.set_hover_text(f"点击打开文件 {url}")
         else:
             label.set_hover_text("文件地址缺失")
@@ -721,11 +930,36 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
     if seg_type == "forward":
         return RText("[合并转发]", color=RColor.gray)
     if seg_type in {"xml", "json"}:
-        label = RText("[XML/JSON]", color=RColor.green)
         detail = str(data.get("data") or "")
-        if detail:
-            label.set_hover_text(detail[:300])
-        return label
+        # 尝试解析 B站/常见分享卡片
+        parsed = _parse_share_card(seg_type, detail)
+        if parsed:
+            title = parsed.get("title") or ""
+            desc = parsed.get("desc") or ""
+            url = parsed.get("url") or ""
+            source = parsed.get("source") or ""
+            
+            # 构建显示文本
+            if source:
+                label = RText(f"[{source}] ", color=RColor.aqua)
+            else:
+                label = RText("[分享] ", color=RColor.aqua)
+            
+            title_part = RText(title, color=RColor.white)
+            if url:
+                title_part.set_click_event(RAction.open_url, url)
+                hover = f"{title}"
+                if desc:
+                    hover += f"\n{desc[:100]}{'...' if len(desc) > 100 else ''}"
+                hover += f"\n点击打开链接"
+                title_part.set_hover_text(hover)
+            
+            return label + title_part
+        else:
+            label = RText("[XML/JSON]", color=RColor.green)
+            if detail:
+                label.set_hover_text(detail[:300])
+            return label
     if seg_type in {
         "rps",
         "dice",
@@ -874,6 +1108,7 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
             # 收集需要播放提示音的玩家
             players_to_notify: set[str] = set()
             
+            reply_line = None
             # 如果有回复信息，先显示回复行
             if reply_info and isinstance(reply_info, dict):
                 reply_user = str(reply_info.get("user") or "")
@@ -912,12 +1147,12 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
                         players_to_notify.add(game_player)
                 else:
                     # 来自 QQ 的消息
-                    reply_line = reply_line + RText("[QQ] ", color=RColor.gray)
+                    reply_line = reply_line + RText("[QQ] ", color=RColor.dark_gray)
                     
                     # 被回复者用户名（可点击艾特）
                     if reply_sender_qq:
                         reply_at_cq = f"[CQ:at,qq={reply_sender_qq}]"
-                        reply_user_part = RText(f"<{reply_user}>", color=RColor.gray)
+                        reply_user_part = RText(f"<{reply_user}>", color=RColor.dark_gray)
                         reply_user_part.set_click_event(RAction.suggest_command, f".{reply_at_cq} ")
                         reply_user_part.set_hover_text(f"点击艾特 {reply_user}")
                     else:
@@ -926,7 +1161,7 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
                     reply_line = reply_line + reply_user_part + _rtext_gray(" ")
                     
                     # 回复内容（截断显示，避免过长）
-                    max_reply_len = 40
+                    max_reply_len = 25
                     if len(reply_content) > max_reply_len:
                         reply_content_display = reply_content[:max_reply_len] + "..."
                     else:
@@ -942,8 +1177,6 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
                 
                 reply_line = reply_line + reply_content_part
                 
-                # 显示回复行
-                server.say(reply_line)
             
             # 检查被艾特的绑定玩家是否在线
             for bound_player in at_bound_players:
@@ -959,11 +1192,17 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
                 except Exception:
                     pass
             
+            # 显示回复行
+            if reply_line is not None:
+                server.say(reply_line)
+            
             # [QQ] 可点击，提示输入 !!qqlist 命令
             prefix_qq = RText("[QQ]", color=RColor.gray)
             prefix_qq.set_click_event(RAction.suggest_command, "!!qqlist")
             prefix_qq.set_hover_text("点击查看QQ群成员列表")
             prefix = prefix_qq + _rtext_gray(" ")
+            if reply_line is not None:
+                prefix = RText("│ ", color=RColor.dark_gray) + prefix
 
             # <用户名> 可点击，复制艾特标记
             if sender_qq:

@@ -257,6 +257,95 @@ def _segments_to_cq_string(segments: List[_CQSegment]) -> str:
     return "".join(parts)
 
 
+def _parse_share_card_title(seg_type: str, data_str: str) -> Optional[str]:
+    """解析 XML/JSON 分享卡片，提取标题用于纯文本显示。"""
+    if not data_str:
+        return None
+    
+    try:
+        if seg_type == "json":
+            try:
+                obj = json.loads(data_str)
+            except json.JSONDecodeError:
+                return None
+            
+            meta = obj.get("meta") or {}
+            for key in ["news", "detail_1", "detail", "music", "video"]:
+                if key in meta:
+                    item = meta[key]
+                    title = item.get("title") or item.get("desc") or ""
+                    if title:
+                        return f"[分享] {title}"
+            
+            if obj.get("prompt"):
+                return f"[分享] {obj.get('prompt')}"
+            if obj.get("title"):
+                return f"[分享] {obj.get('title')}"
+        
+        elif seg_type == "xml":
+            import re as _re
+            title_match = _re.search(r'<title[^>]*>([^<]*)</title>', data_str, _re.IGNORECASE)
+            if title_match:
+                title = _cq_unescape(title_match.group(1))
+                if title:
+                    return f"[分享] {title}"
+        
+        return None
+    except Exception:
+        return None
+
+
+# URL 匹配正则
+_URL_PATTERN = re.compile(r'(https?://[^\s<>\[\]]+)')
+
+
+def _get_url_source(url: str) -> Optional[str]:
+    """根据 URL 识别来源平台"""
+    if not url:
+        return None
+    url_lower = url.lower()
+    if "bilibili.com" in url_lower or "b23.tv" in url_lower:
+        return "B站"
+    elif "music.163.com" in url_lower:
+        return "网易云"
+    elif "weibo.com" in url_lower or "weibo.cn" in url_lower:
+        return "微博"
+    elif "mp.weixin.qq.com" in url_lower:
+        return "公众号"
+    elif "douyin.com" in url_lower:
+        return "抖音"
+    elif "xiaohongshu.com" in url_lower or "xhslink.com" in url_lower:
+        return "小红书"
+    elif "youtube.com" in url_lower or "youtu.be" in url_lower:
+        return "YouTube"
+    elif "twitter.com" in url_lower or "x.com" in url_lower:
+        return "X"
+    elif "github.com" in url_lower:
+        return "GitHub"
+    elif "zhihu.com" in url_lower:
+        return "知乎"
+    elif "taobao.com" in url_lower or "tb.cn" in url_lower:
+        return "淘宝"
+    elif "jd.com" in url_lower:
+        return "京东"
+    return None
+
+
+def _replace_urls_with_source(text: str) -> str:
+    """将文本中的 URL 替换为 [来源] 格式"""
+    if not text:
+        return text
+    
+    def replace_url(match: re.Match) -> str:
+        url = match.group(1)
+        source = _get_url_source(url)
+        if source:
+            return f"[{source}]"
+        return "[链接]"
+    
+    return _URL_PATTERN.sub(replace_url, text)
+
+
 def _segments_to_plain_text(segments: List[_CQSegment]) -> str:
     parts: List[str] = []
     for seg in segments:
@@ -286,10 +375,13 @@ def _segments_to_plain_text(segments: List[_CQSegment]) -> str:
             parts.append("[回复]")
         elif seg.type == "forward":
             parts.append("[合并转发]")
-        elif seg.type == "xml":
-            parts.append("[XML消息]")
-        elif seg.type == "json":
-            parts.append("[JSON消息]")
+        elif seg.type in {"xml", "json"}:
+            # 尝试解析分享卡片标题
+            parsed_title = _parse_share_card_title(seg.type, seg.data.get("data", ""))
+            if parsed_title:
+                parts.append(parsed_title)
+            else:
+                parts.append(f"[{seg.type.upper()}消息]")
         else:
             parts.append(f"[{seg.type}]")
     return "".join(parts).strip()
@@ -332,6 +424,7 @@ async def _call_onebot_api(action: str, params: Dict[str, Any], timeout: float =
     """调用 OneBot API 并等待响应"""
     global _API_ECHO_COUNTER
     if not _SESSIONS:
+        logger.debug(f"[OneBot] API 调用失败: 无可用会话 | action={action}")
         return None
     
     async with _API_LOCK:
@@ -347,14 +440,17 @@ async def _call_onebot_api(action: str, params: Dict[str, Any], timeout: float =
     session = next(iter(_SESSIONS), None)
     if not session:
         _API_PENDING.pop(echo, None)
+        logger.debug(f"[OneBot] API 调用失败: 会话已断开 | action={action}")
         return None
     
     try:
+        logger.debug(f"[OneBot] 发送 API 请求: {action} | echo={echo} | params={params}")
         await session.send(payload)
         result = await asyncio.wait_for(future, timeout=timeout)
+        logger.debug(f"[OneBot] API 响应: {action} | echo={echo} | status={result.get('status') if result else 'None'}")
         return result
     except asyncio.TimeoutError:
-        logger.warning(f"[OneBot] API 调用超时: {action}")
+        logger.warning(f"[OneBot] API 调用超时: {action} | echo={echo}")
         return None
     except Exception as e:
         logger.warning(f"[OneBot] API 调用失败: {action} - {e}")
@@ -1319,13 +1415,15 @@ async def _handle_incoming(session: OneBotSession, payload: Dict[str, Any]) -> N
     if not isinstance(payload, dict):
         return
     
-    # 处理 API 响应
+    # 处理 API 响应（echo 可能是字符串或整数）
     echo = payload.get("echo")
-    if echo and isinstance(echo, str) and echo.startswith("aspanel_"):
-        future = _API_PENDING.get(echo)
-        if future and not future.done():
-            future.set_result(payload)
-        return
+    if echo is not None:
+        echo_str = str(echo)
+        if echo_str.startswith("aspanel_"):
+            future = _API_PENDING.get(echo_str)
+            if future and not future.done():
+                future.set_result(payload)
+            return
     
     post_type = payload.get("post_type")
     if post_type == "meta_event":
@@ -1341,7 +1439,9 @@ async def _handle_incoming(session: OneBotSession, payload: Dict[str, Any]) -> N
         group_id = _QQ_TO_GROUP.get(qq_group)
         if not group_id:
             return
-        await _handle_chat_from_qq(group_id, qq_group, payload)
+        # 使用 create_task 在后台处理消息，避免阻塞 WebSocket 接收循环
+        # 这样 API 响应可以被正常接收和处理
+        asyncio.create_task(_handle_chat_from_qq(group_id, qq_group, payload))
 
 
 async def startup_sync() -> None:

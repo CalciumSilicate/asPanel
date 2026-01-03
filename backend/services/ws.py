@@ -227,7 +227,7 @@ def _safe_json_loads(text: str) -> Any:
         return None
 
 
-async def broadcast_chat_to_plugins(*, level: str, group_id: Optional[int], user: str, message: str, source: str = "web", avatar: Optional[str] = None, sender_qq: Optional[str] = None, message_id: Optional[Any] = None) -> None:
+async def broadcast_chat_to_plugins(*, level: str, group_id: Optional[int], user: str, message: str, source: str = "web", avatar: Optional[str] = None, sender_qq: Optional[str] = None, message_id: Optional[Any] = None, reply_info: Optional[Dict] = None, at_bound_players: Optional[List] = None) -> None:
     data = {
         "level": level,
         "message": message,
@@ -237,6 +237,8 @@ async def broadcast_chat_to_plugins(*, level: str, group_id: Optional[int], user
         "source": source,
         "sender_qq": sender_qq,
         "message_id": message_id,
+        "reply_info": reply_info,
+        "at_bound_players": at_bound_players,
     }
     payload = json.dumps({"event": "chat.message", "ts": "-", "data": data}, ensure_ascii=False)
 
