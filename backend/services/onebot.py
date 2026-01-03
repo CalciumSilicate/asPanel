@@ -319,8 +319,56 @@ _SERVER_TO_GROUPS: Dict[str, List[int]] = {}
 _GROUP_PLAYERS: Dict[int, Set[str]] = {}
 _PLAYER_EVENT_SUPPRESS_WINDOW = 1.0
 
+# API 请求响应等待
+_API_PENDING: Dict[str, asyncio.Future] = {}
+_API_ECHO_COUNTER = 0
+_API_LOCK = asyncio.Lock()
+
 # QQ群成员最后发言记录: {qq_group: {sender_qq: {"nickname": str, "last_time": float}}}
 _QQ_GROUP_SPEAKERS: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+
+async def _call_onebot_api(action: str, params: Dict[str, Any], timeout: float = 3.0) -> Optional[Dict[str, Any]]:
+    """调用 OneBot API 并等待响应"""
+    global _API_ECHO_COUNTER
+    if not _SESSIONS:
+        return None
+    
+    async with _API_LOCK:
+        _API_ECHO_COUNTER += 1
+        echo = f"aspanel_{_API_ECHO_COUNTER}"
+    
+    future: asyncio.Future = asyncio.get_running_loop().create_future()
+    _API_PENDING[echo] = future
+    
+    payload = {"action": action, "params": params, "echo": echo}
+    
+    # 发送到第一个可用的 session
+    session = next(iter(_SESSIONS), None)
+    if not session:
+        _API_PENDING.pop(echo, None)
+        return None
+    
+    try:
+        await session.send(payload)
+        result = await asyncio.wait_for(future, timeout=timeout)
+        return result
+    except asyncio.TimeoutError:
+        logger.warning(f"[OneBot] API 调用超时: {action}")
+        return None
+    except Exception as e:
+        logger.warning(f"[OneBot] API 调用失败: {action} - {e}")
+        return None
+    finally:
+        _API_PENDING.pop(echo, None)
+
+
+async def _get_message_by_id(message_id: int) -> Optional[Dict[str, Any]]:
+    """通过消息 ID 获取消息内容"""
+    result = await _call_onebot_api("get_msg", {"message_id": message_id})
+    if result and result.get("status") == "ok":
+        return result.get("data")
+    return None
 
 
 @dataclass
@@ -673,6 +721,32 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
 
     sender_qq = str(payload.get("user_id") or "") or None
     
+    # 检测回复段落并获取被回复消息内容
+    reply_info: Optional[Dict[str, Any]] = None
+    for seg in segments:
+        if seg.type == "reply":
+            reply_msg_id = seg.data.get("id")
+            if reply_msg_id:
+                try:
+                    reply_msg_id_int = int(reply_msg_id)
+                    reply_data = await _get_message_by_id(reply_msg_id_int)
+                    if reply_data:
+                        # 获取被回复消息的发送者和内容
+                        reply_sender = reply_data.get("sender") or {}
+                        reply_nickname = reply_sender.get("card") or reply_sender.get("nickname") or str(reply_data.get("user_id") or "")
+                        reply_message = reply_data.get("message")
+                        reply_segments = _parse_message_segments(reply_message)
+                        reply_plain = _segments_to_plain_text(reply_segments)
+                        reply_info = {
+                            "user": reply_nickname,
+                            "content": reply_plain,
+                            "sender_qq": str(reply_data.get("user_id") or ""),
+                            "message_id": reply_msg_id_int,  # 被回复消息的ID，用于游戏内点击回复
+                        }
+                except Exception as e:
+                    logger.warning(f"[OneBot] 获取回复消息失败: {e}")
+            break
+    
     # 记录发言者信息用于 !!qqlist 命令
     if sender_qq and qq_group:
         if qq_group not in _QQ_GROUP_SPEAKERS:
@@ -717,6 +791,7 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
             avatar=None,
             sender_qq=sender_qq,
             message_id=message_id,
+            reply_info=reply_info,
         )
 
 
@@ -1212,6 +1287,15 @@ async def onebot_endpoint(websocket: WebSocket):
 async def _handle_incoming(session: OneBotSession, payload: Dict[str, Any]) -> None:
     if not isinstance(payload, dict):
         return
+    
+    # 处理 API 响应
+    echo = payload.get("echo")
+    if echo and isinstance(echo, str) and echo.startswith("aspanel_"):
+        future = _API_PENDING.get(echo)
+        if future and not future.done():
+            future.set_result(payload)
+        return
+    
     post_type = payload.get("post_type")
     if post_type == "meta_event":
         if payload.get("meta_event_type") == "lifecycle":

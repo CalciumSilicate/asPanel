@@ -840,7 +840,7 @@ def _handle_forward_event(server: ServerInterface, event: str, data: dict[str, A
 
 
 def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
-    # data: { level, message, user, avatar, group_id, source, sender_qq, message_id }
+    # data: { level, message, user, avatar, group_id, source, sender_qq, message_id, reply_info }
     level = str(data.get("level") or "NORMAL").upper()
     message = str(data.get("message") or "")
     user = str(data.get("user") or "")
@@ -848,6 +848,7 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
     gid = data.get("group_id")
     sender_qq = data.get("sender_qq")
     message_id = data.get("message_id")
+    reply_info = data.get("reply_info")  # { user, content, sender_qq }
     # NORMAL: 仅当该消息目标组与本服组有交集（实际上 gid 在某一组）才显示；ALERT: 全服显示
     if level != "ALERT":
         try:
@@ -867,6 +868,39 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
         server.say(t)
     else:
         if source == "qq":
+            # 如果有回复信息，先显示回复行
+            if reply_info and isinstance(reply_info, dict):
+                reply_user = str(reply_info.get("user") or "")
+                reply_content = str(reply_info.get("content") or "")
+                reply_sender_qq = reply_info.get("sender_qq")
+                
+                # 构建回复行: | 回复 [QQ] <用户名> 消息
+                reply_line = RText("│ ", color=RColor.dark_gray)
+                reply_line = reply_line + RText("回复 ", color=RColor.light_purple)
+                reply_line = reply_line + RText("[QQ] ", color=RColor.gray)
+                
+                # 被回复者用户名（可点击艾特）
+                if reply_sender_qq:
+                    reply_at_cq = f"[CQ:at,qq={reply_sender_qq}]"
+                    reply_user_part = RText(f"<{reply_user}>", color=RColor.gray)
+                    reply_user_part.set_click_event(RAction.suggest_command, f".{reply_at_cq} ")
+                    reply_user_part.set_hover_text(f"点击艾特 {reply_user}")
+                else:
+                    reply_user_part = _rtext_gray(f"<{reply_user}>")
+                
+                reply_line = reply_line + reply_user_part + _rtext_gray(" ")
+                
+                # 回复内容（截断显示，避免过长）
+                max_reply_len = 40
+                if len(reply_content) > max_reply_len:
+                    reply_content_display = reply_content[:max_reply_len] + "..."
+                else:
+                    reply_content_display = reply_content
+                reply_line = reply_line + RText(reply_content_display, color=RColor.dark_gray)
+                
+                # 显示回复行
+                server.say(reply_line)
+            
             # [QQ] 可点击，提示输入 !!qqlist 命令
             prefix_qq = RText("[QQ]", color=RColor.gray)
             prefix_qq.set_click_event(RAction.suggest_command, "!!qqlist")
