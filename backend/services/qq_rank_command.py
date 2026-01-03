@@ -175,12 +175,14 @@ def _builtin_boards() -> Dict[str, BuiltinBoard]:
     out["航天榜"] = out["航天"]
     out["最后在线"] = BuiltinBoard("最后在线榜", "最近一次在线时间（越晚越靠前）", [], 1.0, lambda x: str(x))
     out["最后在线榜"] = out["最后在线"]
+    out["放置"] = BuiltinBoard("放置榜", "统计放置方块次数（只统计可挖掘的方块）", [], 1.0, lambda x: _fmt_int(x))
+    out["放置榜"] = out["放置"]
     return out
 
 
 def list_board_names() -> List[str]:
     names = [
-        "上线榜", "在线榜", "挖掘榜", "击杀榜", "被击杀榜", "死亡榜", "鞘翅榜", "珍珠榜", "步行榜", "移动榜", "烟花榜", "不死图腾榜", "基岩榜",
+        "上线榜", "在线榜", "挖掘榜", "真挖掘榜", "放置榜", "击杀榜", "被击杀榜", "死亡榜", "鞘翅榜", "珍珠榜", "步行榜", "移动榜", "烟花榜", "不死图腾榜", "基岩榜",
         "航天榜", "最后在线榜", "吃货榜", "小馋猫榜"
     ]
     return names
@@ -832,6 +834,64 @@ def build_last_seen_rank_image_b64(
     )
     return True, _image_to_base64(img)
 
+
+def build_placement_rank_image_b64(
+    *,
+    server_ids: List[int],
+    limit: int,
+    pinned_uuid: Optional[str] = None,
+    pinned_name: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """放置榜：统计 used.X 的次数，其中 X 是可挖掘的方块（存在于 mined.X 的项目）。
+    
+    这样可以过滤掉食物消耗、工具使用等非方块放置的统计。
+    """
+    with get_db_context() as db:
+        # 1. 获取所有 mined.* 指标，提取方块名称
+        mined_metrics = stats_service.resolve_metrics(
+            db,
+            ["mined.*"],
+            namespace=stats_service.DEFAULT_NAMESPACE,
+            include_discovered=True,
+        )
+        # mined_metrics 格式: ["mined.stone", "mined.dirt", ...]
+        block_names = set()
+        for m in mined_metrics:
+            if m.startswith("mined."):
+                block_name = m[6:]  # 去掉 "mined." 前缀
+                block_names.add(block_name)
+        
+        if not block_names:
+            return False, "没有查到可挖掘方块数据，无法生成放置榜"
+        
+        # 2. 构建 used.X 指标列表
+        placement_metrics = [f"used.{block}" for block in block_names]
+        
+        # 3. 验证这些指标在数据库中存在
+        valid_metrics = stats_service.resolve_metrics(
+            db,
+            placement_metrics,
+            namespace=stats_service.DEFAULT_NAMESPACE,
+            include_discovered=True,
+        )
+        
+        if not valid_metrics:
+            return False, "没有查到方块放置数据"
+    
+    # 4. 使用通用的 metric rank 构建函数
+    return build_metric_rank_image_b64(
+        title="放置榜",
+        description="统计放置方块次数（只统计可挖掘的方块）",
+        metrics=valid_metrics,
+        server_ids=server_ids,
+        limit=limit,
+        scale=1.0,
+        formatter=lambda x: _fmt_int(x),
+        pinned_uuid=pinned_uuid,
+        pinned_name=pinned_name,
+    )
+
+
 def build_rank_image_from_args_b64(
     args: List[str],
     server_ids: List[int],
@@ -857,6 +917,14 @@ def build_rank_image_from_args_b64(
 
     if board and board.name == "最后在线榜":
         return build_last_seen_rank_image_b64(
+            server_ids=server_ids,
+            limit=limit,
+            pinned_uuid=pinned_uuid,
+            pinned_name=pinned_name,
+        )
+
+    if board and board.name == "放置榜":
+        return build_placement_rank_image_b64(
             server_ids=server_ids,
             limit=limit,
             pinned_uuid=pinned_uuid,
