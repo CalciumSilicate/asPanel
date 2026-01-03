@@ -319,6 +319,9 @@ _SERVER_TO_GROUPS: Dict[str, List[int]] = {}
 _GROUP_PLAYERS: Dict[int, Set[str]] = {}
 _PLAYER_EVENT_SUPPRESS_WINDOW = 1.0
 
+# QQ群成员最后发言记录: {qq_group: {sender_qq: {"nickname": str, "last_time": float}}}
+_QQ_GROUP_SPEAKERS: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
 
 @dataclass
 class _RankSettings:
@@ -651,6 +654,7 @@ async def _emit_chat_message(group_id: int, nickname: str, message: str, *, send
 
 
 async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, Any]) -> None:
+    import time as _time
     nickname = None
     sender = payload.get("sender") or {}
     nickname = sender.get("card") or sender.get("nickname") or str(payload.get("user_id") or "QQ")
@@ -668,6 +672,15 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
     plain_text = _segments_to_plain_text(segments)
 
     sender_qq = str(payload.get("user_id") or "") or None
+    
+    # 记录发言者信息用于 !!qqlist 命令
+    if sender_qq and qq_group:
+        if qq_group not in _QQ_GROUP_SPEAKERS:
+            _QQ_GROUP_SPEAKERS[qq_group] = {}
+        _QQ_GROUP_SPEAKERS[qq_group][sender_qq] = {
+            "nickname": nickname,
+            "last_time": _time.time(),
+        }
 
     # 命令检测
     if await _maybe_handle_command(group_id, qq_group, nickname, plain_text, sender_qq=sender_qq, qq_group_id=int(qq_group)) :
@@ -693,6 +706,8 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
                         game_user = nickname
         except Exception:
             game_user = nickname
+        # 获取消息ID用于回复功能
+        message_id = payload.get("message_id")
         await _PLUGIN_BROADCASTER(
             level="NORMAL",
             group_id=group_id,
@@ -700,6 +715,8 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
             message=raw_message,
             source="qq",
             avatar=None,
+            sender_qq=sender_qq,
+            message_id=message_id,
         )
 
 
@@ -1214,3 +1231,26 @@ async def _handle_incoming(session: OneBotSession, payload: Dict[str, Any]) -> N
 
 async def startup_sync() -> None:
     await refresh_bindings()
+
+
+def get_qq_group_speakers(group_id: int) -> List[Dict[str, Any]]:
+    """获取指定组对应的QQ群成员发言列表，按最后发言时间排序"""
+    qq_group = _GROUP_TO_QQ.get(group_id)
+    if not qq_group:
+        return []
+    
+    speakers = _QQ_GROUP_SPEAKERS.get(qq_group, {})
+    if not speakers:
+        return []
+    
+    # 转换为列表并按最后发言时间排序（最近的在前）
+    result = []
+    for qq, info in speakers.items():
+        result.append({
+            "qq": qq,
+            "nickname": info.get("nickname", ""),
+            "last_time": info.get("last_time", 0),
+        })
+    
+    result.sort(key=lambda x: x.get("last_time", 0), reverse=True)
+    return result

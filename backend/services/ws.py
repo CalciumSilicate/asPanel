@@ -227,7 +227,7 @@ def _safe_json_loads(text: str) -> Any:
         return None
 
 
-async def broadcast_chat_to_plugins(*, level: str, group_id: Optional[int], user: str, message: str, source: str = "web", avatar: Optional[str] = None) -> None:
+async def broadcast_chat_to_plugins(*, level: str, group_id: Optional[int], user: str, message: str, source: str = "web", avatar: Optional[str] = None, sender_qq: Optional[str] = None, message_id: Optional[Any] = None) -> None:
     data = {
         "level": level,
         "message": message,
@@ -235,6 +235,8 @@ async def broadcast_chat_to_plugins(*, level: str, group_id: Optional[int], user
         "avatar": avatar,
         "group_id": group_id,
         "source": source,
+        "sender_qq": sender_qq,
+        "message_id": message_id,
     }
     payload = json.dumps({"event": "chat.message", "ts": "-", "data": data}, ensure_ascii=False)
 
@@ -279,11 +281,89 @@ async def broadcast_chat_to_plugins(*, level: str, group_id: Optional[int], user
 
 onebot.register_plugin_broadcaster(broadcast_chat_to_plugins)
 
+
+async def _handle_qqlist_request(server_name: str) -> None:
+    """处理来自插件的 !!qqlist 请求，返回QQ群成员列表"""
+    try:
+        # 找到该服务器对应的组
+        with get_db_context() as db:
+            target = None
+            for s in crud.get_all_servers(db):
+                try:
+                    if Path(s.path).name == server_name:
+                        target = s
+                        break
+                except Exception:
+                    continue
+            if not target:
+                return
+            
+            # 获取该服务器所属的所有组
+            group_ids = []
+            for g in crud.list_server_link_groups(db):
+                try:
+                    ids = list(map(int, json.loads(g.server_ids or '[]')))
+                except Exception:
+                    ids = []
+                if target.id in ids:
+                    group_ids.append(g.id)
+        
+        if not group_ids:
+            return
+        
+        # 获取所有组的QQ群成员列表（合并去重）
+        all_speakers: Dict[str, Dict[str, Any]] = {}
+        for gid in group_ids:
+            speakers = onebot.get_qq_group_speakers(gid)
+            for s in speakers:
+                qq = s.get("qq")
+                if qq and qq not in all_speakers:
+                    all_speakers[qq] = s
+                elif qq and s.get("last_time", 0) > all_speakers.get(qq, {}).get("last_time", 0):
+                    all_speakers[qq] = s
+        
+        # 转换为列表并排序
+        speakers_list = list(all_speakers.values())
+        speakers_list.sort(key=lambda x: x.get("last_time", 0), reverse=True)
+        
+        # 发送响应给请求的服务器
+        response = {
+            "event": "qqlist.response",
+            "ts": "-",
+            "data": {
+                "server": server_name,
+                "speakers": speakers_list,
+            }
+        }
+        payload_text = json.dumps(response, ensure_ascii=False)
+        
+        for ws, bound in list(_PLUGIN_CLIENTS.items()):
+            try:
+                if bound == server_name:
+                    await ws.send_text(payload_text)
+            except Exception:
+                pass
+    except Exception:
+        logger.opt(exception=True).warning("[MCDR-WS] 处理 qqlist 请求失败")
+
+
 async def _handle_single(payload: Dict[str, Any]):
     """处理单条 mcdr 事件，广播至 Socket.IO"""
     if not isinstance(payload, dict):
         return
     event = payload.get("event")
+    
+    # 处理 !!qqlist 请求事件
+    if event == "mcdr.qqlist_request":
+        try:
+            data = payload.get("data", {})
+            server_name = data.get("server")
+            if server_name:
+                await _handle_qqlist_request(server_name)
+        except Exception:
+            pass
+        return
+    
     if not isinstance(event, str) or not event.startswith("mcdr."):
         # 不识别的事件格式，忽略
         return

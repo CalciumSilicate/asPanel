@@ -35,6 +35,11 @@ _JOINED_LOCAL_PATTERN = re.compile(r"\[local\]\s+logged in with entity id\b")
 _POS_THREAD: Optional[threading.Thread] = None
 _POS_STOP = threading.Event()
 
+# QQ群成员列表响应缓存
+_QQLIST_RESPONSE: Optional[List[dict[str, Any]]] = None
+_QQLIST_EVENT = threading.Event()
+_QQLIST_SERVER: Optional["ServerInterface"] = None
+
 # 命令输出解析：data get entity <player> Pos / Dimension
 _POS_PATTERN = re.compile(
     r"\[([\-0-9\.eE]+)d?,\s*([\-0-9\.eE]+)d?,\s*([\-0-9\.eE]+)d?\]"
@@ -126,6 +131,7 @@ def _query_save_all(server: ServerInterface) -> bool:
             return True
     except Exception:
         return False
+
 
 def _read_env_config() -> dict[str, Any]:
     def _int_env(name: str, default: int) -> int:
@@ -305,28 +311,40 @@ class WsSender:
                                             and str(data.get("server")) == _SERVER_NAME
                                         ):
                                             if _query_save_all(self.server):
-                                                logger.info("[asPanel] 收到保存世界请求，已执行 save-all")
+                                                logger.info(
+                                                    "[asPanel] 收到保存世界请求，已执行 save-all"
+                                                )
                                                 _send_event(
                                                     self.server,
                                                     "mcdr.save_all_executed",
                                                     {"server": _SERVER_NAME},
                                                 )
                                             else:
-                                                logger.warning("[asPanel] 收到保存世界请求，但执行 save-all 失败 (saving 可能被pb关闭)， 将延迟15秒后重试")
+                                                logger.warning(
+                                                    "[asPanel] 收到保存世界请求，但执行 save-all 失败 (saving 可能被pb关闭)， 将延迟15秒后重试"
+                                                )
+
                                                 # 15秒后再次尝试保存(非阻塞)
                                                 def _delayed_save():
                                                     time.sleep(15)
                                                     if _query_save_all(self.server):
-                                                        logger.info("[asPanel] 延迟保存世界请求已执行 save-all")
+                                                        logger.info(
+                                                            "[asPanel] 延迟保存世界请求已执行 save-all"
+                                                        )
                                                     else:
-                                                        logger.warning("[asPanel] 延迟保存世界请求执行 save-all 失败 (saving 可能被pb关闭)")
+                                                        logger.warning(
+                                                            "[asPanel] 延迟保存世界请求执行 save-all 失败 (saving 可能被pb关闭)"
+                                                        )
                                                     _send_event(
                                                         self.server,
                                                         "mcdr.save_all_executed",
                                                         {"server": _SERVER_NAME},
                                                     )
-                                                threading.Thread(target=_delayed_save, daemon=True).start()
-                                        
+
+                                                threading.Thread(
+                                                    target=_delayed_save, daemon=True
+                                                ).start()
+
                                     # 转发的 mcdr 事件（来自其他同组服务器）
                                     elif isinstance(ev, str) and ev.startswith("mcdr."):
                                         try:
@@ -337,6 +355,12 @@ class WsSender:
                                     elif ev == "chat.message":
                                         try:
                                             _handle_chat_message(self.server, data)
+                                        except Exception:
+                                            pass
+                                    # QQ群成员列表响应
+                                    elif ev == "qqlist.response":
+                                        try:
+                                            _handle_qqlist_response(self.server, data)
                                         except Exception:
                                             pass
                             except Exception:
@@ -643,17 +667,22 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
     if seg_type == "video":
         return RText("[短视频]", color=RColor.gray)
     if seg_type == "at":
-        target = str(data.get("text") or data.get("qq") or "")
-        if target.lower() == "all":
+        target_qq = str(data.get("qq") or "")
+        target_text = str(data.get("name") or "")
+        # 优先使用 text 字段作为显示名，否则使用 qq 号
+        if target_qq.lower() == "all" or target_text == "全体成员":
             display = "@全体成员"
-        elif target:
-            display = f"@{target}"
+        elif target_text:
+            display = f"@{target_text}"
+        elif target_qq:
+            display = f"@{target_qq}"
         else:
             display = "@"
-        label = RText("[@]", color=RColor.gold)
+        # 显示为蓝色的 @用户名
+        label = RText(display, color=RColor.aqua)
         if raw:
             label.set_click_event(RAction.suggest_command, f".{raw}")
-        label.set_hover_text(display)
+            label.set_hover_text(f"点击艾特 {target_text or target_qq}")
         return label
     if seg_type == "share":
         url = _normalize_media_url(
@@ -726,6 +755,22 @@ def _cq_message_to_rtext(message: str) -> RText:
     return combined if combined is not None else _rtext_gray(str(message or ""))
 
 
+def _wrap_rtext_with_reply(rtext: RText, reply_cq: str) -> RText:
+    """为 RText 添加回复点击事件的包装器"""
+    # 创建一个包装 RText，设置点击事件
+    wrapper = RText("")
+    # 由于 RText 的 + 操作会返回 RTextList，我们需要特殊处理
+    # 直接在原 rtext 上设置事件（如果它是简单的 RText）
+    try:
+        # 尝试直接设置点击事件
+        rtext.set_click_event(RAction.suggest_command, f".{reply_cq}")
+        rtext.set_hover_text("点击回复此消息")
+        return rtext
+    except Exception:
+        # 如果失败，返回原文本
+        return rtext
+
+
 def _handle_forward_event(server: ServerInterface, event: str, data: dict[str, Any]):
     # 仅处理与自己同组的事件
     if not _same_group(data.get("server_groups")):
@@ -781,7 +826,7 @@ def _handle_forward_event(server: ServerInterface, event: str, data: dict[str, A
         # [server] OFF
         server.say(prefix + _rtext_gray("OFF"))
 
-    elif event in [ "mcdr.player_joined", "mcdr.bot_joined" ]:
+    elif event in ["mcdr.player_joined", "mcdr.bot_joined"]:
         # [server] player joined
         player = str(data.get("player") or "?")
         p = _rtext_gray(player).set_click_event(RAction.suggest_command, f"@ {player}")
@@ -795,12 +840,14 @@ def _handle_forward_event(server: ServerInterface, event: str, data: dict[str, A
 
 
 def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
-    # data: { level, message, user, avatar, group_id }
+    # data: { level, message, user, avatar, group_id, source, sender_qq, message_id }
     level = str(data.get("level") or "NORMAL").upper()
     message = str(data.get("message") or "")
     user = str(data.get("user") or "")
     source = str(data.get("source") or "web").lower()
     gid = data.get("group_id")
+    sender_qq = data.get("sender_qq")
+    message_id = data.get("message_id")
     # NORMAL: 仅当该消息目标组与本服组有交集（实际上 gid 在某一组）才显示；ALERT: 全服显示
     if level != "ALERT":
         try:
@@ -820,14 +867,123 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
         server.say(t)
     else:
         if source == "qq":
-            prefix = "[QQ] "
+            # [QQ] 可点击，提示输入 !!qqlist 命令
+            prefix_qq = RText("[QQ]", color=RColor.gray)
+            prefix_qq.set_click_event(RAction.suggest_command, "!!qqlist")
+            prefix_qq.set_hover_text("点击查看QQ群成员列表")
+            prefix = prefix_qq + _rtext_gray(" ")
+
+            # <用户名> 可点击，复制艾特标记
+            if sender_qq:
+                at_cq = f"[CQ:at,qq={sender_qq}]"
+                user_part = RText(f"<{user}>", color=RColor.gray)
+                user_part.set_click_event(RAction.suggest_command, f".{at_cq} ")
+                user_part.set_hover_text(f"点击艾特 {user}")
+            else:
+                user_part = _rtext_gray(f"<{user}>")
+
+            # 消息内容可点击，复制回复标记
+            content_rtext = _cq_message_to_rtext(message)
+            if message_id:
+                reply_cq = f"[CQ:reply,id={message_id}]"
+                # 为整个消息内容添加点击事件
+                content_rtext = _wrap_rtext_with_reply(content_rtext, reply_cq)
+
+            t = prefix + user_part + _rtext_gray(" ") + content_rtext
         else:
             prefix = "[WEB] "
-        content_rtext = (
-            _cq_message_to_rtext(message) if source == "qq" else _rtext_gray(message)
-        )
-        t = _rtext_gray(prefix) + _rtext_gray(f"<{user}> ") + content_rtext
+            t = _rtext_gray(prefix) + _rtext_gray(f"<{user}> ") + _rtext_gray(message)
         server.say(t)
+
+
+def _handle_qqlist_response(server: ServerInterface, data: dict[str, Any]):
+    """处理来自后端的QQ群成员列表响应"""
+    global _QQLIST_RESPONSE, _QQLIST_SERVER
+    speakers = data.get("speakers") or []
+    _QQLIST_RESPONSE = speakers
+    _QQLIST_SERVER = server
+    _QQLIST_EVENT.set()
+
+
+def _request_qqlist(server: ServerInterface):
+    """发送请求获取QQ群成员列表"""
+    global _QQLIST_RESPONSE
+    _QQLIST_RESPONSE = None
+    _QQLIST_EVENT.clear()
+    _send_event(server, "mcdr.qqlist_request", {"server": _SERVER_NAME})
+
+
+def _display_qqlist(server: ServerInterface):
+    """显示QQ群成员列表"""
+    global _QQLIST_RESPONSE
+    speakers = _QQLIST_RESPONSE or []
+
+    if not speakers:
+        server.say(_rtext_gray("暂无QQ群成员发言记录"))
+        return
+
+    # 标题
+    title = RText("=== QQ群成员列表 ===", color=RColor.gold)
+    server.say(title)
+
+    # 显示成员列表（限制显示前20个）
+    import time as _time
+
+    now = _time.time()
+    for i, speaker in enumerate(speakers[:20]):
+        qq = speaker.get("qq", "")
+        nickname = speaker.get("nickname", "")
+        last_time = speaker.get("last_time", 0)
+
+        # 计算距离最后发言的时间
+        if last_time > 0:
+            delta = now - last_time
+            if delta < 60:
+                time_str = "刚刚"
+            elif delta < 3600:
+                time_str = f"{int(delta / 60)}分钟前"
+            elif delta < 86400:
+                time_str = f"{int(delta / 3600)}小时前"
+            else:
+                time_str = f"{int(delta / 86400)}天前"
+        else:
+            time_str = ""
+
+        # 创建可点击的成员条目
+        # 序号
+        num = RText(f"{i + 1}. ", color=RColor.gray)
+
+        # 昵称（可点击艾特）
+        at_cq = f"[CQ:at,qq={qq}]"
+        name_text = RText(nickname or qq, color=RColor.aqua)
+        name_text.set_click_event(RAction.suggest_command, f".{at_cq} ")
+        name_text.set_hover_text(f"点击艾特 {nickname or qq}\nQQ: {qq}")
+
+        # 时间
+        time_text = (
+            RText(f" ({time_str})", color=RColor.gray) if time_str else RText("")
+        )
+
+        server.say(num + name_text + time_text)
+
+    if len(speakers) > 20:
+        server.say(_rtext_gray(f"... 还有 {len(speakers) - 20} 人"))
+
+
+def _qqlist_command_handler(server: ServerInterface, source: Any):
+    """处理 !!qqlist 命令"""
+
+    def _do_request():
+        _request_qqlist(server)
+        # 等待响应（最多3秒）
+        if _QQLIST_EVENT.wait(timeout=3.0):
+            _display_qqlist(server)
+        else:
+            server.say(_rtext_gray("获取QQ群成员列表超时"))
+
+    # 在后台线程中执行，避免阻塞
+    t = threading.Thread(target=_do_request, daemon=True)
+    t.start()
 
 
 # ---- Plugin lifecycle ----
@@ -837,6 +993,12 @@ def on_load(server: ServerInterface, prev_module: Any):
     try:
         server.register_help_message(
             "!!aspanel_link", "asPanel Server Link：WS 上报 & 组同步"
+        )
+    except Exception:
+        pass
+    try:
+        server.register_help_message(
+            "!!qqlist", "查看QQ群成员列表（按最后发言时间排序）"
         )
     except Exception:
         pass
@@ -892,7 +1054,14 @@ def on_unload(server: ServerInterface):
 
 # ---- General / User Info ----
 def on_user_info(server: ServerInterface, info: Info):
-    if info.content == "!test":
+    content = str(getattr(info, "content", "") or "").strip()
+
+    # 处理 !!qqlist 命令
+    if content == "!!qqlist":
+        _qqlist_command_handler(server, info)
+        return
+
+    if content == "!test":
         _report_positions(server, "test_command")
         server.say("[asPanel] 测试位置上报已发送")
     _send_event(server, "mcdr.user_info", {"info": _info_to_dict(info)})
