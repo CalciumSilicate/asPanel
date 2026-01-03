@@ -873,6 +873,7 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
                 reply_user = str(reply_info.get("user") or "")
                 reply_content = str(reply_info.get("content") or "")
                 reply_sender_qq = reply_info.get("sender_qq")
+                reply_msg_id = reply_info.get("message_id")  # 被回复消息的ID
                 
                 # 构建回复行: | 回复 [QQ] <用户名> 消息
                 reply_line = RText("│ ", color=RColor.dark_gray)
@@ -890,13 +891,21 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
                 
                 reply_line = reply_line + reply_user_part + _rtext_gray(" ")
                 
-                # 回复内容（截断显示，避免过长）
+                # 回复内容（截断显示，避免过长）- 可点击回复被回复的消息
                 max_reply_len = 40
                 if len(reply_content) > max_reply_len:
                     reply_content_display = reply_content[:max_reply_len] + "..."
                 else:
                     reply_content_display = reply_content
-                reply_line = reply_line + RText(reply_content_display, color=RColor.dark_gray)
+                
+                reply_content_part = RText(reply_content_display, color=RColor.dark_gray)
+                # 为回复内容添加点击事件，回复被回复的消息
+                if reply_msg_id:
+                    reply_to_original_cq = f"[CQ:reply,id={reply_msg_id}]"
+                    reply_content_part.set_click_event(RAction.suggest_command, f".{reply_to_original_cq} ")
+                    reply_content_part.set_hover_text("点击回复此消息")
+                
+                reply_line = reply_line + reply_content_part
                 
                 # 显示回复行
                 server.say(reply_line)
