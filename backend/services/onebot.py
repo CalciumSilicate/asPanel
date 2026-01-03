@@ -350,9 +350,7 @@ def _segments_to_plain_text(segments: List[_CQSegment]) -> str:
     parts: List[str] = []
     for seg in segments:
         if seg.type == "text":
-            # 将文本中的 URL 替换为 [来源] 格式
-            text = seg.data.get("text", "")
-            parts.append(_replace_urls_with_source(text))
+            parts.append(seg.data.get("text", ""))
         elif seg.type == "face":
             parts.append("[表情]")
         elif seg.type == "record":
@@ -370,13 +368,7 @@ def _segments_to_plain_text(segments: List[_CQSegment]) -> str:
         elif seg.type in {"rps", "dice", "shake", "anonymous", "contact", "location", "music", "redbag", "poke", "gift", "cardimage", "tts"}:
             parts.append(f"[{seg.type}]")
         elif seg.type == "share":
-            # 解析 share 中的 URL 来源
-            url = seg.data.get("url") or seg.data.get("jumpUrl") or ""
-            source = _get_url_source(url)
-            if source:
-                parts.append(f"[{source}]")
-            else:
-                parts.append("[链接]")
+            parts.append("[链接]")
         elif seg.type == "image":
             parts.append("[图片]")
         elif seg.type == "reply":
@@ -840,6 +832,7 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
                         reply_nickname = reply_sender.get("card") or reply_sender.get("nickname") or str(reply_data.get("user_id") or "")
                         reply_message = reply_data.get("message")
                         reply_segments = _parse_message_segments(reply_message)
+                        reply_cq = _segments_to_cq_string(reply_segments)
                         reply_plain = _segments_to_plain_text(reply_segments)
                         
                         # 检测被回复的消息是否来自游戏（格式为 <player> message）
@@ -853,6 +846,8 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
                         
                         reply_info = {
                             "user": reply_nickname,
+                            "raw": reply_message,
+                            "raw_cq": reply_cq,
                             "content": reply_plain,
                             "sender_qq": str(reply_data.get("user_id") or ""),
                             "message_id": reply_msg_id_int,  # 被回复消息的ID，用于游戏内点击回复

@@ -683,6 +683,7 @@ def _parse_share_card(seg_type: str, data_str: str) -> dict[str, Any] | None:
                     # 来源标识
                     tag = item.get("tag") or item.get("source") or ""
                     if "bilibili" in str(result.get("url", "")).lower() or "b23.tv" in str(result.get("url", "")).lower():
+                        result["title"] = item.get("desc")
                         result["source"] = "B站"
                     elif "music.163" in str(result.get("url", "")).lower():
                         result["source"] = "网易云"
@@ -891,7 +892,7 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
         label = RText(display, color=RColor.aqua)
         if raw:
             label.set_click_event(RAction.suggest_command, f".{raw}")
-            label.set_hover_text(f"点击艾特 {target_text or target_qq}")
+            label.set_hover_text(f"点击提及 {target_text or target_qq}")
         return label
     if seg_type == "share":
         url = _normalize_media_url(
@@ -944,7 +945,7 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
                 label = RText(f"[{source}] ", color=RColor.aqua)
             else:
                 label = RText("[分享] ", color=RColor.aqua)
-            
+            label.set_click_event(RAction.open_url, url)
             title_part = RText(title, color=RColor.white)
             if url:
                 title_part.set_click_event(RAction.open_url, url)
@@ -953,6 +954,7 @@ def _cq_segment_to_rtext(segment: dict[str, Any]) -> RText | None:
                     hover += f"\n{desc[:100]}{'...' if len(desc) > 100 else ''}"
                 hover += f"\n点击打开链接"
                 title_part.set_hover_text(hover)
+                label.set_hover_text(hover)
             
             return label + title_part
         else:
@@ -1113,6 +1115,7 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
             if reply_info and isinstance(reply_info, dict):
                 reply_user = str(reply_info.get("user") or "")
                 reply_content = str(reply_info.get("content") or "")
+                reply_cq = reply_info.get("raw_cq")
                 reply_sender_qq = reply_info.get("sender_qq")
                 reply_msg_id = reply_info.get("message_id")  # 被回复消息的ID
                 is_from_game = reply_info.get("is_from_game", False)  # 是否来自游戏
@@ -1154,28 +1157,25 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
                         reply_at_cq = f"[CQ:at,qq={reply_sender_qq}]"
                         reply_user_part = RText(f"<{reply_user}>", color=RColor.dark_gray)
                         reply_user_part.set_click_event(RAction.suggest_command, f".{reply_at_cq} ")
-                        reply_user_part.set_hover_text(f"点击艾特 {reply_user}")
+                        reply_user_part.set_hover_text(f"点击提及 {reply_user}")
                     else:
                         reply_user_part = _rtext_gray(f"<{reply_user}>")
                     
                     reply_line = reply_line + reply_user_part + _rtext_gray(" ")
                     
-                    # 回复内容（截断显示，避免过长）
-                    max_reply_len = 25
-                    if len(reply_content) > max_reply_len:
-                        reply_content_display = reply_content[:max_reply_len] + "..."
-                    else:
-                        reply_content_display = reply_content
+                    reply_content_display = _cq_message_to_rtext(reply_cq)
                     
-                    reply_content_part = RText(reply_content_display, color=RColor.dark_gray)
+                    reply_content_part = reply_content_display.set_color(RColor.dark_gray)
                 
                 # 为回复内容添加点击事件，回复被回复的消息
+                reply_mark = _rtext_gray(" [↑]")
+
                 if reply_msg_id:
                     reply_to_original_cq = f"[CQ:reply,id={reply_msg_id}]"
-                    reply_content_part.set_click_event(RAction.suggest_command, f".{reply_to_original_cq} ")
-                    reply_content_part.set_hover_text("点击回复此消息")
+                    reply_mark.set_click_event(RAction.suggest_command, f".{reply_to_original_cq} ")
+                    reply_mark.set_hover_text("点击回复此消息")
                 
-                reply_line = reply_line + reply_content_part
+                reply_line = reply_line + reply_content_part + reply_mark
                 
             
             # 检查被艾特的绑定玩家是否在线
@@ -1209,18 +1209,18 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
                 at_cq = f"[CQ:at,qq={sender_qq}]"
                 user_part = RText(f"<{user}>", color=RColor.gray)
                 user_part.set_click_event(RAction.suggest_command, f".{at_cq} ")
-                user_part.set_hover_text(f"点击艾特 {user}")
+                user_part.set_hover_text(f"点击提及 {user}")
             else:
                 user_part = _rtext_gray(f"<{user}>")
 
             # 消息内容可点击，复制回复标记
             content_rtext = _cq_message_to_rtext(message)
+            reply_mark = _rtext_gray(" [↑]")
+
             if message_id:
                 reply_cq = f"[CQ:reply,id={message_id}]"
-                # 为整个消息内容添加点击事件
-                content_rtext = _wrap_rtext_with_reply(content_rtext, reply_cq)
-
-            t = prefix + user_part + _rtext_gray(" ") + content_rtext
+                reply_mark = _wrap_rtext_with_reply(reply_mark, reply_cq)
+            t = prefix + user_part + _rtext_gray(" ") + content_rtext + reply_mark
         else:
             prefix = "[WEB] "
             t = _rtext_gray(prefix) + _rtext_gray(f"<{user}> ") + _rtext_gray(message)
@@ -1288,7 +1288,7 @@ def _display_qqlist(server: ServerInterface):
         at_cq = f"[CQ:at,qq={qq}]"
         name_text = RText(nickname or qq, color=RColor.aqua)
         name_text.set_click_event(RAction.suggest_command, f".{at_cq} ")
-        name_text.set_hover_text(f"点击艾特 {nickname or qq}\nQQ: {qq}")
+        name_text.set_hover_text(f"点击提及 {nickname or qq}\nQQ: {qq}")
 
         # 时间
         time_text = (
