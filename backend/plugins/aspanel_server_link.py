@@ -868,37 +868,72 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
         server.say(t)
     else:
         if source == "qq":
+            # 获取额外字段
+            at_bound_players = data.get("at_bound_players") or []  # 被艾特的绑定玩家列表
+            
+            # 收集需要播放提示音的玩家
+            players_to_notify: set[str] = set()
+            
             # 如果有回复信息，先显示回复行
             if reply_info and isinstance(reply_info, dict):
                 reply_user = str(reply_info.get("user") or "")
                 reply_content = str(reply_info.get("content") or "")
                 reply_sender_qq = reply_info.get("sender_qq")
                 reply_msg_id = reply_info.get("message_id")  # 被回复消息的ID
+                is_from_game = reply_info.get("is_from_game", False)  # 是否来自游戏
+                game_player = reply_info.get("game_player")  # 游戏玩家名
                 
-                # 构建回复行: | 回复 [QQ] <用户名> 消息
+                # 构建回复行: │ 回复 [QQ] <用户名> 消息 或 │ 回复 <玩家名> 消息
                 reply_line = RText("│ ", color=RColor.dark_gray)
                 reply_line = reply_line + RText("回复 ", color=RColor.light_purple)
-                reply_line = reply_line + RText("[QQ] ", color=RColor.gray)
                 
-                # 被回复者用户名（可点击艾特）
-                if reply_sender_qq:
-                    reply_at_cq = f"[CQ:at,qq={reply_sender_qq}]"
-                    reply_user_part = RText(f"<{reply_user}>", color=RColor.gray)
-                    reply_user_part.set_click_event(RAction.suggest_command, f".{reply_at_cq} ")
-                    reply_user_part.set_hover_text(f"点击艾特 {reply_user}")
+                if is_from_game and game_player:
+                    # 来自游戏的消息，不显示 [QQ]，用户名用白色
+                    reply_user_part = RText(f"<{game_player}>", color=RColor.white)
+                    reply_user_part.set_click_event(RAction.suggest_command, f"@ {game_player}")
+                    reply_user_part.set_hover_text(f"点击提及 {game_player}")
+                    reply_line = reply_line + reply_user_part + RText(" ", color=RColor.white)
+                    
+                    # 游戏消息的回复内容也用白色
+                    max_reply_len = 40
+                    # 去掉 <player> 前缀显示实际内容
+                    actual_content = reply_content
+                    if reply_content.startswith(f"<{game_player}> "):
+                        actual_content = reply_content[len(f"<{game_player}> "):]
+                    if len(actual_content) > max_reply_len:
+                        reply_content_display = actual_content[:max_reply_len] + "..."
+                    else:
+                        reply_content_display = actual_content
+                    
+                    reply_content_part = RText(reply_content_display, color=RColor.white)
+                    
+                    # 检查被回复的游戏玩家是否在线，如果在线则加入通知列表
+                    if game_player in _LOCAL_PLAYERS:
+                        players_to_notify.add(game_player)
                 else:
-                    reply_user_part = _rtext_gray(f"<{reply_user}>")
+                    # 来自 QQ 的消息
+                    reply_line = reply_line + RText("[QQ] ", color=RColor.gray)
+                    
+                    # 被回复者用户名（可点击艾特）
+                    if reply_sender_qq:
+                        reply_at_cq = f"[CQ:at,qq={reply_sender_qq}]"
+                        reply_user_part = RText(f"<{reply_user}>", color=RColor.gray)
+                        reply_user_part.set_click_event(RAction.suggest_command, f".{reply_at_cq} ")
+                        reply_user_part.set_hover_text(f"点击艾特 {reply_user}")
+                    else:
+                        reply_user_part = _rtext_gray(f"<{reply_user}>")
+                    
+                    reply_line = reply_line + reply_user_part + _rtext_gray(" ")
+                    
+                    # 回复内容（截断显示，避免过长）
+                    max_reply_len = 40
+                    if len(reply_content) > max_reply_len:
+                        reply_content_display = reply_content[:max_reply_len] + "..."
+                    else:
+                        reply_content_display = reply_content
+                    
+                    reply_content_part = RText(reply_content_display, color=RColor.dark_gray)
                 
-                reply_line = reply_line + reply_user_part + _rtext_gray(" ")
-                
-                # 回复内容（截断显示，避免过长）- 可点击回复被回复的消息
-                max_reply_len = 40
-                if len(reply_content) > max_reply_len:
-                    reply_content_display = reply_content[:max_reply_len] + "..."
-                else:
-                    reply_content_display = reply_content
-                
-                reply_content_part = RText(reply_content_display, color=RColor.dark_gray)
                 # 为回复内容添加点击事件，回复被回复的消息
                 if reply_msg_id:
                     reply_to_original_cq = f"[CQ:reply,id={reply_msg_id}]"
@@ -909,6 +944,20 @@ def _handle_chat_message(server: ServerInterface, data: dict[str, Any]):
                 
                 # 显示回复行
                 server.say(reply_line)
+            
+            # 检查被艾特的绑定玩家是否在线
+            for bound_player in at_bound_players:
+                if bound_player in _LOCAL_PLAYERS:
+                    players_to_notify.add(bound_player)
+            
+            # 播放提示音给需要通知的玩家
+            for player_name in players_to_notify:
+                try:
+                    server.execute(
+                        f"execute at {player_name} run playsound minecraft:entity.arrow.hit_player player {player_name}"
+                    )
+                except Exception:
+                    pass
             
             # [QQ] 可点击，提示输入 !!qqlist 命令
             prefix_qq = RText("[QQ]", color=RColor.gray)

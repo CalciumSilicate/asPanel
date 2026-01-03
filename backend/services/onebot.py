@@ -737,15 +737,35 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
                         reply_message = reply_data.get("message")
                         reply_segments = _parse_message_segments(reply_message)
                         reply_plain = _segments_to_plain_text(reply_segments)
+                        
+                        # 检测被回复的消息是否来自游戏（格式为 <player> message）
+                        is_from_game = False
+                        game_player: Optional[str] = None
+                        import re as _re
+                        game_msg_match = _re.match(r'^<([A-Za-z0-9_]{1,32})>\s+(.*)$', reply_plain)
+                        if game_msg_match:
+                            is_from_game = True
+                            game_player = game_msg_match.group(1)
+                        
                         reply_info = {
                             "user": reply_nickname,
                             "content": reply_plain,
                             "sender_qq": str(reply_data.get("user_id") or ""),
                             "message_id": reply_msg_id_int,  # 被回复消息的ID，用于游戏内点击回复
+                            "is_from_game": is_from_game,  # 是否来自游戏
+                            "game_player": game_player,  # 游戏玩家名（如果来自游戏）
                         }
                 except Exception as e:
                     logger.warning(f"[OneBot] 获取回复消息失败: {e}")
             break
+    
+    # 检测消息中艾特的QQ号，用于查找绑定的玩家
+    at_qq_list: List[str] = []
+    for seg in segments:
+        if seg.type == "at":
+            at_qq = seg.data.get("qq")
+            if at_qq and str(at_qq).lower() != "all":
+                at_qq_list.append(str(at_qq))
     
     # 记录发言者信息用于 !!qqlist 命令
     if sender_qq and qq_group:
@@ -766,18 +786,28 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
     if _PLUGIN_BROADCASTER is not None:
         # 发送到游戏端：若该 QQ 号对应面板用户且绑定了玩家名，则显示为 [QQ] <MCName> message
         game_user = nickname
+        # 查找艾特的 QQ 绑定的玩家名列表
+        at_bound_players: List[str] = []
         try:
-            if sender_qq:
+            if sender_qq or at_qq_list:
                 with get_db_context() as db:
-                    u = db.query(models.User).filter(models.User.qq == str(sender_qq)).first()
-                    if u and getattr(u, 'bound_player_id', None):
-                        p = db.query(models.Player).filter(models.Player.id == u.bound_player_id).first()
-                        if p and p.player_name:
-                            game_user = p.player_name
+                    if sender_qq:
+                        u = db.query(models.User).filter(models.User.qq == str(sender_qq)).first()
+                        if u and getattr(u, 'bound_player_id', None):
+                            p = db.query(models.Player).filter(models.Player.id == u.bound_player_id).first()
+                            if p and p.player_name:
+                                game_user = p.player_name
+                            else:
+                                game_user = nickname
                         else:
                             game_user = nickname
-                    else:
-                        game_user = nickname
+                    # 查找艾特的 QQ 绑定的玩家
+                    for aq in at_qq_list:
+                        au = db.query(models.User).filter(models.User.qq == str(aq)).first()
+                        if au and getattr(au, 'bound_player_id', None):
+                            ap = db.query(models.Player).filter(models.Player.id == au.bound_player_id).first()
+                            if ap and ap.player_name:
+                                at_bound_players.append(str(ap.player_name))
         except Exception:
             game_user = nickname
         # 获取消息ID用于回复功能
@@ -792,6 +822,7 @@ async def _handle_chat_from_qq(group_id: int, qq_group: str, payload: Dict[str, 
             sender_qq=sender_qq,
             message_id=message_id,
             reply_info=reply_info,
+            at_bound_players=at_bound_players,  # 被艾特的绑定玩家名列表
         )
 
 
