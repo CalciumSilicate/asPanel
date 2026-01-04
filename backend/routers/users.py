@@ -37,8 +37,18 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     qq_str = str(user.qq).strip()
     if not qq_str.isdigit():
         raise HTTPException(400, "QQ 必须为纯数字")
-    # 创建用户；create_user 内部会尝试根据 player_name 绑定玩家
-    return crud.create_user(db, user)
+    # player_name 必填：检查玩家是否存在
+    if not user.player_name or not user.player_name.strip():
+        raise HTTPException(400, "玩家名为必填项")
+    player = crud.get_player_by_name(db, user.player_name.strip())
+    if not player:
+        raise HTTPException(400, "玩家不存在，请确认玩家名是否正确")
+    # 检查该玩家是否已被其他用户绑定
+    existing_user = db.query(models.User).filter(models.User.bound_player_id == player.id).first()
+    if existing_user:
+        raise HTTPException(400, "该玩家已被其他账号绑定")
+    # 创建用户，传入 player.id 作为 bound_player_id
+    return crud.create_user(db, user, bound_player_id=player.id)
 
 
 @router.post("/token", response_model=schemas.Token)

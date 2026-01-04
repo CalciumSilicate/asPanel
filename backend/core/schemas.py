@@ -98,10 +98,10 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str
-    # 新增注册字段：qq 必填，email/player_name 可选
+    # 注册字段：qq 必填，email 可选，player_name 必填（需绑定已存在的玩家）
     qq: str
     email: Optional[str] = None
-    player_name: Optional[str] = None
+    player_name: str
 
 
 class UserOut(UserBase):

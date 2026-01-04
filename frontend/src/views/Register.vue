@@ -24,8 +24,8 @@
         <el-form-item label="邮箱（可选）">
           <el-input v-model="form.email" placeholder="请输入邮箱" size="large" autocomplete="email"></el-input>
         </el-form-item>
-        <el-form-item label="玩家名（可选，便于绑定 MC 身份）">
-          <el-input v-model="form.player_name" placeholder="绑定已有玩家名（可选）" size="large"></el-input>
+        <el-form-item label="玩家名（必填，需为已存在的玩家）">
+          <el-input v-model="form.player_name" placeholder="请输入已有玩家名" size="large"></el-input>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" native-type="submit" style="width: 100%;" :loading="loading" size="large">
@@ -62,8 +62,8 @@ const form = reactive({
 });
 
 const handleRegister = async () => {
-  if (!form.username || !form.password || !form.confirmPassword || !form.qq) {
-    ElMessage.error('请填写用户名、密码与 QQ');
+  if (!form.username || !form.password || !form.confirmPassword || !form.qq || !form.player_name) {
+    ElMessage.error('请填写用户名、密码、QQ 与玩家名');
     return;
   }
   if (form.password !== form.confirmPassword) {
@@ -82,7 +82,7 @@ const handleRegister = async () => {
       password: form.password,
       qq: form.qq,
       email: form.email || undefined,
-      player_name: form.player_name || undefined,
+      player_name: form.player_name,
     });
     ElMessage.success('注册成功！将跳转至登录页。');
     router.push('/login');

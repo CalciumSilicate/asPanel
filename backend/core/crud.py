@@ -21,16 +21,8 @@ def get_user_by_username(db: Session, username: str) -> Optional[models.User]:
     return db.query(models.User).filter(models.User.username == username).first()
 
 
-def create_user(db: Session, user: schemas.UserCreate, role: Optional[schemas.Role] = None) -> models.User:
+def create_user(db: Session, user: schemas.UserCreate, role: Optional[schemas.Role] = None, bound_player_id: Optional[int] = None) -> models.User:
     hashed_password = get_password_hash(user.password)
-    bound_player_id = None
-    try:
-        if getattr(user, 'player_name', None):
-            p = db.query(models.Player).filter(models.Player.player_name == user.player_name).first()
-            if p:
-                bound_player_id = p.id
-    except Exception:
-        bound_player_id = None
     db_user = models.User(
         username=user.username,
         hashed_password=hashed_password,
