@@ -744,6 +744,11 @@ class SystemSettings(BaseModel):
     java_command: str = Field("java", description="用于构建 MCDR start_command 的 Java 可执行文件")
     timezone: str = Field("Asia/Shanghai", description="前端显示使用的时区标识 e.g. Asia/Shanghai")
     stats_ignore_server: List[int] = Field(default_factory=list, description="忽略统计入库的服务器ID列表")
+    # 新增网页可配置项
+    token_expire_minutes: int = Field(10080, description="Token 有效期（分钟），默认 7 天")
+    allow_register: bool = Field(True, description="是否允许新用户注册")
+    default_user_role: str = Field("USER", description="新用户默认角色: GUEST, USER, ADMIN")
+    copy_limit_mbps: float = Field(1024.0, description="文件复制速度限制（MB/s）")
 
 
 class SystemSettingsUpdate(BaseModel):
@@ -751,6 +756,11 @@ class SystemSettingsUpdate(BaseModel):
     java_command: str | None = None
     timezone: str | None = None
     stats_ignore_server: List[int] | None = None
+    # 新增网页可配置项
+    token_expire_minutes: int | None = None
+    allow_register: bool | None = None
+    default_user_role: str | None = None
+    copy_limit_mbps: float | None = None
 
 
 # --- Player Schemas ---

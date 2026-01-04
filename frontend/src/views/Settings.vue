@@ -12,6 +12,8 @@
             </template>
 
             <el-form label-position="left" label-width="320px" :model="form" class="cfg-form">
+              <el-divider content-position="left">服务器配置</el-divider>
+
               <el-form-item>
                 <template #label>
                   <div class="form-item-label">
@@ -45,6 +47,67 @@
                   </el-select>
                 </div>
               </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <div class="form-item-label">
+                    <span>文件复制速度限制</span>
+                    <small>限制备份、存档等操作的文件复制速度（MB/s）。</small>
+                  </div>
+                </template>
+                <div class="form-item-control">
+                  <el-input-number v-model="form.copy_limit_mbps" :min="1" :max="10240" :step="128" style="width: 180px;" />
+                  <span style="margin-left: 8px;">MB/s</span>
+                </div>
+              </el-form-item>
+
+              <el-divider content-position="left">用户与安全</el-divider>
+
+              <el-form-item>
+                <template #label>
+                  <div class="form-item-label">
+                    <span>允许新用户注册</span>
+                    <small>关闭后，新用户将无法通过注册页面创建账号。</small>
+                  </div>
+                </template>
+                <div class="form-item-control">
+                  <el-switch v-model="form.allow_register" />
+                </div>
+              </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <div class="form-item-label">
+                    <span>新用户默认角色</span>
+                    <small>新注册用户的默认权限角色。</small>
+                  </div>
+                </template>
+                <div class="form-item-control">
+                  <el-select v-model="form.default_user_role" style="width: 200px;">
+                    <el-option v-for="role in userRoles" :key="role.value" :label="role.label" :value="role.value" />
+                  </el-select>
+                </div>
+              </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <div class="form-item-label">
+                    <span>Token 有效期</span>
+                    <small>登录凭证的有效时间，过期后需要重新登录。</small>
+                  </div>
+                </template>
+                <div class="form-item-control">
+                  <el-select v-model="form.token_expire_minutes" style="width: 200px;">
+                    <el-option label="1 天" :value="1440" />
+                    <el-option label="3 天" :value="4320" />
+                    <el-option label="7 天" :value="10080" />
+                    <el-option label="14 天" :value="20160" />
+                    <el-option label="30 天" :value="43200" />
+                  </el-select>
+                </div>
+              </el-form-item>
+
+              <el-divider content-position="left">显示与统计</el-divider>
 
               <el-form-item>
                 <template #label>
@@ -83,7 +146,7 @@
 import { reactive, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import apiClient from '@/api'
-import { settings, loadSettings, updateSettings, COMMON_TIMEZONES } from '@/store/settings'
+import { settings, loadSettings, updateSettings, COMMON_TIMEZONES, USER_ROLES } from '@/store/settings'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 
 const form = reactive({
@@ -91,8 +154,14 @@ const form = reactive({
   java_command: settings.java_command,
   timezone: settings.timezone,
   stats_ignore_server_text: '',
+  // 新增
+  token_expire_minutes: settings.token_expire_minutes,
+  allow_register: settings.allow_register,
+  default_user_role: settings.default_user_role,
+  copy_limit_mbps: settings.copy_limit_mbps,
 })
 const tzOptions = COMMON_TIMEZONES
+const userRoles = USER_ROLES
 const saving = ref(false)
 const savedAt = ref('')
 const javaOptions = ref([])
@@ -113,6 +182,11 @@ const autoSave = () => {
           .filter(s => s.length > 0)
           .map(s => parseInt(s, 10))
           .filter(n => !Number.isNaN(n)),
+        // 新增
+        token_expire_minutes: form.token_expire_minutes,
+        allow_register: form.allow_register,
+        default_user_role: form.default_user_role,
+        copy_limit_mbps: form.copy_limit_mbps,
       })
       const d = new Date()
       savedAt.value = d.toLocaleTimeString('zh-CN')
@@ -161,4 +235,6 @@ watch(() => ({...form}), autoSave, { deep: true })
 .form-item-label > span { font-size: 14px; color: var(--el-text-color-regular); line-height: 1.3; }
 .form-item-label > small { margin-top: 2px; color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.2; }
 .form-item-control { display: inline-flex; align-items: center; }
+.cfg-form :deep(.el-divider) { margin: 24px 0 16px 0; }
+.cfg-form :deep(.el-divider__text) { font-size: 14px; font-weight: 500; color: var(--el-text-color-primary); }
 </style>

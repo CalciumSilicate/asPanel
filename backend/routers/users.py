@@ -14,7 +14,7 @@ from backend.core import security, crud, models, schemas
 from backend.core.logger import logger
 from backend.core.database import get_db
 from backend.core.auth import get_current_user, require_role
-from backend.core.constants import AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, ALLOW_REGISTER, AVATAR_MC_PATH, \
+from backend.core.constants import AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, AVATAR_MC_PATH, \
     UUID_HYPHEN_PATTERN
 from backend.core.utils import get_str_md5, is_valid_mc_name
 from backend.core.schemas import Role, UserUpdate
@@ -27,7 +27,9 @@ router = APIRouter(
 
 @router.post("/users/register", status_code=status.HTTP_201_CREATED, response_model=schemas.UserOut)
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    if not ALLOW_REGISTER:
+    # 从数据库读取是否允许注册
+    sys_settings = crud.get_system_settings_data(db)
+    if not sys_settings.get("allow_register", True):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "禁止注册！")
     if crud.get_user_by_username(db, user.username):
         raise HTTPException(400, "用户名已存在")
@@ -60,7 +62,10 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     user = crud.get_user_by_username(db, form_data.username)
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(401, "账号名或密码错误", {"WWW-Authenticate": "Bearer"})
-    return {"access_token": security.create_access_token({"sub": user.username}), "token_type": "bearer"}
+    # 从数据库读取 token 过期时间
+    sys_settings = crud.get_system_settings_data(db)
+    expire_minutes = sys_settings.get("token_expire_minutes", 10080)
+    return {"access_token": security.create_access_token({"sub": user.username}, expire_minutes=expire_minutes), "token_type": "bearer"}
 
 
 @router.get("/users/me", response_model=schemas.UserOut)

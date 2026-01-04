@@ -6,6 +6,11 @@ export interface SettingsState {
   java_command: string
   timezone: string
   stats_ignore_server: number[]
+  // 新增网页可配置项
+  token_expire_minutes: number
+  allow_register: boolean
+  default_user_role: string
+  copy_limit_mbps: number
 }
 
 export const settings = reactive<SettingsState>({
@@ -13,6 +18,11 @@ export const settings = reactive<SettingsState>({
   java_command: 'java',
   timezone: 'Asia/Shanghai',
   stats_ignore_server: [],
+  // 新增网页可配置项
+  token_expire_minutes: 10080,
+  allow_register: true,
+  default_user_role: 'USER',
+  copy_limit_mbps: 1024.0,
 })
 
 export const loadSettings = async () => {
@@ -38,3 +48,8 @@ export const COMMON_TIMEZONES: Array<{ label: string; value: string }> = [
   { label: 'UTC-5 纽约', value: 'America/New_York' },
 ]
 
+export const USER_ROLES: Array<{ label: string; value: string }> = [
+  { label: '访客 (GUEST)', value: 'GUEST' },
+  { label: '普通用户 (USER)', value: 'USER' },
+  { label: '管理员 (ADMIN)', value: 'ADMIN' },
+]

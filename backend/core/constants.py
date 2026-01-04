@@ -1,30 +1,35 @@
 # backend/core/constants.py
 
-import re
 import os
+import re
 import secrets
 from pathlib import Path
 
+from .config import get_config
+
+# 加载配置
+_cfg = get_config()
+
 # --- Uvicorn Configure ---
-UVICORN_HOST = "0.0.0.0"
-UVICORN_LOG_LEVEL = "warning"
-UVICORN_PORT = 8013
+UVICORN_HOST = _cfg.server.host
+UVICORN_LOG_LEVEL = _cfg.server.log_level
+UVICORN_PORT = _cfg.server.port
 
 # --- COPY Speed Limit Configure ---
 COPY_LIMIT_MBPS = 1024.0
 
+# --- Fabric Repository URL ---
 FABRIC_REPO_URL = "https://maven.fabricmc.net/"
 
 # --- Path Configure ---
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # --- Directory that stores All files generated ---
-_STORAGE_DIRNAME = "storages"
-STORAGE_ROOT_PATH = BASE_DIR / _STORAGE_DIRNAME
+STORAGE_ROOT_PATH = BASE_DIR / _cfg.storage.root
 STORAGE_ROOT_PATH.mkdir(exist_ok=True)
 
 # --- Database Configure ---
-SQLALCHEMY_DATABASE_URL = "sqlite:///./{}/asPanel.db".format(_STORAGE_DIRNAME)
+SQLALCHEMY_DATABASE_URL = _cfg.database.url
 DATABASE_CONNECT_ARGS = {"check_same_thread": False}
 
 # --- Directory that stores All MCDR Instances ---
@@ -62,8 +67,8 @@ UPLOADED_LITEMATIC_PATH.mkdir(exist_ok=True, parents=True)
 LITEMATIC_COMMAND_LIST_PATH.mkdir(exist_ok=True, parents=True)
 
 # --- Logger Configuration ---
-LOG_LEVEL = "DEBUG"
-LOG_FILE_LEVEL = "INFO"
+LOG_LEVEL = _cfg.log.level
+LOG_FILE_LEVEL = _cfg.log.file_level
 LOG_STORAGE = STORAGE_ROOT_PATH / "logs"
 
 # --- Timezone Setting ---
@@ -86,9 +91,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 10080  # 7 days
 
 # --- CORS Configure ---
-ALLOWED_ORIGINS = [
-    "*",
-]
+ALLOWED_ORIGINS = _cfg.cors.origins
 
 # --- DEFAULT Server Config ---
 DEFAULT_CORE_CONFIG = {
@@ -103,13 +106,19 @@ DEFAULT_CORE_CONFIG = {
 
 # --- DEFAULT Vanilla Server Properties ---
 DEFAULT_SERVER_PROPERTIES_CONFIG = {
-    "online-mode": True, "server-port": 25565,
-    "view-distance": 16, "max-players": 20,
+    "online-mode": True,
+    "server-port": 25565,
+    "view-distance": 10,
+    "max-players": 20,
     "motd": "A Minecraft Server",
-    "gamemode": "survival", "difficulty": "hard",
-    "hardcore": False, "enable-command-block": True,
-    "enable-rcon": True, "rcon.password": "password",
-    "rcon.port": 25575, "level-seed": ""
+    "gamemode": "survival",
+    "difficulty": "hard",
+    "hardcore": False,
+    "enable-command-block": True,
+    "enable-rcon": True,
+    "rcon.password": "password",
+    "rcon.port": 25575,
+    "level-seed": "",
 }
 
 # --- USER SETTING ---
@@ -123,10 +132,7 @@ LOG_EMIT_INTERVAL_MS = 200
 WS_PUSH_INTERVAL_MS = 200
 
 # --- PUBLIC PLUGINS DIRECTORIES SETTING ---
-PUBLIC_PLUGINS_DIRECTORIES = [
-    'plugins',
-    str(BASE_DIR / 'backend' / 'plugins')
-]
+PUBLIC_PLUGINS_DIRECTORIES = ["plugins", str(BASE_DIR / "backend" / "plugins")]
 
 # --- Python Executable ---
 PYTHON_EXECUTABLE = "python"
@@ -145,4 +151,6 @@ STATS_WHITELIST = [
 STATS_IGNORE = []
 
 # --- UUID string schema ---
-UUID_HYPHEN_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+UUID_HYPHEN_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
