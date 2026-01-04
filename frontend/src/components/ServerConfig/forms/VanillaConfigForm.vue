@@ -103,7 +103,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { Cpu } from '@element-plus/icons-vue';
-import apiClient from '@/api';
+import apiClient, { isRequestCanceled } from '@/api';
 import { ElMessage } from 'element-plus';
 
 const props = defineProps({
@@ -140,7 +140,7 @@ const fetchMojangVersions = async () => {
     const {data} = await apiClient.get('/api/minecraft/versions');
     mojangVersions.value = data.versions;
   } catch (error) {
-    ElMessage.error('获取 Minecraft 版本列表失败');
+    if (!isRequestCanceled(error)) ElMessage.error('获取 Minecraft 版本列表失败');
   } finally {
     isFetchingVersions.value = false;
   }

@@ -279,7 +279,7 @@ import {ref, computed, onMounted} from 'vue';
 import {ElMessage, ElNotification} from 'element-plus';
 // [MODIFIED] Import Remove icon
 import {Search, Refresh, UploadFilled, Download, Delete, Remove} from '@element-plus/icons-vue';
-import apiClient from '@/api';
+import apiClient, { isRequestCanceled } from '@/api';
 
 // --- State ---
 const loading = ref(false);
@@ -384,7 +384,7 @@ const load = async () => {
     const {data} = await apiClient.get('/api/plugins/db');
     items.value = data.sort((a, b) => (b.id - a.id));
   } catch (error) {
-    ElMessage.error('加载数据库插件列表失败: ' + (error.response?.data?.detail || error.message));
+    if (!isRequestCanceled(error)) ElMessage.error('加载数据库插件列表失败: ' + (error.response?.data?.detail || error.message));
   } finally {
     loading.value = false;
   }
@@ -395,7 +395,7 @@ const fetchServers = async () => {
     const {data} = await apiClient.get('/api/servers');
     servers.value = data;
   } catch (error) {
-    ElMessage.error('加载服务器列表失败: ' + (error.response?.data?.detail || error.message));
+    if (!isRequestCanceled(error)) ElMessage.error('加载服务器列表失败: ' + (error.response?.data?.detail || error.message));
   }
 };
 

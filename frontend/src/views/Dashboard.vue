@@ -145,7 +145,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import apiClient from '@/api';
+import apiClient, { isRequestCanceled } from '@/api';
 import { UserFilled, Monitor, Tickets, Cpu, DataLine, Folder } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { user, fullAvatarUrl, hasRole } from '@/store/user';
@@ -219,6 +219,7 @@ const fetchDashboardData = async () => {
     const usageList = Array.isArray(usageRes.data) ? usageRes.data : [];
     runningServersUsage.value = usageList.filter(u => runningIds.has(u?.id));
   } catch (error) {
+    if (isRequestCanceled(error)) return;
     ElMessage.error('获取仪表盘数据失败，请检查后端服务。');
     console.error(error);
     if (refreshInterval) {

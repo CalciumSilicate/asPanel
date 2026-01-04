@@ -137,7 +137,7 @@ import {ref, computed, onMounted, watch} from 'vue'
 import {ElMessage, ElMessageBox, ElNotification} from 'element-plus'
 import draggable from 'vuedraggable'
 import { Plus, Refresh, Delete, Rank } from '@element-plus/icons-vue'
-import apiClient from '@/api'
+import apiClient, { isRequestCanceled } from '@/api'
 
 // 表单状态
 const form = ref({
@@ -294,7 +294,7 @@ onMounted(async ()=>{
     const { data } = await apiClient.get('/api/minecraft/versions')
     mojangVersions.value = data?.versions || []
   } catch (e) {
-    ElMessage.error('获取 Minecraft 版本列表失败')
+    if (!isRequestCanceled(e)) ElMessage.error('获取 Minecraft 版本列表失败')
   } finally {
     isFetchingVersions.value = false
   }

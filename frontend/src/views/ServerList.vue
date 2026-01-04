@@ -1312,7 +1312,7 @@
 		  Setting, Cpu, Delete, Document, FolderAdd, FolderChecked, Rank, Loading, CircleClose, DocumentCopy, Upload
 		} from '@element-plus/icons-vue';
 	import {io} from 'socket.io-client';
-	import apiClient from '@/api';
+	import apiClient, { isRequestCanceled } from '@/api';
 	import {ref, onMounted, onUnmounted, reactive, computed, nextTick, watch} from 'vue';
 	import {useRouter} from 'vue-router';
 import {ElMessage, ElMessageBox, ElNotification} from 'element-plus';
@@ -2021,7 +2021,7 @@ const fetchMojangVersions = async () => {
     const {data} = await apiClient.get('/api/minecraft/versions');
     mojangVersions.value = data.versions;
   } catch (error) {
-    ElMessage.error('获取 Minecraft 版本列表失败');
+    if (!isRequestCanceled(error)) ElMessage.error('获取 Minecraft 版本列表失败');
   } finally {
     isFetchingVersions.value = false;
   }
@@ -2033,7 +2033,7 @@ const fetchVelocityVersions = async () => {
     const {data} = await apiClient.get('/api/velocity/versions');
     velocityVersions.value = data.versions;
   } catch (error) {
-    ElMessage.error('获取 Velocity 版本列表失败');
+    if (!isRequestCanceled(error)) ElMessage.error('获取 Velocity 版本列表失败');
   } finally {
     isFetchingVersions.value = false;
   }
@@ -2044,7 +2044,7 @@ const fetchFabricGameVersions = async () => {
     const {data} = await apiClient.get('/api/fabric/game-versions');
     fabricGameVersions.value = data.versions;
   } catch (error) {
-    console.error('获取 Fabric 兼容的游戏版本列表失败:', error);
+    if (!isRequestCanceled(error)) console.error('获取 Fabric 兼容的游戏版本列表失败:', error);
   }
 };
 const fetchFabricLoaderVersions = async (mcVersion) => {
@@ -2057,7 +2057,7 @@ const fetchFabricLoaderVersions = async (mcVersion) => {
     const {data} = await apiClient.get(`/api/fabric/loader-versions?version_id=${mcVersion}`);
     fabricLoaderVersions.value = data.versions;
   } catch (error) {
-    ElMessage.error('获取 Fabric Loader 版本列表失败');
+    if (!isRequestCanceled(error)) ElMessage.error('获取 Fabric Loader 版本列表失败');
     fabricLoaderVersions.value = [];
   } finally {
     isFetchingFabricVersions.value = false;
@@ -2070,7 +2070,7 @@ const fetchForgeGameVersions = async () => {
     const {data} = await apiClient.get('/api/forge/game-versions');
     forgeGameVersions.value = data.versions;
   } catch (error) {
-    ElMessage.error('获取 Forge 支持的游戏版本失败');
+    if (!isRequestCanceled(error)) ElMessage.error('获取 Forge 支持的游戏版本失败');
   } finally {
     isFetchingForgeGameVersions.value = false;
   }
@@ -2094,7 +2094,7 @@ const fetchForgeLoaderVersions = async (mcVersion) => {
       configFormData.value.core_config.loader_version = '';
     }
   } catch (error) {
-    ElMessage.error('获取 Forge 版本列表失败');
+    if (!isRequestCanceled(error)) ElMessage.error('获取 Forge 版本列表失败');
     forgeLoaderVersions.value = [];
   } finally {
     isFetchingForgeLoaderVersions.value = false;

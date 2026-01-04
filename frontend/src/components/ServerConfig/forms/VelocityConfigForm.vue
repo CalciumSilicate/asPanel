@@ -84,7 +84,7 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { Rank } from '@element-plus/icons-vue';
 import draggable from 'vuedraggable';
-import apiClient from '@/api';
+import apiClient, { isRequestCanceled } from '@/api';
 import { ElMessage } from 'element-plus';
 
 const props = defineProps({
@@ -112,7 +112,7 @@ const fetchVelocityVersions = async () => {
     const {data} = await apiClient.get('/api/velocity/versions');
     velocityVersions.value = data.versions.reverse();
   } catch (error) {
-    ElMessage.error('获取 Velocity 版本列表失败');
+    if (!isRequestCanceled(error)) ElMessage.error('获取 Velocity 版本列表失败');
   } finally {
     isFetchingVersions.value = false;
   }

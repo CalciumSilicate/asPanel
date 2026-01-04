@@ -334,7 +334,7 @@
 import {ref, onMounted, computed} from 'vue';
 import {ElMessage, ElNotification} from 'element-plus';
 import {Search, Refresh, Plus, Coin, Delete, Download} from '@element-plus/icons-vue';
-import apiClient from '@/api';
+import apiClient, { isRequestCanceled } from '@/api';
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 
 // --- Page State ---
@@ -439,7 +439,7 @@ const initialLoad = async (forceOnlineRefresh = false) => {
       await fetchCurrentServerPlugins();
     }
   } catch (error) {
-    ElMessage.error('加载服务器列表失败: ' + (error.response?.data?.detail || error.message));
+    if (!isRequestCanceled(error)) ElMessage.error('加载服务器列表失败: ' + (error.response?.data?.detail || error.message));
   } finally {
     serversLoading.value = false;
   }
@@ -469,7 +469,7 @@ const fetchCurrentServerPlugins = async () => {
     serverPluginsMap.set(selectedServerId.value, plugins);
     currentPlugins.value = plugins;
   } catch (error) {
-    ElMessage.error(`加载插件列表失败: ${error.response?.data?.detail || error.message}`);
+    if (!isRequestCanceled(error)) ElMessage.error(`加载插件列表失败: ${error.response?.data?.detail || error.message}`);
     currentPlugins.value = [];
   } finally {
     pluginsLoading.value = false;
@@ -599,7 +599,7 @@ const fetchOnlinePlugins = async (force = false) => {
       return {meta: p.meta, plugin: p.plugin, release: p.release, repository: p.repository, latest};
     }).sort((a, b) => (b.repository?.stargazers_count ?? 0) - (a.repository?.stargazers_count ?? 0));
   } catch (error) {
-    ElMessage.error(`加载 MCDR 市场插件失败: ${error.message}`);
+    if (!isRequestCanceled(error)) ElMessage.error(`加载 MCDR 市场插件失败: ${error.message}`);
   } finally {
     onlinePluginsLoading.value = false;
   }
@@ -611,7 +611,7 @@ const fetchDbPlugins = async () => {
     const {data} = await apiClient.get('/api/plugins/db');
     dbPlugins.value = data || [];
   } catch (error) {
-    ElMessage.error(`加载数据库插件失败: ${error.message}`);
+    if (!isRequestCanceled(error)) ElMessage.error(`加载数据库插件失败: ${error.message}`);
   } finally {
     dbPluginsLoading.value = false;
   }

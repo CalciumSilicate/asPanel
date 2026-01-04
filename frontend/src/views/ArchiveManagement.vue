@@ -210,7 +210,7 @@ import {ref, onMounted, onUnmounted, computed, reactive} from 'vue';
 import {useRoute} from 'vue-router';
 import {ElMessage, ElMessageBox} from 'element-plus';
 import {Upload, Download, Delete, WarningFilled, FolderAdd, Search, Refresh, Folder, Document} from '@element-plus/icons-vue';
-import apiClient from '@/api';
+import apiClient, { isRequestCanceled } from '@/api';
 import { settings } from '@/store/settings'
 import { fetchTasks, onTaskEvent } from '@/store/tasks'
 import { downloadArchive } from '@/store/downloads'
@@ -310,7 +310,7 @@ const fetchArchives = async () => {
       if (!validIds.has(id)) selectedArchiveIds.delete(id);
     });
   } catch (error) {
-    ElMessage.error('加载存档列表失败');
+    if (!isRequestCanceled(error)) ElMessage.error('加载存档列表失败');
   } finally {
     loading.value = false;
   }
@@ -324,7 +324,7 @@ const fetchAllServers = async () => {
     const {data} = await apiClient.get('/api/servers');
     allServers.value = data;
   } catch (error) {
-    ElMessage.error('获取服务器列表失败');
+    if (!isRequestCanceled(error)) ElMessage.error('获取服务器列表失败');
   } finally {
     allServersLoading.value = false;
   }
@@ -340,7 +340,7 @@ const fetchMinecraftVersions = async (visible) => {
         .slice()
         .sort((a, b) => b.id.localeCompare(a.id, undefined, {numeric: true}));
   } catch (error) {
-    ElMessage.error('获取 Minecraft 版本列表失败');
+    if (!isRequestCanceled(error)) ElMessage.error('获取 Minecraft 版本列表失败');
   } finally {
     versionsLoading.value = false;
   }

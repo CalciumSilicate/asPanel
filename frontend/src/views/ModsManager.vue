@@ -322,7 +322,7 @@
 import {ref, computed, onMounted} from 'vue'
 import { ElMessage, ElNotification } from 'element-plus'
 import { Search, Plus, Delete, Download, Upload, UploadFilled, Refresh, CopyDocument } from '@element-plus/icons-vue'
-import apiClient from '@/api'
+import apiClient, { isRequestCanceled } from '@/api'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import router from '@/router'
 
@@ -421,7 +421,7 @@ const initialLoad = async () => {
     prefetchAllServerMods(servers.value)
     // 初始不选中服务器，保持右侧空白
   } catch (e) {
-    ElMessage.error('加载服务器失败: ' + (e.response?.data?.detail || e.message))
+    if (!isRequestCanceled(e)) ElMessage.error('加载服务器失败: ' + (e.response?.data?.detail || e.message))
   } finally {
     serversLoading.value = false
   }
@@ -459,7 +459,7 @@ const fetchMods = async () => {
       }
     })
   } catch (e) {
-    ElMessage.error('加载模组失败: ' + (e.response?.data?.detail || e.message))
+    if (!isRequestCanceled(e)) ElMessage.error('加载模组失败: ' + (e.response?.data?.detail || e.message))
     mods.value = []
   } finally {
     modsLoading.value = false
@@ -598,7 +598,7 @@ const searchModrinth = async () => {
     }))
     modrinthDialog.value.total = data?.total_hits || hits.length
   } catch (e) {
-    ElMessage.error('搜索失败: ' + (e.response?.data?.detail || e.message))
+    if (!isRequestCanceled(e)) ElMessage.error('搜索失败: ' + (e.response?.data?.detail || e.message))
   } finally {
     modrinthDialog.value.loading = false
   }

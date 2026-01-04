@@ -300,7 +300,7 @@
 import {ref, computed, onMounted} from 'vue'
 import {ElMessage, ElNotification} from 'element-plus'
 import {Search, Star, Download, Upload} from '@element-plus/icons-vue'
-import apiClient from '@/api'
+import apiClient, { isRequestCanceled } from '@/api'
 
 // --- Interfaces ---
 interface Asset {
@@ -653,7 +653,7 @@ async function fetchServers() {
     const res = await apiClient.get('/api/servers');
     servers.value = res.data;
   } catch (e: any) {
-    ElMessage.error(`加载服务器列表失败: ${e.message || String(e)}`);
+    if (!isRequestCanceled(e)) ElMessage.error(`加载服务器列表失败: ${e.message || String(e)}`);
   }
 }
 
@@ -668,6 +668,7 @@ async function load() {
     stats.value.updatedAt = new Date().toLocaleString()
     page.value = 1
   } catch (e: any) {
+    if (isRequestCanceled(e)) return;
     error.value = e?.message || String(e)
     ElMessage.error(`加载失败：${error.value}`)
   } finally {
