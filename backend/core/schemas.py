@@ -114,6 +114,17 @@ class UserOut(UserBase):
     bound_player_id: Optional[int] = None
     mc_uuid: Optional[str] = None
     mc_name: Optional[str] = None
+    server_link_group_ids: List[int] = Field(default_factory=list)
+
+    @field_validator('server_link_group_ids', mode='before')
+    @classmethod
+    def parse_server_link_group_ids(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return []
+        return v or []
 
     class Config:
         from_attributes = True

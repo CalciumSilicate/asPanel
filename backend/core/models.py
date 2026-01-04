@@ -21,6 +21,7 @@ class User(Base):
     email = Column(String, nullable=True)
     qq = Column(String, nullable=True)
     bound_player_id = Column(Integer, nullable=True)
+    server_link_group_ids = Column(String, nullable=True, default="[]")  # JSON array of group IDs
 
 
 class Server(Base):

@@ -21,7 +21,7 @@ def get_user_by_username(db: Session, username: str) -> Optional[models.User]:
     return db.query(models.User).filter(models.User.username == username).first()
 
 
-def create_user(db: Session, user: schemas.UserCreate, role: Optional[schemas.Role] = None, bound_player_id: Optional[int] = None) -> models.User:
+def create_user(db: Session, user: schemas.UserCreate, role: Optional[schemas.Role] = None, bound_player_id: Optional[int] = None, server_link_group_ids: Optional[List[int]] = None) -> models.User:
     hashed_password = get_password_hash(user.password)
     db_user = models.User(
         username=user.username,
@@ -30,6 +30,7 @@ def create_user(db: Session, user: schemas.UserCreate, role: Optional[schemas.Ro
         email=getattr(user, 'email', None),
         qq=str(getattr(user, 'qq', '') or ''),
         bound_player_id=bound_player_id,
+        server_link_group_ids=json.dumps(server_link_group_ids or []),
     )
     db.add(db_user)
     db.commit()
@@ -63,6 +64,11 @@ def list_users_sorted(db: Session, *, search: Optional[str] = None, role: Option
         pmap = {p.id: p for p in db.query(models.Player).filter(models.Player.id.in_(pid_set)).all()}
 
     for u in users:
+        # 解析 server_link_group_ids
+        try:
+            slg_ids = json.loads(getattr(u, 'server_link_group_ids', None) or '[]')
+        except Exception:
+            slg_ids = []
         row = {
             'id': u.id,
             'username': u.username,
@@ -73,6 +79,7 @@ def list_users_sorted(db: Session, *, search: Optional[str] = None, role: Option
             'bound_player_id': getattr(u, 'bound_player_id', None),
             'mc_uuid': None,
             'mc_name': None,
+            'server_link_group_ids': slg_ids,
         }
         bp = pmap.get(getattr(u, 'bound_player_id', None)) if getattr(u, 'bound_player_id', None) else None
         if bp is not None:
@@ -911,3 +918,41 @@ def bulk_remove_server_from_all_players(db: Session, server_name: str) -> int:
             updated += 1
     db.commit()
     return updated
+
+
+def get_servers_player_joined(db: Session, player_uuid: str) -> List[models.Server]:
+    """
+    根据玩家 UUID 检查所有服务器的 playerdata 目录，
+    返回该玩家加入过的服务器列表。
+    """
+    from pathlib import Path
+    servers = get_all_servers(db)
+    joined_servers: List[models.Server] = []
+    for server in servers:
+        try:
+            playerdata_path = Path(server.path) / 'server' / 'world' / 'playerdata' / f'{player_uuid}.dat'
+            if playerdata_path.exists():
+                joined_servers.append(server)
+        except Exception:
+            continue
+    return joined_servers
+
+
+def get_server_link_groups_for_servers(db: Session, server_ids: List[int]) -> List[int]:
+    """
+    根据服务器 ID 列表，找到这些服务器所属的服务器组 ID 列表（去重）。
+    """
+    if not server_ids:
+        return []
+    groups = list_server_link_groups(db)
+    group_ids: set[int] = set()
+    for g in groups:
+        try:
+            ids = json.loads(g.server_ids or '[]')
+            for sid in server_ids:
+                if sid in ids:
+                    group_ids.add(g.id)
+                    break
+        except Exception:
+            continue
+    return list(group_ids)

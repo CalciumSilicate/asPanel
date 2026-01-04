@@ -47,8 +47,12 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(models.User).filter(models.User.bound_player_id == player.id).first()
     if existing_user:
         raise HTTPException(400, "该玩家已被其他账号绑定")
-    # 创建用户，传入 player.id 作为 bound_player_id
-    return crud.create_user(db, user, bound_player_id=player.id)
+    # 根据玩家 UUID 查找加入过的服务器，然后获取对应的服务器组
+    joined_servers = crud.get_servers_player_joined(db, player.uuid)
+    server_ids = [s.id for s in joined_servers]
+    server_link_group_ids = crud.get_server_link_groups_for_servers(db, server_ids)
+    # 创建用户，传入 player.id 和服务器组 ID 列表
+    return crud.create_user(db, user, bound_player_id=player.id, server_link_group_ids=server_link_group_ids)
 
 
 @router.post("/token", response_model=schemas.Token)
