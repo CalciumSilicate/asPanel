@@ -2,7 +2,7 @@
 
 import { createRouter, createWebHistory } from 'vue-router';
 import MainLayout from '../layout/MainLayout.vue';
-import { hasRole, fetchUser, type UserRole } from '@/store/user';
+import { hasRole, fetchUser, user, type UserRole } from '@/store/user';
 import { ElMessage } from 'element-plus';
 
 const routes = [
@@ -71,7 +71,7 @@ const routes = [
                 meta: { requiredRole: 'USER' }
             },
             {
-                path: 'tools/server-link',
+                path: 'server-groups',
                 name: 'ServerLink',
                 component: () => import('../views/ServerLink.vue'),
                 meta: { requiredRole: 'USER' }
@@ -137,6 +137,12 @@ const routes = [
                 component: () => import('../views/Statistics.vue'),
                 meta: { requiredRole: 'USER' }
             },
+            {
+                path: 'profile',
+                name: 'Profile',
+                component: () => import('../views/Profile.vue'),
+                meta: { requiredRole: 'GUEST' }
+            },
             // 未来可以在此添加 statistics, settings 等子路由
         ]
     },
@@ -173,8 +179,9 @@ router.beforeEach(async (to, from, next) => {
     }
 
     // 按需拉取用户信息（用于角色判断）
+    // 只在用户信息缺失时才阻塞等待，避免每次路由切换都延迟
     try {
-        if (authRequired && token) {
+        if (authRequired && token && !user.id) {
             await fetchUser();
         }
     } catch (e) {

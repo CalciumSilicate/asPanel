@@ -60,6 +60,22 @@ async def delete_server(server_id: int, _user: models.User = Depends(require_rol
     return {"task_id": task.id, "message": "已开始删除服务器任务"}
 
 
+@router.post("/servers/{server_id}/rename")
+async def rename_server(server_id: int, new_name: str, db: Session = Depends(get_db),
+                        _user: models.User = Depends(require_role(Role.ADMIN))):
+    # PERMISSION: ADMIN
+    if not new_name or not new_name.strip():
+        raise HTTPException(status_code=400, detail="服务器名称不能为空")
+    new_name = new_name.strip()
+    try:
+        db_server = crud.rename_server(db, server_id, new_name)
+        if not db_server:
+            raise HTTPException(status_code=404, detail="服务器不存在")
+        return {"status": "success", "message": f"服务器已重命名为 '{new_name}'", "name": new_name}
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
 # --- Server Action Endpoints ---
 @router.post('/servers/start')
 async def start_server(server_id: int, db: Session = Depends(get_db),

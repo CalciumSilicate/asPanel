@@ -17,7 +17,7 @@ from backend.core.auth import get_current_user, require_role
 from backend.core.constants import AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, AVATAR_MC_PATH, \
     UUID_HYPHEN_PATTERN
 from backend.core.utils import get_str_md5, is_valid_mc_name
-from backend.core.schemas import Role, UserUpdate
+from backend.core.schemas import Role, UserUpdate, UserSelfUpdate, PasswordChange
 
 router = APIRouter(
     prefix="/api",
@@ -69,8 +69,172 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
 
 
 @router.get("/users/me", response_model=schemas.UserOut)
-async def read_users_me(current_user: models.User = Depends(get_current_user)):
-    return current_user
+async def read_users_me(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # 构建返回对象，包含 mc_uuid 和 mc_name
+    result = {
+        'id': current_user.id,
+        'username': current_user.username,
+        'avatar_url': current_user.avatar_url,
+        'role': current_user.role,
+        'email': current_user.email,
+        'qq': current_user.qq,
+        'bound_player_id': current_user.bound_player_id,
+        'mc_uuid': None,
+        'mc_name': None,
+        'server_link_group_ids': current_user.server_link_group_ids,
+    }
+    # 如果绑定了玩家，查询玩家信息
+    if current_user.bound_player_id:
+        player = db.query(models.Player).filter(models.Player.id == current_user.bound_player_id).first()
+        if player:
+            result['mc_uuid'] = player.uuid
+            result['mc_name'] = player.player_name
+    return result
+
+
+@router.patch("/users/me", response_model=schemas.UserOut)
+async def update_current_user(
+        payload: UserSelfUpdate,
+        current_user: models.User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+):
+    """用户更新自己的个人资料（邮箱、QQ、绑定玩家）"""
+    if payload.email is not None:
+        current_user.email = payload.email
+    if payload.qq is not None:
+        qq_str = str(payload.qq).strip()
+        if qq_str and not qq_str.isdigit():
+            raise HTTPException(400, "QQ 必须为纯数字")
+        current_user.qq = qq_str
+    
+    # 处理玩家绑定
+    if payload.player_name is not None:
+        player_name = payload.player_name.strip()
+        if player_name:
+            player = crud.get_player_by_name(db, player_name)
+            if not player:
+                raise HTTPException(400, f"玩家 '{player_name}' 不存在")
+            # 检查该玩家是否已被其他用户绑定
+            existing_user = db.query(models.User).filter(
+                models.User.bound_player_id == player.id,
+                models.User.id != current_user.id
+            ).first()
+            if existing_user:
+                raise HTTPException(400, "该玩家已被其他账号绑定")
+            current_user.bound_player_id = player.id
+            
+            # 更新服务器组权限
+            import json
+            joined_servers = crud.get_servers_player_joined(db, player.uuid)
+            server_ids = [s.id for s in joined_servers]
+            server_link_group_ids = crud.get_server_link_groups_for_servers(db, server_ids)
+            current_user.server_link_group_ids = json.dumps(server_link_group_ids)
+        else:
+            # 传空字符串表示解绑
+            current_user.bound_player_id = None
+            current_user.server_link_group_ids = "[]"
+    
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+    
+    # 构建返回对象，包含 mc_uuid 和 mc_name
+    result = {
+        'id': current_user.id,
+        'username': current_user.username,
+        'avatar_url': current_user.avatar_url,
+        'role': current_user.role,
+        'email': current_user.email,
+        'qq': current_user.qq,
+        'bound_player_id': current_user.bound_player_id,
+        'mc_uuid': None,
+        'mc_name': None,
+        'server_link_group_ids': current_user.server_link_group_ids,
+    }
+    # 如果绑定了玩家，查询玩家信息
+    if current_user.bound_player_id:
+        bound_player = db.query(models.Player).filter(models.Player.id == current_user.bound_player_id).first()
+        if bound_player:
+            result['mc_uuid'] = bound_player.uuid
+            result['mc_name'] = bound_player.player_name
+    return result
+
+
+@router.post("/users/me/password")
+async def change_password(
+        payload: PasswordChange,
+        current_user: models.User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+):
+    """用户修改自己的密码"""
+    if not security.verify_password(payload.old_password, current_user.hashed_password):
+        raise HTTPException(400, "原密码错误")
+    if len(payload.new_password) < 6:
+        raise HTTPException(400, "新密码长度至少6位")
+    current_user.hashed_password = security.get_password_hash(payload.new_password)
+    db.add(current_user)
+    db.commit()
+    return {"success": True, "message": "密码修改成功"}
+
+
+@router.get("/users/me/stats")
+async def get_my_stats(
+        range: str = Query("1d", description="时间范围: 1d, 1w, 1m, 1y, all"),
+        current_user: models.User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+):
+    """获取当前用户绑定玩家的统计数据"""
+    import json
+    from backend.services.qq_stats_command import (
+        _calc_preset, _build_totals, _build_charts, TOTAL_ITEMS, CHART_ITEMS
+    )
+    from backend.services import stats_service
+    
+    if not current_user.bound_player_id:
+        raise HTTPException(400, "您尚未绑定玩家，无法查看统计数据")
+    
+    player = db.query(models.Player).filter(models.Player.id == current_user.bound_player_id).first()
+    if not player or not player.uuid:
+        raise HTTPException(400, "绑定的玩家不存在或无效")
+    
+    # 获取用户可访问的服务器组的数据源服务器
+    server_ids = []
+    try:
+        group_ids = json.loads(current_user.server_link_group_ids or '[]')
+        for gid in group_ids:
+            group = crud.get_server_link_group_by_id(db, gid)
+            if group:
+                ds_ids = json.loads(group.data_source_ids or "[]")
+                srv_ids = json.loads(group.server_ids or "[]")
+                target_ids = ds_ids if ds_ids else srv_ids
+                server_ids.extend([int(i) for i in target_ids])
+    except Exception:
+        pass
+    
+    # 去重
+    server_ids = list(set(server_ids)) if server_ids else []
+    
+    # 计算时间范围
+    tr = _calc_preset(range, 0, server_ids)
+    
+    # 构建统计数据
+    effective_server_ids = server_ids if server_ids else [3]  # 默认使用 server_id=3
+    totals = _build_totals(player.uuid, tr, effective_server_ids)
+    charts = _build_charts(player.uuid, tr, effective_server_ids)
+    
+    return {
+        "player_name": player.player_name,
+        "player_uuid": player.uuid,
+        "time_range": {
+            "label": tr.label,
+            "start": tr.start.isoformat(),
+            "end": tr.end.isoformat(),
+            "granularity": tr.granularity,
+        },
+        "totals": totals,
+        "charts": charts,
+        "server_ids": effective_server_ids,
+    }
 
 
 @router.post("/users/me/avatar", response_model=schemas.UserOut)

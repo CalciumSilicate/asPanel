@@ -164,8 +164,7 @@
           </span>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item command="avatar">更换头像</el-dropdown-item>
-              <el-dropdown-item command="profile" disabled>个人中心</el-dropdown-item>
+              <el-dropdown-item command="profile">个人中心</el-dropdown-item>
               <el-dropdown-item command="logout" divided>注销</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -203,6 +202,12 @@
               <Tickets/>
             </el-icon>
             <span>服务器列表</span>
+          </el-menu-item>
+          <el-menu-item index="/server-groups" v-if="hasRole('USER')">
+            <el-icon>
+              <Link/>
+            </el-icon>
+            <span>服务器组列表</span>
           </el-menu-item>
 
           <!-- 服务器配置（已移动至工具前，保留此占位空白） -->
@@ -349,12 +354,7 @@
               </el-icon>
               <span>超平坦世界</span>
             </el-menu-item>
-            <el-menu-item index="/tools/server-link" v-if="hasRole('ADMIN')">
-              <el-icon>
-                <Link/>
-              </el-icon>
-              <span>Server Link</span>
-            </el-menu-item>
+
             <el-menu-item index="/tools/qq-bot" disabled v-if="hasRole('ADMIN')">
               <el-icon>
                 <Promotion/>
@@ -406,6 +406,12 @@
             </el-icon>
             <span>设置</span>
           </el-menu-item>
+          <el-menu-item index="/profile">
+            <el-icon>
+              <UserFilled/>
+            </el-icon>
+            <span>个人中心</span>
+          </el-menu-item>
 
         </el-menu>
       </el-scrollbar>
@@ -415,18 +421,14 @@
       <!-- 主内容区域 -->
       <el-main>
         <router-view v-slot="{ Component, route }">
-          <transition name="fade-transform" mode="out-in">
+          <transition name="fade-transform">
             <component :is="Component" :key="route.fullPath"/>
           </transition>
         </router-view>
       </el-main>
     </el-container>
 
-    <!-- 头像上传对话框组件 -->
-    <AvatarUploader
-        v-model:visible="avatarDialogVisible"
-        @success="handleAvatarSuccess"
-    />
+    <!-- 头像上传对话框组件（已移至个人中心页面） -->
 
 
   </el-container>
@@ -434,7 +436,7 @@
 </template>
 
 <script setup>
-import {ref, computed, onMounted, onUnmounted} from 'vue';
+import {ref, computed, onMounted, onUnmounted, nextTick} from 'vue';
 import {useRoute, useRouter} from 'vue-router';
 import { asideCollapsed as isCollapse, asideCollapsing as isCollapsing, toggleAside as toggleCollapse } from '@/store/ui';
 import { ElMessage, ElNotification } from 'element-plus'
@@ -449,9 +451,8 @@ import {
   LocationInformation, Place, List, RefreshRight, Comment, DocumentCopy, Operation, Download,
   Moon, Sunny
 } from '@element-plus/icons-vue';
-import {user, fullAvatarUrl, fetchUser, clearUser, refreshAvatar, hasRole} from '@/store/user';
+import {user, fullAvatarUrl, fetchUser, clearUser, hasRole} from '@/store/user';
 import { isDark, toggleTheme } from '@/store/theme'
-import AvatarUploader from '@/components/AvatarUploader.vue';
 import {
   tasks,
   activeTasksCount,
@@ -478,7 +479,6 @@ import { cancelPendingRequests } from '@/api'
 // const isCollapsing = ref(false); // 折叠过渡前的瞬时隐藏与子菜单上收阶段
 const route = useRoute();
 const router = useRouter();
-const avatarDialogVisible = ref(false);
 
 const TASK_TYPE_LABELS = {
   DOWNLOAD: '下载',
@@ -616,18 +616,62 @@ const handleCommand = (command) => {
     clearUser();
     localStorage.removeItem('token');
     router.push('/login');
-  } else if (command === 'avatar') {
-    avatarDialogVisible.value = true;
+  } else if (command === 'profile') {
+    router.push('/profile');
   }
-};
-
-const handleAvatarSuccess = async () => {
-  await fetchUser();
-  refreshAvatar();
 };
 
 let offTaskEvents = null
 let removeCancelGuard = null
+
+// 预加载所有子页面组件，在浏览器空闲时执行
+const preloadRouteComponents = () => {
+  const componentLoaders = [
+    () => import('../views/Dashboard.vue'),
+    () => import('../views/ServerList.vue'),
+    () => import('../views/MCDRPluginExplorer.vue'),
+    () => import('../views/DbPluginExplorer.vue'),
+    () => import('../views/ServerPluginManager.vue'),
+    () => import('../views/ModsManager.vue'),
+    () => import('../views/SuperFlatWorld.vue'),
+    () => import('../views/PrimeBackup.vue'),
+    () => import('../views/ServerLink.vue'),
+    () => import('../views/PlayerManager.vue'),
+    () => import('../views/UserManager.vue'),
+    () => import('../views/Litematica.vue'),
+    () => import('../views/ChatRoom.vue'),
+    () => import('../views/Settings.vue'),
+    () => import('../views/ArchiveManagement.vue'),
+    () => import('../views/Console.vue'),
+    () => import('../views/Statistics.vue'),
+    () => import('../views/Profile.vue'),
+    // 插件配置页面
+    () => import('../views/plugin-config/ViaVersionConfig.vue'),
+    () => import('../views/plugin-config/VelocityProxyConfig.vue'),
+    () => import('../views/plugin-config/PrimeBackupConfig.vue'),
+    () => import('../views/plugin-config/AutoPluginReloaderConfig.vue'),
+    () => import('../views/plugin-config/BiliLiveHelperConfig.vue'),
+    () => import('../views/plugin-config/WhereIsConfig.vue'),
+    () => import('../views/plugin-config/CrashRestartConfig.vue'),
+    () => import('../views/plugin-config/JoinMOTDConfig.vue'),
+    () => import('../views/plugin-config/QuickBackupMultiConfig.vue'),
+  ]
+
+  let index = 0
+  const loadNext = () => {
+    if (index >= componentLoaders.length) return
+    componentLoaders[index]().catch(() => {}) // 静默加载，忽略错误
+    index++
+    // 使用 requestIdleCallback 或 setTimeout 在空闲时继续加载下一个
+    if ('requestIdleCallback' in window) {
+      requestIdleCallback(loadNext, { timeout: 2000 })
+    } else {
+      setTimeout(loadNext, 50)
+    }
+  }
+  // 延迟启动预加载，让当前页面先完成渲染
+  setTimeout(loadNext, 500)
+}
 
 onMounted(() => {
   removeCancelGuard = router.beforeEach((to, from) => {
@@ -638,6 +682,11 @@ onMounted(() => {
   fetchUser();
   fetchTasks().catch(() => {})
   connectTasksSocket()
+
+  // 预加载所有子页面组件
+  nextTick(() => {
+    preloadRouteComponents()
+  })
 
   offTaskEvents = onTaskEvent((evt) => {
     if (evt.action === 'created') {
@@ -914,21 +963,27 @@ onUnmounted(() => {
 
 .el-main {
   padding: 20px 24px 24px 24px;
+  position: relative;
+  overflow: hidden;
 }
 
 .fade-transform-leave-active,
 .fade-transform-enter-active {
-  transition: all 0.35s var(--ease-standard);
+  transition: opacity 0.15s ease-out, transform 0.15s ease-out;
+}
+
+.fade-transform-leave-active {
+  position: absolute;
+  width: 100%;
 }
 
 .fade-transform-enter-from {
   opacity: 0;
-  transform: translateY(10px);
+  transform: translateY(6px);
 }
 
 .fade-transform-leave-to {
   opacity: 0;
-  transform: translateY(-10px);
 }
 
 /* 降低侧边栏菜单项的高度 */

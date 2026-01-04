@@ -49,9 +49,6 @@
                 <el-tag v-if="activeGroup" size="small" type="info">服务器数：{{ selectedServersCount }}</el-tag>
                 <el-tag v-if="activeGroup" size="small" type="success">已连接群聊：{{ connectedChatsCount }}</el-tag>
               </div>
-              <div class="flex items-center gap-2">
-                <el-button v-if="activeGroup" size="small" :disabled="saving" type="primary" @click="saveGroup">保存</el-button>
-              </div>
             </div>
           </template>
 
@@ -128,6 +125,7 @@ const groups = ref([])
 const groupQuery = ref('')
 const activeGroup = ref(null)
 const saving = ref(false)
+let saveVersion = 0  // 用于跟踪保存请求的版本，避免竞态条件
 
 const filteredGroups = computed(() => {
   const q = groupQuery.value.trim().toLowerCase()
@@ -209,14 +207,22 @@ const saveGroup = async () => {
   if (!activeGroup.value) return
   if (!activeGroup.value.name?.trim()) return // 避免每次输入时弹提示，交由失焦/点击保存时提示
   if (!activeGroup.value.serverIds || activeGroup.value.serverIds.length === 0) return
+  
+  const currentVersion = ++saveVersion  // 递增版本号
+  const currentGroupId = activeGroup.value.id
+  
   try {
     saving.value = true
     const payload = toAPIPayload(activeGroup.value)
-    const { data } = await apiClient.put(`/api/tools/server-link/groups/${activeGroup.value.id}`, payload)
-    const updated = toUIGroup(data)
-    const idx = groups.value.findIndex(g => g.id === updated.id)
-    if (idx >= 0) groups.value[idx] = updated
-    activeGroup.value = updated
+    const { data } = await apiClient.put(`/api/tools/server-link/groups/${currentGroupId}`, payload)
+    
+    // 只有当这是最新的保存请求，且用户仍在编辑同一个组时，才更新状态
+    if (currentVersion === saveVersion && activeGroup.value?.id === currentGroupId) {
+      const updated = toUIGroup(data)
+      const idx = groups.value.findIndex(g => g.id === updated.id)
+      if (idx >= 0) groups.value[idx] = updated
+      // 不再覆盖 activeGroup，避免用户正在编辑的内容被旧请求覆盖
+    }
   } catch (e) {
     // 静默失败，避免在频繁自动保存期间干扰用户
   } finally {

@@ -354,7 +354,7 @@ class WsSender:
                                             and str(data.get("server")) == _SERVER_NAME
                                         ):
                                             if _query_save_all(self.server):
-                                                logger.info(
+                                                logger.debug(
                                                     "[asPanel] 收到保存世界请求，已执行 save-all"
                                                 )
                                                 _send_event(
@@ -371,7 +371,7 @@ class WsSender:
                                                 def _delayed_save():
                                                     time.sleep(15)
                                                     if _query_save_all(self.server):
-                                                        logger.info(
+                                                        logger.debug(
                                                             "[asPanel] 延迟保存世界请求已执行 save-all"
                                                         )
                                                     else:
@@ -1521,7 +1521,7 @@ def on_player_joined(server: ServerInterface, player: str, info: Info):
         pass
     try:
         _report_positions(server, "join")
-        server.logger.info(f"[asPanel] 玩家加入：{player}，上报位置")
+        server.logger.debug(f"[asPanel] 玩家加入：{player}，上报位置")
     except Exception:
         pass
 

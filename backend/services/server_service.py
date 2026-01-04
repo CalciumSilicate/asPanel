@@ -278,6 +278,12 @@ class ServerService:
                 player_manager.on_server_created(server_name, db_server.path)
             except Exception:
                 pass
+            # 将服务器添加到指定的服务器组
+            if server_create.server_link_group_ids:
+                try:
+                    crud.add_server_to_groups(db, db_server.id, server_create.server_link_group_ids)
+                except Exception:
+                    pass
             if task:
                 task.status = TaskStatus.SUCCESS
                 task.progress = 100
@@ -488,6 +494,12 @@ class ServerService:
                     player_manager.on_server_created(Path(db_server.path).name, db_server.path)
                 except Exception:
                     pass
+                # 将服务器添加到指定的服务器组
+                if server_import.server_link_group_ids:
+                    try:
+                        crud.add_server_to_groups(db, db_server.id, server_import.server_link_group_ids)
+                    except Exception:
+                        pass
                 # 推送服务器列表更新（用于 ServerList 自动刷新）
                 try:
                     await self.mcdr_manager.notify_server_list_update(db_server, is_adding=True)

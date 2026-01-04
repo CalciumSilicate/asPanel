@@ -196,6 +196,22 @@ def get_server_by_name(db: Session, name: str) -> Optional[models.Server]:
     return db.query(models.Server).filter(models.Server.name == name).first()
 
 
+def rename_server(db: Session, server_id: int, new_name: str) -> Optional[models.Server]:
+    """重命名服务器，返回更新后的服务器对象，如果名称已存在则抛出 ValueError"""
+    db_server = get_server_by_id(db, server_id)
+    if not db_server:
+        return None
+    # 检查名称是否重复（排除自己）
+    existing = get_server_by_name(db, new_name)
+    if existing and existing.id != server_id:
+        raise ValueError(f"服务器名称 '{new_name}' 已存在")
+    db_server.name = new_name
+    db.add(db_server)
+    db.commit()
+    db.refresh(db_server)
+    return db_server
+
+
 def get_all_servers(db: Session) -> list[Server]:
     return db.query(models.Server).all()
 
@@ -657,6 +673,28 @@ def cleanup_server_link_groups_for_server(db: Session, server_id: int) -> int:
                 ids.remove(server_id)
                 g.server_ids = json.dumps(ids)
                 db.add(g)
+                updated += 1
+        except Exception:
+            continue
+    db.commit()
+    return updated
+
+
+def add_server_to_groups(db: Session, server_id: int, group_ids: List[int]) -> int:
+    """将服务器添加到多个服务器组的 server_ids 中，返回更新的组数量。"""
+    if not group_ids:
+        return 0
+    updated = 0
+    for gid in group_ids:
+        rec = get_server_link_group_by_id(db, gid)
+        if not rec:
+            continue
+        try:
+            ids = json.loads(rec.server_ids or '[]')
+            if server_id not in ids:
+                ids.append(server_id)
+                rec.server_ids = json.dumps(ids)
+                db.add(rec)
                 updated += 1
         except Exception:
             continue

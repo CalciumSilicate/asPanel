@@ -138,6 +138,19 @@ class UserUpdate(BaseModel):
     bound_player_id: Optional[int] = None
 
 
+class UserSelfUpdate(BaseModel):
+    """用户自己更新个人资料（不包含权限相关字段）"""
+    email: Optional[str] = None
+    qq: Optional[str] = None
+    player_name: Optional[str] = None  # 通过玩家名绑定
+
+
+class PasswordChange(BaseModel):
+    """用户修改自己的密码"""
+    old_password: str
+    new_password: str
+
+
 # --- Token Schemas ---
 class Token(BaseModel):
     access_token: str
@@ -156,7 +169,7 @@ class ServerBase(BaseModel):
 
 
 class ServerCreate(ServerBase):
-    pass
+    server_link_group_ids: List[int] = Field(default_factory=list, description="要加入的服务器组ID列表")
 
 
 class ServerCreateInternal(ServerBase):
@@ -263,6 +276,7 @@ class BatchActionPayload(BaseModel):
 class ServerImport(BaseModel):
     name: str = Field(..., description="为导入的服务器指定一个新名称")
     path: str = Field(..., description="服务器上MCDR实例的绝对路径")
+    server_link_group_ids: List[int] = Field(default_factory=list, description="要加入的服务器组ID列表")
 
 
 # --- Task Schemas ---

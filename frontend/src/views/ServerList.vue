@@ -136,6 +136,8 @@
                   <el-dropdown-item :icon="DocumentCopy" @click="openCopyDialog(scope.row)"
                                     :disabled="scope.row.status === 'running'" v-if="hasRole('ADMIN')">复制服务器
                   </el-dropdown-item>
+                  <el-dropdown-item :icon="Edit" @click="openRenameDialog(scope.row)" v-if="hasRole('ADMIN')">重命名
+                  </el-dropdown-item>
                   <el-dropdown-item divided :icon="CircleClose" @click="forceKillServer(scope.row)"
                                     :disabled="scope.row.status !== 'running' && scope.row.status !== 'pending'" v-if="hasRole('ADMIN')">强制关闭
                   </el-dropdown-item>
@@ -155,11 +157,31 @@
         <el-form-item label="服务器名称" prop="name">
           <el-input v-model="newServerForm.name" placeholder="例如: Survival"></el-input>
         </el-form-item>
+        <el-form-item label="服务器组" prop="serverLinkGroupIds" required>
+          <el-select
+            v-model="newServerForm.serverLinkGroupIds"
+            multiple
+            filterable
+            placeholder="请选择服务器组"
+            style="width: 100%;"
+            :loading="serverLinkGroupsLoading"
+          >
+            <el-option
+              v-for="g in serverLinkGroups"
+              :key="g.id"
+              :label="g.name"
+              :value="g.id"
+            />
+          </el-select>
+          <div class="el-form-item__info" v-if="serverLinkGroups.length === 0 && !serverLinkGroupsLoading">
+            暂无服务器组，请先<a class="text-link" @click="goToServerLinkGroups">创建服务器组</a>
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="createDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleCreateServer">创建</el-button>
+          <el-button type="primary" @click="handleCreateServer" :disabled="serverLinkGroups.length === 0">创建</el-button>
         </span>
       </template>
     </el-dialog>
@@ -174,11 +196,31 @@
             请输入服务器上 MCDR 实例的根目录绝对路径 (包含 config.yml 文件的目录)。
           </div>
         </el-form-item>
+        <el-form-item label="服务器组" prop="serverLinkGroupIds" required>
+          <el-select
+            v-model="importServerForm.serverLinkGroupIds"
+            multiple
+            filterable
+            placeholder="请选择服务器组"
+            style="width: 100%;"
+            :loading="serverLinkGroupsLoading"
+          >
+            <el-option
+              v-for="g in serverLinkGroups"
+              :key="g.id"
+              :label="g.name"
+              :value="g.id"
+            />
+          </el-select>
+          <div class="el-form-item__info" v-if="serverLinkGroups.length === 0 && !serverLinkGroupsLoading">
+            暂无服务器组，请先<a class="text-link" @click="goToServerLinkGroups">创建服务器组</a>
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="importDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleImportServer">导入</el-button>
+          <el-button type="primary" @click="handleImportServer" :disabled="serverLinkGroups.length === 0">导入</el-button>
         </span>
       </template>
     </el-dialog>
@@ -188,11 +230,45 @@
         <el-form-item label="新服务器名称" prop="name">
           <el-input v-model="copyServerForm.name" placeholder="为新服务器设置一个名称"></el-input>
         </el-form-item>
+        <el-form-item label="服务器组" prop="serverLinkGroupIds" required>
+          <el-select
+            v-model="copyServerForm.serverLinkGroupIds"
+            multiple
+            filterable
+            placeholder="请选择服务器组"
+            style="width: 100%;"
+            :loading="serverLinkGroupsLoading"
+          >
+            <el-option
+              v-for="g in serverLinkGroups"
+              :key="g.id"
+              :label="g.name"
+              :value="g.id"
+            />
+          </el-select>
+          <div class="el-form-item__info" v-if="serverLinkGroups.length === 0 && !serverLinkGroupsLoading">
+            暂无服务器组，请先<a class="text-link" @click="goToServerLinkGroups">创建服务器组</a>
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="copyDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleCopyServer">复制</el-button>
+          <el-button type="primary" @click="handleCopyServer" :disabled="serverLinkGroups.length === 0">复制</el-button>
+        </span>
+      </template>
+    </el-dialog>
+    <!-- 重命名服务器对话框 -->
+    <el-dialog v-model="renameDialogVisible" title="重命名服务器" width="400px" align-center>
+      <el-form ref="renameFormRef" :model="renameForm" :rules="renameFormRules" label-width="100px">
+        <el-form-item label="新名称" prop="newName">
+          <el-input v-model="renameForm.newName" placeholder="请输入新的服务器名称"></el-input>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="renameDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleRenameServer" :loading="renameLoading">确认</el-button>
         </span>
       </template>
     </el-dialog>
@@ -1307,10 +1383,10 @@
 </template>
 
 		<script setup>
-		import {
-		  Plus, VideoPlay, SwitchButton, Refresh, Monitor, ArrowDown, Promotion,
-		  Setting, Cpu, Delete, Document, FolderAdd, FolderChecked, Rank, Loading, CircleClose, DocumentCopy, Upload
-		} from '@element-plus/icons-vue';
+import {
+  Plus, VideoPlay, SwitchButton, Refresh, Monitor, ArrowDown, Promotion,
+  Setting, Cpu, Delete, Document, FolderAdd, FolderChecked, Rank, Loading, CircleClose, DocumentCopy, Upload, Edit
+} from '@element-plus/icons-vue';
 	import {io} from 'socket.io-client';
 	import apiClient, { isRequestCanceled } from '@/api';
 	import {ref, onMounted, onUnmounted, reactive, computed, nextTick, watch} from 'vue';
@@ -1375,12 +1451,23 @@ const copyDialogVisible = ref(false); // 新增
 const commandDialogVisible = ref(false);
 	const configDialogVisible = ref(false);
 	const formRef = ref(null);
-	const newServerForm = ref({name: ''});
+	const newServerForm = ref({name: '', serverLinkGroupIds: []});
 	const importFormRef = ref(null);
-	const importServerForm = ref({name: '', path: ''});
+	const importServerForm = ref({name: '', path: '', serverLinkGroupIds: []});
 const copyFormRef = ref(null); // 新增
-const copyServerForm = ref({name: ''}); // 新增
+const copyServerForm = ref({name: '', serverLinkGroupIds: []}); // 新增
 const sourceServerToCopy = ref(null); // 新增
+
+// --- 重命名服务器相关状态 ---
+const renameDialogVisible = ref(false);
+const renameFormRef = ref(null);
+const renameForm = ref({newName: ''});
+const renameLoading = ref(false);
+const serverToRename = ref(null);
+
+// --- 服务器组相关状态 ---
+const serverLinkGroups = ref([]);
+const serverLinkGroupsLoading = ref(false);
 const batchCommand = ref('');
 const configLoading = ref(false);
 const isSavingConfig = ref(false);
@@ -1423,14 +1510,23 @@ const editorDialog = reactive({
   language: '',
   fileType: ''
 });
-const formRules = reactive({name: [{required: true, message: '请输入服务器名称', trigger: 'blur'}]});
+const formRules = reactive({
+  name: [{required: true, message: '请输入服务器名称', trigger: 'blur'}],
+  serverLinkGroupIds: [{required: true, type: 'array', min: 1, message: '请选择至少一个服务器组', trigger: 'change'}]
+});
 const importFormRules = reactive({
   name: [{required: true, message: '请输入服务器名称', trigger: 'blur'}],
-  path: [{required: true, message: '请输入服务器的绝对路径', trigger: 'blur'}]
+  path: [{required: true, message: '请输入服务器的绝对路径', trigger: 'blur'}],
+  serverLinkGroupIds: [{required: true, type: 'array', min: 1, message: '请选择至少一个服务器组', trigger: 'change'}]
 });
 // 新增：复制服务器表单验证规则
 const copyFormRules = reactive({
-  name: [{required: true, message: '请输入新服务器的名称', trigger: 'blur'}]
+  name: [{required: true, message: '请输入新服务器的名称', trigger: 'blur'}],
+  serverLinkGroupIds: [{required: true, type: 'array', min: 1, message: '请选择至少一个服务器组', trigger: 'change'}]
+});
+// 新增：重命名服务器表单验证规则
+const renameFormRules = reactive({
+  newName: [{required: true, message: '请输入新的服务器名称', trigger: 'blur'}]
 });
 
 // --- Velocity 配置状态 ---
@@ -1718,6 +1814,18 @@ const fetchJavaCmdOptions = async () => {
     javaCmdOptions.value = Array.isArray(data) ? data : [];
   } catch (e) {
     javaCmdOptions.value = [];
+  }
+};
+
+const fetchServerLinkGroups = async () => {
+  serverLinkGroupsLoading.value = true;
+  try {
+    const { data } = await apiClient.get('/api/tools/server-link/groups');
+    serverLinkGroups.value = Array.isArray(data) ? data : [];
+  } catch (e) {
+    serverLinkGroups.value = [];
+  } finally {
+    serverLinkGroupsLoading.value = false;
   }
 };
 
@@ -2143,17 +2251,22 @@ const removeTryServer = (serverName) => {
     velocityTryOrderNames.value.splice(index, 1);
   }
 };
-const openCreateDialog = () => {
+const openCreateDialog = async () => {
+  await fetchServerLinkGroups();
   createDialogVisible.value = true;
   if (formRef.value) formRef.value.resetFields();
-  newServerForm.value = {name: ''};
+  newServerForm.value = {name: '', serverLinkGroupIds: []};
 };
 	const handleCreateServer = async () => {
 	  if (!formRef.value) return;
 	  await formRef.value.validate(async (valid) => {
 	    if (valid) {
 	      try {
-	        const {data} = await apiClient.post('/api/servers/create', newServerForm.value);
+	        const payload = {
+	          name: newServerForm.value.name,
+	          server_link_group_ids: newServerForm.value.serverLinkGroupIds || []
+	        };
+	        const {data} = await apiClient.post('/api/servers/create', payload);
 	        ElMessage.success(data?.message || '已提交创建服务器任务');
 	        createDialogVisible.value = false;
 	        // 服务器将由后台任务创建，ServerList 通过 socket 的 server_create 事件自动刷新
@@ -2294,17 +2407,23 @@ const forceKillServer = (server) => {
     ElMessage.info('已取消强制关闭操作');
   });
 };
-const openImportDialog = () => {
+const openImportDialog = async () => {
+  await fetchServerLinkGroups();
   importDialogVisible.value = true;
   if (importFormRef.value) importFormRef.value.resetFields();
-  importServerForm.value = {name: '', path: ''};
+  importServerForm.value = {name: '', path: '', serverLinkGroupIds: []};
 };
 const handleImportServer = async () => {
   if (!importFormRef.value) return;
   await importFormRef.value.validate(async (valid) => {
     if (valid) {
       try {
-        const {data} = await apiClient.post('/api/servers/import', importServerForm.value);
+        const payload = {
+          name: importServerForm.value.name,
+          path: importServerForm.value.path,
+          server_link_group_ids: importServerForm.value.serverLinkGroupIds || []
+        };
+        const {data} = await apiClient.post('/api/servers/import', payload);
         ElMessage.success(data?.message || '已提交导入服务器任务');
         importDialogVisible.value = false;
       } catch (e) {
@@ -2313,13 +2432,47 @@ const handleImportServer = async () => {
     }
   });
 };
-const openCopyDialog = (server) => {
+const openCopyDialog = async (server) => {
+  await fetchServerLinkGroups();
   sourceServerToCopy.value = server;
-  copyServerForm.value.name = ''; // 重置名称字段
+  copyServerForm.value = {name: '', serverLinkGroupIds: []}; // 重置表单
   copyDialogVisible.value = true;
   nextTick(() => {
     if (copyFormRef.value) {
       copyFormRef.value.clearValidate();
+    }
+  });
+};
+const openRenameDialog = (server) => {
+  serverToRename.value = server;
+  renameForm.value = {newName: server.name};
+  renameDialogVisible.value = true;
+  nextTick(() => {
+    if (renameFormRef.value) {
+      renameFormRef.value.clearValidate();
+    }
+  });
+};
+const handleRenameServer = async () => {
+  if (!renameFormRef.value) return;
+  await renameFormRef.value.validate(async (valid) => {
+    if (valid) {
+      renameLoading.value = true;
+      try {
+        const newName = renameForm.value.newName.trim();
+        await apiClient.post(`/api/servers/${serverToRename.value.id}/rename?new_name=${encodeURIComponent(newName)}`);
+        ElMessage.success(`服务器已重命名为 "${newName}"`);
+        renameDialogVisible.value = false;
+        // 更新本地状态
+        const idx = serverList.value.findIndex(s => s.id === serverToRename.value.id);
+        if (idx !== -1) {
+          serverList.value[idx].name = newName;
+        }
+      } catch (e) {
+        ElMessage.error(`重命名失败: ${e.response?.data?.detail || e.message}`);
+      } finally {
+        renameLoading.value = false;
+      }
     }
   });
 };
@@ -2329,7 +2482,8 @@ const handleCopyServer = async () => {
     if (valid) {
       const payload = {
         name: copyServerForm.value.name,
-        path: sourceServerToCopy.value.path // 使用源服务器的路径
+        path: sourceServerToCopy.value.path, // 使用源服务器的路径
+        server_link_group_ids: copyServerForm.value.serverLinkGroupIds || []
       };
       try {
         const {data} = await apiClient.post('/api/servers/import', payload);
@@ -2352,6 +2506,12 @@ const handleCreateArchive = async (server) => {
       ElMessage.error(error.response?.data?.detail || '发起创建备份任务失败');
     }
   }
+};
+const goToServerLinkGroups = () => {
+  createDialogVisible.value = false;
+  importDialogVisible.value = false;
+  copyDialogVisible.value = false;
+  router.push('/server-groups');
 };
 const goToConsole = (serverId) => {
   router.push(`/console/${serverId}`);
@@ -3150,5 +3310,16 @@ onUnmounted(() => {
   background-color: var(--el-color-primary) !important;
   border-color: var(--el-color-primary) !important;
   color: #fff !important;
+}
+
+/* 文本链接样式 */
+.text-link {
+  color: var(--el-color-primary);
+  text-decoration: underline;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.text-link:hover {
+  color: var(--el-color-primary-light-3);
 }
 </style>

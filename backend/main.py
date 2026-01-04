@@ -60,7 +60,7 @@ def _ensure_default_admin():
         admin_user = models.User(
             username=default_username,
             hashed_password=hashed_password,
-            role="ADMIN",
+            role="OWNER",
             email="",
             qq="",
         )
