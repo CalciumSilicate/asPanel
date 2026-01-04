@@ -4,6 +4,7 @@ import time
 import sys
 import asyncio
 import json
+import secrets
 import socketio
 from sqlalchemy import text
 from fastapi import FastAPI, Request
@@ -23,6 +24,7 @@ from backend.core.constants import (
     ALLOWED_ORIGINS, AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, ARCHIVE_STORAGE_PATH, ARCHIVE_URL_PREFIX,
     UVICORN_HOST, UVICORN_PORT, UVICORN_LOG_LEVEL
 )
+from backend.core.security import get_password_hash
 from backend.routers import users, system, archives, servers, versions, plugins, tools
 from backend.routers import players as players_router
 from backend.routers import stats as stats_router
@@ -41,51 +43,46 @@ from backend.core.dependencies import mcdr_manager
 
 models.Base.metadata.create_all(bind=engine)
 
-def _ensure_db_schema():
-    """轻量级 Schema 迁移（SQLite）。
 
-    本项目未集成 Alembic，这里仅做向后兼容的 ADD COLUMN。
-    """
-    try:
-        with engine.begin() as conn:
-            # ----------------------------
-            # servers: map
-            # ----------------------------
-            cols = conn.execute(text("PRAGMA table_info(servers)")).fetchall()
-            names = set()
-            for row in cols:
-                try:
-                    names.add(row._mapping.get("name"))
-                except Exception:
-                    names.add(row[1] if len(row) > 1 else None)
-            names.discard(None)
+def _ensure_default_admin():
+    """检查是否有用户，没有则创建默认管理员并提示"""
+    with SessionLocal() as db:
+        user_count = db.query(models.User).count()
+        if user_count > 0:
+            return  # 已有用户，跳过
+        
+        # 生成随机密码
+        default_password = secrets.token_urlsafe(12)
+        default_username = "admin"
+        
+        # 创建管理员用户
+        hashed_password = get_password_hash(default_password)
+        admin_user = models.User(
+            username=default_username,
+            hashed_password=hashed_password,
+            role="ADMIN",
+            email="",
+            qq="",
+        )
+        db.add(admin_user)
+        db.commit()
+        
+        # 打印提示信息
+        print()
+        print("=" * 60)
+        print("  默认管理员账号已创建")
+        print("=" * 60)
+        print()
+        print(f"  用户名: {default_username}")
+        print(f"  密码:   {default_password}")
+        print()
+        print("  请登录后立即修改密码！")
+        print("=" * 60)
+        print()
 
-            if "map" not in names:
-                conn.execute(text("ALTER TABLE servers ADD COLUMN map TEXT DEFAULT '{}'"))
-            conn.execute(text("UPDATE servers SET map='{}' WHERE map IS NULL"))
 
-            # ----------------------------
-            # players: is_bot
-            # ----------------------------
-            cols = conn.execute(text("PRAGMA table_info(players)")).fetchall()
-            names = set()
-            for row in cols:
-                try:
-                    names.add(row._mapping.get("name"))
-                except Exception:
-                    names.add(row[1] if len(row) > 1 else None)
-            names.discard(None)
+_ensure_default_admin()
 
-            if "is_bot" not in names:
-                # SQLite bool 通常用 0/1；这里用 INTEGER + DEFAULT 0
-                conn.execute(text("ALTER TABLE players ADD COLUMN is_bot INTEGER DEFAULT 0"))
-            conn.execute(text("UPDATE players SET is_bot=0 WHERE is_bot IS NULL"))
-
-    except Exception:
-        # 不阻塞启动；缺列时相关功能会不可用
-        pass
-
-_ensure_db_schema()
 
 app = FastAPI(title="AS Panel API")
 
