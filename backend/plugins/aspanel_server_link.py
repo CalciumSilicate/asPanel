@@ -133,13 +133,56 @@ def _query_save_all(server: ServerInterface) -> bool:
         return False
 
 
+def _read_aspanel_port() -> int:
+    """
+    读取 ASPanel 的 config.yaml 获取端口。
+    插件运行在 MCDR 服务器目录，ASPanel 配置文件在上级目录。
+    查找顺序：
+    1. 当前目录向上查找 config.yaml / config.yml
+    2. 环境变量 ASPANEL_PORT
+    3. 默认值 8013
+    """
+    # 从当前目录向上查找 config.yaml
+    current = Path(".").resolve()
+    for _ in range(10):  # 最多向上查找 10 层
+        for name in ["config.yaml", "config.yml"]:
+            cfg_path = current / name
+            if cfg_path.exists() and cfg_path.is_file():
+                try:
+                    import yaml
+                    with open(cfg_path, "r", encoding="utf-8") as f:
+                        data = yaml.safe_load(f) or {}
+                    server_cfg = data.get("server") or {}
+                    port = server_cfg.get("port")
+                    if isinstance(port, int) and port > 0:
+                        return port
+                except Exception:
+                    pass
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    
+    # 回退到环境变量
+    env_port = os.getenv("ASPANEL_PORT")
+    if env_port and env_port.isdigit():
+        return int(env_port)
+    
+    # 默认值
+    return 8013
+
+
 def _read_env_config() -> dict[str, Any]:
     def _int_env(name: str, default: int) -> int:
         v = os.getenv(name)
         return int(v) if v is not None and v != "" else default
 
+    # 读取 ASPanel 端口，用于构建默认 WS URL
+    aspanel_port = _read_aspanel_port()
+    default_ws_url = f"ws://127.0.0.1:{aspanel_port}/aspanel/mcdr"
+
     cfg = {
-        "ws_url": os.getenv("ASPANEL_WS_URL", "ws://127.0.0.1:8013/aspanel/mcdr"),
+        "ws_url": os.getenv("ASPANEL_WS_URL", default_ws_url),
         "connect_timeout": _int_env("ASPANEL_WS_CONNECT_TIMEOUT", 5),
         "reconnect_interval": _int_env("ASPANEL_WS_RECONNECT_INTERVAL", 3),
         "max_queue": _int_env("ASPANEL_WS_MAX_QUEUE", 2000),
