@@ -621,9 +621,29 @@ def delete_server_link_group(db: Session, group_id: int) -> Optional[models.Serv
     rec = get_server_link_group_by_id(db, group_id)
     if not rec:
         return None
+    # 从所有用户的 server_link_group_ids 中移除该组
+    cleanup_users_for_server_link_group(db, group_id)
     db.delete(rec)
     db.commit()
     return rec
+
+
+def cleanup_users_for_server_link_group(db: Session, group_id: int) -> int:
+    """从所有用户的 server_link_group_ids JSON 中移除指定 group_id，返回更新的用户数量。"""
+    users = get_all_users(db)
+    updated = 0
+    for u in users:
+        try:
+            ids = json.loads(u.server_link_group_ids or '[]')
+            if group_id in ids:
+                ids.remove(group_id)
+                u.server_link_group_ids = json.dumps(ids)
+                db.add(u)
+                updated += 1
+        except Exception:
+            continue
+    db.commit()
+    return updated
 
 
 def cleanup_server_link_groups_for_server(db: Session, server_id: int) -> int:
