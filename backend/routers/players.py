@@ -37,6 +37,29 @@ async def list_players(scope: Optional[str] = "all", db: Session = Depends(get_d
     return items
 
 
+@router.get("/with-groups")
+async def list_players_with_groups(scope: Optional[str] = "all", db: Session = Depends(get_db),
+                                   _user: models.User = Depends(require_role(Role.ADMIN))):
+    """返回带有所属服务器组信息的玩家列表（仅管理员可用）"""
+    scope = scope or "all"
+    if scope not in ("all", "official_only", "include_cracked"):
+        scope = "all"
+    items = crud.list_players(db, scope=scope)
+    
+    result = []
+    for player in items:
+        player_data = {
+            'id': player.id,
+            'uuid': player.uuid,
+            'player_name': player.player_name,
+            'is_offline': player.is_offline,
+            'play_time': json.loads(player.play_time or '{}') if isinstance(player.play_time, str) else (player.play_time or {}),
+            'server_link_groups': crud.get_server_link_groups_for_player(db, player.uuid)
+        }
+        result.append(player_data)
+    return result
+
+
 @router.post("/refresh-uuids")
 async def refresh_uuids(_user: models.User = Depends(require_role(Role.ADMIN))):
     """逻辑1：扫描所有服务器 world/playerdata，补全数据库中的玩家 UUID 记录。"""

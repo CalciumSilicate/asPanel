@@ -26,7 +26,7 @@ const routes = [
                 path: 'dashboard',
                 name: 'Dashboard',
                 component: () => import('../views/Dashboard.vue'),
-                meta: { requiredRole: 'GUEST' }
+                meta: { requiredRole: 'USER' }
             },
             {
                 path: 'servers',
@@ -74,7 +74,7 @@ const routes = [
                 path: 'server-groups',
                 name: 'ServerLink',
                 component: () => import('../views/ServerLink.vue'),
-                meta: { requiredRole: 'USER' }
+                meta: { requiredRole: 'ADMIN' }
             },
             // 插件配置
             { path: 'server-config/via-version-config', name: 'ViaVersionConfig', component: () => import('../views/plugin-config/ViaVersionConfig.vue'), meta: { requiredRole: 'ADMIN' } },
@@ -146,7 +146,7 @@ const routes = [
             // 未来可以在此添加 statistics, settings 等子路由
         ]
     },
-     // 404 页面
+    // 404 页面
     {
         path: '/:pathMatch(.*)*',
         redirect: '/dashboard'

@@ -1019,3 +1019,18 @@ def get_server_link_groups_for_servers(db: Session, server_ids: List[int]) -> Li
         except Exception:
             continue
     return list(group_ids)
+
+
+def get_server_link_groups_for_player(db: Session, player_uuid: str) -> List[dict]:
+    """
+    根据玩家 UUID 获取其所属的服务器组列表（包含组ID和名称）。
+    """
+    joined_servers = get_servers_player_joined(db, player_uuid)
+    if not joined_servers:
+        return []
+    server_ids = [s.id for s in joined_servers]
+    group_ids = get_server_link_groups_for_servers(db, server_ids)
+    if not group_ids:
+        return []
+    groups = list_server_link_groups(db)
+    return [{'id': g.id, 'name': g.name} for g in groups if g.id in group_ids]

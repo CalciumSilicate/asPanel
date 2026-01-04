@@ -37,8 +37,36 @@ router = APIRouter(
 
 # --- Server Endpoints ---
 @router.get('/servers', response_model=List[schemas.ServerDetail])
-async def get_servers(db: Session = Depends(get_db), _user: models.User = Depends(require_role(Role.GUEST))):
-    return await server_service.get_servers_list(db)
+async def get_servers(db: Session = Depends(get_db), current_user: models.User = Depends(require_role(Role.GUEST))):
+    all_servers = await server_service.get_servers_list(db)
+    
+    # HELPER 及以上返回所有服务器
+    role_level = {'GUEST': 0, 'USER': 1, 'HELPER': 2, 'ADMIN': 3, 'OWNER': 4}
+    if role_level.get(current_user.role, 0) >= role_level['HELPER']:
+        return all_servers
+    
+    # 对于 USER，根据 server_link_group_ids 过滤
+    try:
+        user_group_ids = json.loads(current_user.server_link_group_ids or '[]')
+    except Exception:
+        user_group_ids = []
+    
+    if not user_group_ids:
+        return []
+    
+    # 获取用户有权限访问的服务器 ID 集合
+    allowed_server_ids = set()
+    groups = crud.list_server_link_groups(db)
+    for group in groups:
+        if group.id in user_group_ids:
+            try:
+                server_ids = json.loads(group.server_ids or '[]')
+                allowed_server_ids.update(server_ids)
+            except Exception:
+                continue
+    
+    # 过滤服务器列表
+    return [s for s in all_servers if s.id in allowed_server_ids]
 
 
 @router.get('/servers/sizes', response_model=List[schemas.ServerSize])
@@ -486,10 +514,35 @@ async def save_server_config(
 
 @router.get("/servers/resource-usage")
 async def get_servers_resource_usage(db: Session = Depends(get_db),
-                                     _user: models.User = Depends(require_role(Role.GUEST))):
+                                     current_user: models.User = Depends(require_role(Role.GUEST))):
     # PERMISSION: USER
     usage_data = []
+    
+    # 确定允许的服务器 ID
+    role_level = {'GUEST': 0, 'USER': 1, 'HELPER': 2, 'ADMIN': 3, 'OWNER': 4}
+    allowed_server_ids = None  # None 表示允许所有
+    if role_level.get(current_user.role, 0) < role_level['HELPER']:
+        try:
+            user_group_ids = json.loads(current_user.server_link_group_ids or '[]')
+        except Exception:
+            user_group_ids = []
+        
+        allowed_server_ids = set()
+        if user_group_ids:
+            groups = crud.list_server_link_groups(db)
+            for group in groups:
+                if group.id in user_group_ids:
+                    try:
+                        server_ids = json.loads(group.server_ids or '[]')
+                        allowed_server_ids.update(server_ids)
+                    except Exception:
+                        continue
+    
     for server_id, process in mcdr_manager.processes.items():
+        # 如果有权限限制，检查服务器是否在允许列表中
+        if allowed_server_ids is not None and server_id not in allowed_server_ids:
+            continue
+            
         if process.returncode is None and mcdr_manager.java_pid.get(server_id):
             try:
                 p = psutil.Process(mcdr_manager.java_pid.get(server_id))

@@ -78,6 +78,22 @@
               <el-tag v-else type="info" effect="plain" size="small">否</el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="服务器组" min-width="200">
+            <template #default="{ row }">
+              <el-space wrap v-if="(row.server_link_groups || []).length > 0">
+                <el-tag
+                    v-for="g in (row.server_link_groups || [])"
+                    :key="g.id"
+                    type="success"
+                    effect="plain"
+                    size="small"
+                >
+                  {{ g.name }}
+                </el-tag>
+              </el-space>
+              <el-tag v-else type="info" effect="plain" size="small">无</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="游玩时长" width="200" align="center">
             <template #header>
               <span class="pt-sort-header" @click="togglePlaytimeSort">游玩时长<span v-if="playtimeSort==='desc'"> ↓</span><span v-else> —</span></span>
@@ -190,7 +206,8 @@ type Player = {
   uuid: string,
   player_name?: string | null,
   is_offline: boolean,
-  play_time: Record<string, number>
+  play_time: Record<string, number>,
+  server_link_groups?: { id: number, name: string }[]
 }
 
 const rows = ref<Player[]>([])
@@ -241,8 +258,8 @@ const loadServers = async () => {
 }
 
 const load = async () => {
-  const { data } = await api.get('/api/players', { params: { scope: scope.value } })
-  rows.value = (data || []).map((x: any) => ({ ...x, play_time: x.play_time || {} }))
+  const { data } = await api.get('/api/players/with-groups', { params: { scope: scope.value } })
+  rows.value = (data || []).map((x: any) => ({ ...x, play_time: x.play_time || {}, server_link_groups: x.server_link_groups || [] }))
   page.value = 1
   loadOpServers()
 }

@@ -62,6 +62,19 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     user = crud.get_user_by_username(db, form_data.username)
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(401, "账号名或密码错误", {"WWW-Authenticate": "Bearer"})
+    
+    # 登录时更新用户的 server_link_group_ids
+    if user.bound_player_id:
+        player = db.query(models.Player).filter(models.Player.id == user.bound_player_id).first()
+        if player and player.uuid:
+            import json
+            joined_servers = crud.get_servers_player_joined(db, player.uuid)
+            server_ids = [s.id for s in joined_servers]
+            new_group_ids = crud.get_server_link_groups_for_servers(db, server_ids)
+            user.server_link_group_ids = json.dumps(new_group_ids)
+            db.add(user)
+            db.commit()
+    
     # 从数据库读取 token 过期时间
     sys_settings = crud.get_system_settings_data(db)
     expire_minutes = sys_settings.get("token_expire_minutes", 10080)

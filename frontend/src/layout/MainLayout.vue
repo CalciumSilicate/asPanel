@@ -185,7 +185,7 @@
             @select="handleMenuSelect"
         >
           <!-- 基础功能 -->
-          <el-menu-item index="/dashboard">
+          <el-menu-item index="/dashboard" v-if="hasRole('HELPER')">
             <el-icon>
               <DataAnalysis/>
             </el-icon>
@@ -203,7 +203,7 @@
             </el-icon>
             <span>服务器列表</span>
           </el-menu-item>
-          <el-menu-item index="/server-groups" v-if="hasRole('USER')">
+          <el-menu-item index="/server-groups" v-if="hasRole('ADMIN')">
             <el-icon>
               <Link/>
             </el-icon>
