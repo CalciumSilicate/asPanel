@@ -96,10 +96,6 @@ def _get_base_dir() -> Path:
 
 def _get_config_path() -> Path:
     """获取配置文件路径"""
-    # 优先使用环境变量指定的路径
-    env_path = os.getenv("ASPANEL_CONFIG", "")
-    if env_path:
-        return Path(env_path)
     return _get_base_dir() / "config.yaml"
 
 
@@ -109,7 +105,6 @@ def _find_config_file() -> Optional[Path]:
     
     # 按优先级查找配置文件
     candidates = [
-        Path(os.getenv("ASPANEL_CONFIG", "")),  # 环境变量指定的路径
         base_dir / "config.yaml",
         base_dir / "config.yml",
     ]

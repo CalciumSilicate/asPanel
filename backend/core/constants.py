@@ -72,7 +72,7 @@ LOG_FILE_LEVEL = _cfg.log.file_level
 LOG_STORAGE = STORAGE_ROOT_PATH / "logs"
 
 # --- Timezone Setting ---
-TIMEZONE = os.getenv("ASPANEL_TIMEZONE", "Asia/Shanghai")
+TIMEZONE = "Asia/Shanghai"
 
 # --- Secret Key for authorization ---
 _SECRET_KEY_FILE = STORAGE_ROOT_PATH / "secret.key"

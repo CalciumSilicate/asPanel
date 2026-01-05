@@ -6,7 +6,7 @@ from cache import AsyncTTL
 from fastapi.exceptions import HTTPException
 import uuid
 
-# --- API Configure ---
+# --- API ---
 MINECRAFT_VERSION_MANIFEST_URL = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
 VELOCITY_VERSION_MANIFEST_URL = "https://fill.papermc.io/v3/projects/velocity/versions"
 VELOCITY_BUILD_MANIFEST_URL = "https://fill.papermc.io/v3/projects/velocity/versions/{0}/builds"
