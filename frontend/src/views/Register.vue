@@ -18,14 +18,14 @@
         <el-form-item label="确认密码">
           <el-input v-model="form.confirmPassword" type="password" placeholder="请再次输入密码" show-password size="large" :prefix-icon="Lock" autocomplete="new-password"></el-input>
         </el-form-item>
-        <el-form-item label="QQ（必填）">
+        <el-form-item label="QQ">
           <el-input v-model="form.qq" placeholder="请输入 QQ 号（纯数字）" size="large"></el-input>
+        </el-form-item>
+        <el-form-item label="玩家名">
+          <el-input v-model="form.player_name" placeholder="请输入玩家名" size="large"></el-input>
         </el-form-item>
         <el-form-item label="邮箱（可选）">
           <el-input v-model="form.email" placeholder="请输入邮箱" size="large" autocomplete="email"></el-input>
-        </el-form-item>
-        <el-form-item label="玩家名（必填，需为已存在的玩家）">
-          <el-input v-model="form.player_name" placeholder="请输入已有玩家名" size="large"></el-input>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" native-type="submit" style="width: 100%;" :loading="loading" size="large">
@@ -62,15 +62,20 @@ const form = reactive({
 });
 
 const handleRegister = async () => {
-  if (!form.username || !form.password || !form.confirmPassword || !form.qq || !form.player_name) {
-    ElMessage.error('请填写用户名、密码、QQ 与玩家名');
+  const username = (form.username || '').trim();
+  const qq = (form.qq || '').trim();
+  const email = (form.email || '').trim();
+  const playerName = (form.player_name || '').trim();
+
+  if (!username || !form.password || !form.confirmPassword) {
+    ElMessage.error('请填写用户名、密码与确认密码');
     return;
   }
   if (form.password !== form.confirmPassword) {
     ElMessage.error('两次输入的密码不一致');
     return;
   }
-  if (!/^\d+$/.test(form.qq)) {
+  if (qq && !/^\d+$/.test(qq)) {
     ElMessage.error('QQ 必须为纯数字');
     return;
   }
@@ -78,11 +83,11 @@ const handleRegister = async () => {
   loading.value = true;
   try {
     await apiClient.post('/api/users/register', {
-      username: form.username,
+      username,
       password: form.password,
-      qq: form.qq,
-      email: form.email || undefined,
-      player_name: form.player_name,
+      qq: qq || undefined,
+      email: email || undefined,
+      player_name: playerName || undefined,
     });
     ElMessage.success('注册成功！将跳转至登录页。');
     router.push('/login');

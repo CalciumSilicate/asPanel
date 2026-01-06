@@ -98,10 +98,10 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str
-    # 注册字段：qq 必填，email 可选，player_name 必填（需绑定已存在的玩家）
-    qq: str
+    # 注册字段（是否必填由系统设置控制）
+    qq: Optional[str] = None
     email: Optional[str] = None
-    player_name: str
+    player_name: Optional[str] = None
 
 
 class UserOut(UserBase):
@@ -761,6 +761,9 @@ class SystemSettings(BaseModel):
     # 新增网页可配置项
     token_expire_minutes: int = Field(10080, description="Token 有效期（分钟），默认 7 天")
     allow_register: bool = Field(True, description="是否允许新用户注册")
+    register_require_qq: bool = Field(True, description="注册时 QQ 是否为必填")
+    register_require_player_name: bool = Field(True, description="注册时玩家名是否为必填")
+    register_player_name_must_exist: bool = Field(True, description="注册时填写的玩家名是否必须已存在")
     default_user_role: str = Field("USER", description="新用户默认角色: GUEST, USER, ADMIN")
     copy_limit_mbps: float = Field(1024.0, description="文件复制速度限制（MB/s）")
 
@@ -773,6 +776,9 @@ class SystemSettingsUpdate(BaseModel):
     # 新增网页可配置项
     token_expire_minutes: int | None = None
     allow_register: bool | None = None
+    register_require_qq: bool | None = None
+    register_require_player_name: bool | None = None
+    register_player_name_must_exist: bool | None = None
     default_user_role: str | None = None
     copy_limit_mbps: float | None = None
 

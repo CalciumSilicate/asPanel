@@ -78,6 +78,42 @@
               <el-form-item>
                 <template #label>
                   <div class="form-item-label">
+                    <span>注册时 QQ 为必填</span>
+                    <small>关闭后，注册时 QQ 可留空；若填写，仍需为纯数字。</small>
+                  </div>
+                </template>
+                <div class="form-item-control">
+                  <el-switch v-model="form.register_require_qq" />
+                </div>
+              </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <div class="form-item-label">
+                    <span>注册时玩家名为必填</span>
+                    <small>关闭后，注册时玩家名可不填；不填则不绑定玩家。</small>
+                  </div>
+                </template>
+                <div class="form-item-control">
+                  <el-switch v-model="form.register_require_player_name" />
+                </div>
+              </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <div class="form-item-label">
+                    <span>注册时玩家名必须已存在</span>
+                    <small>关闭后，允许注册时填入未入库玩家名（将尝试自动创建玩家记录）。</small>
+                  </div>
+                </template>
+                <div class="form-item-control">
+                  <el-switch v-model="form.register_player_name_must_exist" />
+                </div>
+              </el-form-item>
+
+              <el-form-item>
+                <template #label>
+                  <div class="form-item-label">
                     <span>新用户默认角色</span>
                     <small>新注册用户的默认权限角色。</small>
                   </div>
@@ -157,6 +193,9 @@ const form = reactive({
   // 新增
   token_expire_minutes: settings.token_expire_minutes,
   allow_register: settings.allow_register,
+  register_require_qq: settings.register_require_qq,
+  register_require_player_name: settings.register_require_player_name,
+  register_player_name_must_exist: settings.register_player_name_must_exist,
   default_user_role: settings.default_user_role,
   copy_limit_mbps: settings.copy_limit_mbps,
 })
@@ -185,6 +224,9 @@ const autoSave = () => {
         // 新增
         token_expire_minutes: form.token_expire_minutes,
         allow_register: form.allow_register,
+        register_require_qq: form.register_require_qq,
+        register_require_player_name: form.register_require_player_name,
+        register_player_name_must_exist: form.register_player_name_must_exist,
         default_user_role: form.default_user_role,
         copy_limit_mbps: form.copy_limit_mbps,
       })

@@ -793,6 +793,9 @@ DEFAULT_SYSTEM_SETTINGS = {
     # 新增网页可配置项
     "token_expire_minutes": 10080,  # Token 有效期（分钟），默认 7 天
     "allow_register": True,  # 是否允许新用户注册
+    "register_require_qq": True,  # 注册时 QQ 是否为必填
+    "register_require_player_name": True,  # 注册时玩家名是否为必填
+    "register_player_name_must_exist": True,  # 注册时填写的玩家名是否必须已存在
     "default_user_role": "USER",  # 新用户默认角色
     "copy_limit_mbps": 1024.0,  # 文件复制速度限制（MB/s）
 }
