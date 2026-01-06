@@ -21,7 +21,15 @@ class User(Base):
     email = Column(String, nullable=True)
     qq = Column(String, nullable=True)
     bound_player_id = Column(Integer, nullable=True)
-    server_link_group_ids = Column(String, nullable=True, default="[]")  # JSON array of group IDs
+    server_link_group_ids = Column(String, nullable=True, default="[]")  # JSON array of group IDs (DEPRECATED)
+
+
+class UserGroupPermission(Base):
+    __tablename__ = "user_group_permissions"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    group_id = Column(Integer, ForeignKey("server_link_groups.id"), index=True)
+    role = Column(String, default=DEFAULT_USER_ROLE)
 
 
 class Server(Base):

@@ -10,6 +10,51 @@
         <span class="brand" v-show="!isCollapse">AS Panel</span>
       </div>
       <div class="header-right">
+        <!-- Group Context Selector -->
+        <div class="group-selector" v-if="user.id && user.group_permissions.length > 0" style="margin-right: 12px;">
+          <!-- OWNER: Multi-select -->
+          <el-select
+            v-if="user.role === 'OWNER'"
+            v-model="activeGroupIds"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="全选/全局"
+            style="width: 180px;"
+            :max-collapse-tags="1"
+            clearable
+          >
+            <el-option
+              v-for="perm in user.group_permissions"
+              :key="perm.group_id"
+              :label="perm.group_name || `Group ${perm.group_id}`"
+              :value="perm.group_id"
+            >
+              <span style="float: left">{{ perm.group_name || `Group ${perm.group_id}` }}</span>
+              <span style="float: right; color: var(--el-text-color-secondary); font-size: 12px; margin-left: 10px;">{{ perm.role }}</span>
+            </el-option>
+          </el-select>
+          
+          <!-- Others: Single-select -->
+          <el-select
+            v-else
+            :model-value="activeGroupIds[0]"
+            @update:model-value="(val) => activeGroupIds = val ? [val] : []"
+            placeholder="选择上下文"
+            style="width: 180px;"
+          >
+            <el-option
+              v-for="perm in user.group_permissions"
+              :key="perm.group_id"
+              :label="perm.group_name || `Group ${perm.group_id}`"
+              :value="perm.group_id"
+            >
+              <span style="float: left">{{ perm.group_name || `Group ${perm.group_id}` }}</span>
+              <span style="float: right; color: var(--el-text-color-secondary); font-size: 12px; margin-left: 10px;">{{ perm.role }}</span>
+            </el-option>
+          </el-select>
+        </div>
+
         <el-dropdown
           trigger="click"
           class="downloads-dropdown"
@@ -451,7 +496,7 @@ import {
   LocationInformation, Place, List, RefreshRight, Comment, DocumentCopy, Operation, Download,
   Moon, Sunny
 } from '@element-plus/icons-vue';
-import {user, fullAvatarUrl, fetchUser, clearUser, hasRole} from '@/store/user';
+import {user, fullAvatarUrl, fetchUser, clearUser, hasRole, activeGroupIds} from '@/store/user';
 import { isDark, toggleTheme } from '@/store/theme'
 import {
   tasks,

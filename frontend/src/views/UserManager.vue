@@ -198,14 +198,14 @@ const pagedRows = computed(() => {
   return filteredRows.value.slice(start, start + pageSize.value)
 })
 
-const roleTagType = (role: string) => {
+const roleTagType = (role: string): 'primary' | 'success' | 'info' | 'warning' | 'danger' => {
   switch (role) {
     case 'GUEST': return 'info'
-    case 'USER': return ''
+    case 'USER': return 'primary'
     case 'HELPER': return 'success'
     case 'ADMIN': return 'warning'
     case 'OWNER': return 'danger'
-    default: return ''
+    default: return 'info'
   }
 }
 

@@ -119,7 +119,7 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(401, "账号名或密码错误", {"WWW-Authenticate": "Bearer"})
     
-    # 登录时更新用户的 server_link_group_ids
+    # 登录时更新用户的 server_link_group_ids (Legacy & New)
     if user.bound_player_id:
         player = db.query(models.Player).filter(models.Player.id == user.bound_player_id).first()
         if player and player.uuid:
@@ -127,9 +127,26 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
             joined_servers = crud.get_servers_player_joined(db, player.uuid)
             server_ids = [s.id for s in joined_servers]
             new_group_ids = crud.get_server_link_groups_for_servers(db, server_ids)
+            
+            # Legacy
             user.server_link_group_ids = json.dumps(new_group_ids)
             db.add(user)
             db.commit()
+
+            # New: Update UserGroupPermission with default USER role
+            # Note: This overwrites existing permissions if they came from auto-binding.
+            # If we want to preserve manual ADMIN/HELPER roles, we should only ADD missing ones.
+            # However, for now, let's assume auto-binding implies USER role for those groups.
+            # To be safe, let's fetch existing and merge.
+            existing_perms = crud.get_user_group_permissions(db, user.id)
+            existing_map = {p.group_id: p.role for p in existing_perms}
+            
+            new_perms = []
+            for gid in new_group_ids:
+                role = existing_map.get(gid, "USER")
+                new_perms.append(schemas.GroupPermission(group_id=gid, role=role))
+            
+            crud.update_user_group_permissions(db, user.id, new_perms)
     
     # 从数据库读取 token 过期时间
     sys_settings = crud.get_system_settings_data(db)
@@ -139,6 +156,19 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
 
 @router.get("/users/me", response_model=schemas.UserOut)
 async def read_users_me(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Fetch permissions
+    perms = crud.get_user_group_permissions(db, current_user.id)
+    
+    # Fetch group names efficiently
+    group_ids = [p.group_id for p in perms]
+    groups = db.query(models.ServerLinkGroup).filter(models.ServerLinkGroup.id.in_(group_ids)).all()
+    group_map = {g.id: g.name for g in groups}
+
+    group_permissions = []
+    for p in perms:
+        gname = group_map.get(p.group_id, f"Group {p.group_id}")
+        group_permissions.append({'group_id': p.group_id, 'group_name': gname, 'role': p.role})
+
     # 构建返回对象，包含 mc_uuid 和 mc_name
     result = {
         'id': current_user.id,
@@ -151,6 +181,7 @@ async def read_users_me(current_user: models.User = Depends(get_current_user), d
         'mc_uuid': None,
         'mc_name': None,
         'server_link_group_ids': current_user.server_link_group_ids,
+        'group_permissions': group_permissions
     }
     # 如果绑定了玩家，查询玩家信息
     if current_user.bound_player_id:
@@ -198,15 +229,38 @@ async def update_current_user(
             server_ids = [s.id for s in joined_servers]
             server_link_group_ids = crud.get_server_link_groups_for_servers(db, server_ids)
             current_user.server_link_group_ids = json.dumps(server_link_group_ids)
+
+            # Sync permissions (New)
+            existing_perms = crud.get_user_group_permissions(db, current_user.id)
+            existing_map = {p.group_id: p.role for p in existing_perms}
+            new_perms = []
+            for gid in server_link_group_ids:
+                role = existing_map.get(gid, "USER")
+                new_perms.append(schemas.GroupPermission(group_id=gid, role=role, group_name="")) # Name will be filled below
+            crud.update_user_group_permissions(db, current_user.id, new_perms)
+
         else:
             # 传空字符串表示解绑
             current_user.bound_player_id = None
             current_user.server_link_group_ids = "[]"
+            # Clear permissions
+            crud.update_user_group_permissions(db, current_user.id, [])
     
     db.add(current_user)
     db.commit()
     db.refresh(current_user)
     
+    # Fetch latest permissions with names
+    perms = crud.get_user_group_permissions(db, current_user.id)
+    group_ids = [p.group_id for p in perms]
+    groups = db.query(models.ServerLinkGroup).filter(models.ServerLinkGroup.id.in_(group_ids)).all()
+    group_map = {g.id: g.name for g in groups}
+
+    group_permissions = []
+    for p in perms:
+        gname = group_map.get(p.group_id, f"Group {p.group_id}")
+        group_permissions.append({'group_id': p.group_id, 'group_name': gname, 'role': p.role})
+
     # 构建返回对象，包含 mc_uuid 和 mc_name
     result = {
         'id': current_user.id,
@@ -219,6 +273,7 @@ async def update_current_user(
         'mc_uuid': None,
         'mc_name': None,
         'server_link_group_ids': current_user.server_link_group_ids,
+        'group_permissions': group_permissions
     }
     # 如果绑定了玩家，查询玩家信息
     if current_user.bound_player_id:

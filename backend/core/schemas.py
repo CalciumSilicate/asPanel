@@ -104,10 +104,17 @@ class UserCreate(UserBase):
     player_name: Optional[str] = None
 
 
+class GroupPermission(BaseModel):
+    group_id: int
+    group_name: str
+    role: Role
+
+
 class UserOut(UserBase):
     id: int
     avatar_url: Optional[str] = None
     role: Role
+    group_permissions: List[GroupPermission] = Field(default_factory=list)
     # 新增：联系与绑定信息
     email: Optional[str] = None
     qq: Optional[str] = None
@@ -136,6 +143,7 @@ class UserUpdate(BaseModel):
     qq: Optional[str] = None
     role: Optional[Role] = None
     bound_player_id: Optional[int] = None
+    group_permissions: Optional[List[GroupPermission]] = None
 
 
 class UserSelfUpdate(BaseModel):

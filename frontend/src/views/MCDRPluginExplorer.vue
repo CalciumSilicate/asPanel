@@ -297,7 +297,7 @@
 </template>
 
 <script lang="ts" setup>
-import {ref, computed, onMounted} from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import {ElMessage, ElNotification} from 'element-plus'
 import {Search, Star, Download, Upload} from '@element-plus/icons-vue'
 import apiClient, { isRequestCanceled } from '@/api'
@@ -376,6 +376,8 @@ interface PluginEntry {
   release?: ReleaseBlock;
   repository?: Repository;
   latest?: ReleaseItem | null
+  // cached lowercase text for fast client-side search
+  searchText?: string
 }
 
 // [!code block start]
@@ -415,6 +417,10 @@ const hideArchived = ref(true)
 const page = ref(1)
 const pageSize = ref(20)
 
+watch([selectedLabels, sortBy, showPrerelease, hideArchived], () => {
+  page.value = 1
+})
+
 // Stats
 const stats = ref({total: 0, updatedAt: ''})
 
@@ -441,32 +447,20 @@ const allLabels = computed(() => {
   return Array.from(s).sort()
 })
 
-const filtered = computed(() => {
+const baseList = computed(() => {
   let result = items.value
-  if (query.value.trim()) {
-    const q = query.value.trim().toLowerCase()
-    result = result.filter(i => {
-      const desc = JSON.stringify(i.meta?.description || i.plugin?.introduction || {}).toLowerCase()
-      const authors = (i.meta?.authors || []).join(',').toLowerCase()
-      const labels = (i.plugin?.labels || []).join(',').toLowerCase()
-      return (
-          i.meta.id.toLowerCase().includes(q) ||
-          (i.meta.name || '').toLowerCase().includes(q) ||
-          authors.includes(q) || labels.includes(q) || desc.includes(q)
-      )
-    })
-  }
-  if (selectedLabels.value.length) {
-    result = result.filter(i => selectedLabels.value.every(l => (i.plugin?.labels || []).includes(l)))
-  }
   if (!showPrerelease.value) {
     result = result.filter(i => !(i.latest?.prerelease))
   }
   if (hideArchived.value) {
     result = result.filter(i => !i.repository?.archived)
   }
+  return result
+})
 
-  result = [...result].sort((a, b) => {
+const sortedBase = computed(() => {
+  const result = [...baseList.value]
+  result.sort((a, b) => {
     if (sortBy.value === 'name') return (a.meta.name || a.meta.id).localeCompare(b.meta.name || b.meta.id)
     if (sortBy.value === 'stars') return (b.repository?.stargazers_count ?? 0) - (a.repository?.stargazers_count ?? 0)
     if (sortBy.value === 'downloads') return (b.latest?.asset?.download_count ?? 0) - (a.latest?.asset?.download_count ?? 0)
@@ -474,6 +468,18 @@ const filtered = computed(() => {
     const db = b.latest?.created_at ? new Date(b.latest.created_at).getTime() : 0
     return db - da
   })
+  return result
+})
+
+const filtered = computed(() => {
+  let result = sortedBase.value
+  const q = query.value.trim().toLowerCase()
+  if (q) {
+    result = result.filter(i => (i.searchText || '').includes(q))
+  }
+  if (selectedLabels.value.length) {
+    result = result.filter(i => selectedLabels.value.every(l => (i.plugin?.labels || []).includes(l)))
+  }
   return result
 })
 
@@ -518,12 +524,33 @@ function getAuthHeaders() {
   return headers;
 }
 
+function joinRecordValues(record?: Record<string, string> | null): string {
+  if (!record) return ''
+  return Object.values(record).filter(Boolean).join(' ')
+}
+
+function buildSearchText(entry: PluginEntry): string {
+  const parts = [
+    entry.meta?.id,
+    entry.meta?.name,
+    (entry.meta?.authors || []).join(' '),
+    (entry.plugin?.labels || []).join(' '),
+    joinRecordValues(entry.meta?.description),
+    joinRecordValues(entry.plugin?.introduction),
+    entry.repository?.full_name,
+  ]
+
+  return parts.filter(Boolean).join(' ').toLowerCase()
+}
+
 function normalize(data: any): PluginEntry[] {
   const map = data?.plugins || {}
   return Object.keys(map).map((k: string) => {
     const p = map[k]
     const latest = p?.release?.releases?.[0] ?? null
-    return {meta: p.meta, plugin: p.plugin, release: p.release, repository: p.repository, latest}
+    const entry: PluginEntry = {meta: p.meta, plugin: p.plugin, release: p.release, repository: p.repository, latest}
+    entry.searchText = buildSearchText(entry)
+    return entry
   })
 }
 

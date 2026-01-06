@@ -33,8 +33,7 @@ export function initTheme() {
     // ignore
   }
 
-  const prefersDark = typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)')?.matches
-  setTheme(prefersDark ? 'dark' : 'light')
+  setTheme('light')
 }
 
 export function toggleTheme() {

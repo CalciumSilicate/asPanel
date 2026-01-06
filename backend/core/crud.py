@@ -21,6 +21,24 @@ def get_user_by_username(db: Session, username: str) -> Optional[models.User]:
     return db.query(models.User).filter(models.User.username == username).first()
 
 
+def get_user_group_permissions(db: Session, user_id: int) -> List[models.UserGroupPermission]:
+    return db.query(models.UserGroupPermission).filter(models.UserGroupPermission.user_id == user_id).all()
+
+
+def update_user_group_permissions(db: Session, user_id: int, permissions: List[schemas.GroupPermission]):
+    # Delete existing
+    db.query(models.UserGroupPermission).filter(models.UserGroupPermission.user_id == user_id).delete()
+    # Add new
+    for perm in permissions:
+        db_perm = models.UserGroupPermission(
+            user_id=user_id,
+            group_id=perm.group_id,
+            role=perm.role.value
+        )
+        db.add(db_perm)
+    db.commit()
+
+
 def create_user(db: Session, user: schemas.UserCreate, role: Optional[schemas.Role] = None, bound_player_id: Optional[int] = None, server_link_group_ids: Optional[List[int]] = None) -> models.User:
     hashed_password = get_password_hash(user.password)
     db_user = models.User(
@@ -30,11 +48,21 @@ def create_user(db: Session, user: schemas.UserCreate, role: Optional[schemas.Ro
         email=getattr(user, 'email', None),
         qq=str(getattr(user, 'qq', '') or ''),
         bound_player_id=bound_player_id,
-        server_link_group_ids=json.dumps(server_link_group_ids or []),
+        # server_link_group_ids is deprecated, we use it only for legacy compatibility if needed, but here we set empty
+        server_link_group_ids="[]", 
     )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
+
+    # Initialize group permissions based on server_link_group_ids if provided (Legacy migration during create)
+    # Assign DEFAULT_USER_ROLE (USER) for these groups
+    if server_link_group_ids:
+        for gid in server_link_group_ids:
+            perm = models.UserGroupPermission(user_id=db_user.id, group_id=gid, role="USER")
+            db.add(perm)
+        db.commit()
+    
     return db_user
 
 
@@ -63,12 +91,22 @@ def list_users_sorted(db: Session, *, search: Optional[str] = None, role: Option
     if pid_set:
         pmap = {p.id: p for p in db.query(models.Player).filter(models.Player.id.in_(pid_set)).all()}
 
+    # Fetch permissions for all users in one go to avoid N+1
+    # Simple strategy: fetch all permissions and group by user_id
+    all_perms = db.query(models.UserGroupPermission).all()
+    perms_map = {}
+    for p in all_perms:
+        if p.user_id not in perms_map:
+            perms_map[p.user_id] = []
+        perms_map[p.user_id].append({'group_id': p.group_id, 'role': p.role})
+
     for u in users:
-        # 解析 server_link_group_ids
+        # Legacy parsing
         try:
             slg_ids = json.loads(getattr(u, 'server_link_group_ids', None) or '[]')
         except Exception:
             slg_ids = []
+            
         row = {
             'id': u.id,
             'username': u.username,
@@ -79,7 +117,8 @@ def list_users_sorted(db: Session, *, search: Optional[str] = None, role: Option
             'bound_player_id': getattr(u, 'bound_player_id', None),
             'mc_uuid': None,
             'mc_name': None,
-            'server_link_group_ids': slg_ids,
+            'server_link_group_ids': slg_ids, # Keep for legacy compat in response
+            'group_permissions': perms_map.get(u.id, [])
         }
         bp = pmap.get(getattr(u, 'bound_player_id', None)) if getattr(u, 'bound_player_id', None) else None
         if bp is not None:
@@ -118,6 +157,11 @@ def update_user_fields(db: Session, user_id: int, payload: schemas.UserUpdate) -
             u.bound_player_id = payload.bound_player_id
     if payload.role is not None:
         u.role = payload.role
+    
+    # Update group permissions if provided
+    if payload.group_permissions is not None:
+        update_user_group_permissions(db, user_id, payload.group_permissions)
+
     db.add(u)
     db.commit()
     db.refresh(u)
