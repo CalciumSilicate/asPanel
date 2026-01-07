@@ -125,11 +125,8 @@
       <el-upload
           ref="uploadRef"
           drag
-          :http-request="customUploadRequest"
           :limit="1"
           :on-exceed="handleExceed"
-          :on-success="handleUploadSuccess"
-          :on-error="handleUploadError"
           :auto-upload="false"
           accept=".py,.pyz,.zip,.mcdr"
       >
@@ -148,7 +145,7 @@
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="uploadDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="submitUpload" :loading="isUploading">
+          <el-button type="primary" @click="submitUpload">
             确认上传
           </el-button>
         </span>
@@ -281,6 +278,7 @@ import {ElMessage, ElNotification} from 'element-plus';
 import {Search, Refresh, UploadFilled, Download, Delete, Remove} from '@element-plus/icons-vue';
 import apiClient, { isRequestCanceled } from '@/api';
 import { fetchTasks } from '@/store/tasks'
+import { startUpload } from '@/store/transfers'
 
 // --- State ---
 const loading = ref(false);
@@ -297,26 +295,6 @@ const isFetchingServerPlugins = ref(false);
 const uploadDialogVisible = ref(false);
 const isUploading = ref(false);
 const uploadRef = ref(null);
-
-// 使用 apiClient 的自定义上传请求，统一走拦截器与基地址
-const customUploadRequest = async (options) => {
-  try {
-    const formData = new FormData();
-    formData.append('file', options.file);
-    const res = await apiClient.post('/api/plugins/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: (e) => {
-        if (e && e.total) {
-          const percent = Math.round((e.loaded / e.total) * 100);
-          options.onProgress && options.onProgress({ percent });
-        }
-      },
-    });
-    options.onSuccess && options.onSuccess(res.data);
-  } catch (err) {
-    options.onError && options.onError(err);
-  }
-};
 
 // Install Dialog
 const installDialogVisible = ref(false);
@@ -404,37 +382,48 @@ const handleSearch = () => {
   page.value = 1;
 };
 
-// Upload Logic
-const submitUpload = () => {
-  if (uploadRef.value) {
-    isUploading.value = true;
-    uploadRef.value.submit();
+// 使用 transfers store 的 startUpload 进行非阻塞上传
+const submitUpload = async () => {
+  if (!uploadRef.value) return
+  const uploadInstance = uploadRef.value
+  const fileList = uploadInstance.uploadFiles
+  if (!fileList || fileList.length === 0) {
+    ElMessage.warning('请先选择要上传的文件')
+    return
   }
-};
+  
+  const file = fileList[0]?.raw
+  if (!file) {
+    ElMessage.warning('请先选择要上传的文件')
+    return
+  }
+  
+  uploadDialogVisible.value = false
+  uploadInstance.clearFiles()
+  
+  const formData = new FormData()
+  formData.append('file', file)
+  
+  const { id, response, error } = await startUpload({
+    url: '/api/plugins/upload',
+    data: formData,
+    title: file.name || '插件上传',
+    filename: file.name,
+  })
+  
+  if (error) {
+    ElMessage.error(`上传失败: ${error}`)
+  } else {
+    ElMessage.success(`插件 ${response?.file_name || file.name} 上传成功!`)
+    fetchTasks().catch(() => {})
+    load()
+  }
+}
 
 const handleExceed = (files) => {
-  uploadRef.value.clearFiles();
-  const file = files[0];
-  uploadRef.value.handleStart(file);
-};
-
-const handleUploadSuccess = (response, uploadFile) => {
-  ElMessage.success(`插件 ${response.file_name} 上传成功!`);
-  isUploading.value = false;
-  uploadDialogVisible.value = false;
-  uploadRef.value.clearFiles();
-  fetchTasks().catch(() => {});
-  load();
-};
-
-const handleUploadError = (error, uploadFile) => {
-  isUploading.value = false;
-  try {
-    const errData = JSON.parse(error.message);
-    ElMessage.error(`上传失败: ${errData.detail || '未知错误'}`);
-  } catch (e) {
-    ElMessage.error(`上传失败: ${error.message}`);
-  }
+  uploadRef.value.clearFiles()
+  const file = files[0]
+  uploadRef.value.handleStart(file)
 };
 
 // Delete Logic

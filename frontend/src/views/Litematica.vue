@@ -112,7 +112,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import apiClient from '@/api'
 import { ArrowDown } from '@element-plus/icons-vue'
 import { fetchTasks } from '@/store/tasks'
-import { startDownload } from '@/store/transfers'
+import { startDownload, startUpload } from '@/store/transfers'
 
 interface LtmRow {
   file_name: string
@@ -173,27 +173,26 @@ const handleFileChange = async (e: Event) => {
   const input = e.target as HTMLInputElement
   const files = Array.from(input.files || [])
   if (!files.length) return
-  loading.value = true
-  try {
-    const uploads = files.map(async (f) => {
-      const fd = new FormData()
-      fd.append('file', f)
-      return apiClient.post('/api/tools/litematic/upload', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      })
+  if (fileInputRef.value) fileInputRef.value.value = ''
+  
+  for (const f of files) {
+    const fd = new FormData()
+    fd.append('file', f)
+    
+    startUpload({
+      url: '/api/tools/litematic/upload',
+      data: fd,
+      title: f.name || '投影上传',
+      filename: f.name,
+    }).then(({ error }) => {
+      if (error) {
+        ElMessage.error(`${f.name} 上传失败: ${error}`)
+      } else {
+        ElMessage.success(`${f.name} 上传成功`)
+        fetchTasks().catch(() => {})
+        fetchList()
+      }
     })
-    const results = await Promise.allSettled(uploads)
-    const ok = results.filter(r => r.status === 'fulfilled').length
-    const fail = results.length - ok
-    if (ok) ElMessage.success(`成功上传 ${ok} 个投影${fail ? `，失败 ${fail} 个` : ''}`)
-    if (!ok && fail) ElMessage.error(`全部上传失败（${fail} 个）`)
-    fetchTasks().catch(() => {})
-    await fetchList()
-  } catch (err: any) {
-    ElMessage.error(err?.response?.data?.detail || '上传失败')
-  } finally {
-    if (fileInputRef.value) fileInputRef.value.value = ''
-    loading.value = false
   }
 }
 

@@ -273,7 +273,7 @@
       </el-upload>
       <template #footer>
         <el-button @click="uploadDialog.visible=false">取消</el-button>
-        <el-button type="primary" :loading="uploadDialog.loading" :disabled="!uploadDialog.file" @click="doUpload">开始上传</el-button>
+        <el-button type="primary" :disabled="!uploadDialog.file" @click="doUpload">开始上传</el-button>
       </template>
     </el-dialog>
 
@@ -326,7 +326,7 @@ import apiClient, { isRequestCanceled } from '@/api'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import router from '@/router'
 import { fetchTasks } from '@/store/tasks'
-import { startDownload } from '@/store/transfers'
+import { startDownload, startUpload } from '@/store/transfers'
 
 // 左侧数据
 const servers = ref([])
@@ -702,18 +702,25 @@ const uploadDialog = ref({ visible: false, file: null, loading: false })
 const openUploadDialog = () => { uploadDialog.value.visible = true; uploadDialog.value.file = null }
 const doUpload = async () => {
   if (!uploadDialog.value.file) return
-  uploadDialog.value.loading = true
-  try {
-    const form = new FormData()
-    form.append('file', uploadDialog.value.file)
-    await apiClient.post(`/api/mods/upload/${selectedServer.value.id}`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  
+  const file = uploadDialog.value.file
+  uploadDialog.value.visible = false
+  
+  const form = new FormData()
+  form.append('file', file)
+  
+  const { error } = await startUpload({
+    url: `/api/mods/upload/${selectedServer.value.id}`,
+    data: form,
+    title: file.name || '模组上传',
+    filename: file.name,
+  })
+  
+  if (error) {
+    ElMessage.error('上传失败: ' + error)
+  } else {
     ElMessage.success('上传成功')
-    uploadDialog.value.visible = false
     await fetchMods()
-  } catch (e) {
-    ElMessage.error('上传失败: ' + (e.response?.data?.detail || e.message))
-  } finally {
-    uploadDialog.value.loading = false
   }
 }
 
