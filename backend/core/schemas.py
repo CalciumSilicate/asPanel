@@ -75,7 +75,16 @@ class ServerType(str, enum.Enum):
     VELOCITY = "velocity"
 
 
+class GroupRole(str, enum.Enum):
+    """组内权限等级 - 仅用于服务器组权限"""
+    USER = "USER"
+    HELPER = "HELPER"
+    ADMIN = "ADMIN"
+
+
+# 保留 Role 用于向后兼容，但标记为 DEPRECATED
 class Role(str, enum.Enum):
+    """DEPRECATED: 旧版全局权限枚举，仅用于迁移兼容"""
     GUEST = "GUEST"
     USER = "USER"
     HELPER = "HELPER"
@@ -90,6 +99,14 @@ class ServerPluginType(str, enum.Enum):
     PY = "PY"
 
 
+# 组权限等级（新版本）
+GROUP_ROLE_HIERARCHY = {
+    GroupRole.USER: 1,
+    GroupRole.HELPER: 2,
+    GroupRole.ADMIN: 3,
+}
+
+# DEPRECATED: 旧版权限等级
 ROLE_HIERARCHY = {
     Role.GUEST: 0,
     Role.USER: 1,
@@ -115,21 +132,23 @@ class UserCreate(UserBase):
 class GroupPermission(BaseModel):
     group_id: int
     group_name: str
-    role: Role
+    role: GroupRole  # 使用新的 GroupRole 枚举
 
 
 class UserOut(UserBase):
     id: int
     avatar_url: Optional[str] = None
-    role: Role
+    # 新权限模型
+    is_owner: bool = False
+    is_admin: bool = False
     group_permissions: List[GroupPermission] = Field(default_factory=list)
-    # 新增：联系与绑定信息
+    # 联系与绑定信息
     email: Optional[str] = None
     qq: Optional[str] = None
     bound_player_id: Optional[int] = None
     mc_uuid: Optional[str] = None
     mc_name: Optional[str] = None
-    server_link_group_ids: List[int] = Field(default_factory=list)
+    server_link_group_ids: List[int] = Field(default_factory=list)  # DEPRECATED
 
     @field_validator('server_link_group_ids', mode='before')
     @classmethod
@@ -149,7 +168,9 @@ class UserUpdate(BaseModel):
     username: Optional[str] = None
     email: Optional[str] = None
     qq: Optional[str] = None
-    role: Optional[Role] = None
+    # 新权限模型
+    is_owner: Optional[bool] = None
+    is_admin: Optional[bool] = None
     bound_player_id: Optional[int] = None
     group_permissions: Optional[List[GroupPermission]] = None
 

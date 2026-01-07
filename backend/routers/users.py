@@ -17,14 +17,15 @@ from backend.core.responses import success, error, ErrorCodes
 from backend.core.api import get_uuid_by_name
 from backend.core.logger import logger
 from backend.core.database import get_db
-from backend.core.auth import get_current_user, require_role
+from backend.core.auth import get_current_user, require_role, require_owner, require_admin, require_authenticated
 from backend.core.constants import AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, AVATAR_MC_PATH, \
     UUID_HYPHEN_PATTERN
 from backend.core.rate_limit import login_limiter
 from backend.core.utils import get_str_md5, is_valid_mc_name
-from backend.core.schemas import Role, UserUpdate, UserSelfUpdate, PasswordChange
+from backend.core.schemas import Role, UserUpdate, UserSelfUpdate, PasswordChange, GroupRole, GroupPermission
 from backend.core.bind_verification import bind_verification_service
 from backend.core.schemas import BindRequestCreate, BindRequestResponse, BindVerifyRequest, BindPendingResponse
+from backend.services.permission_service import PermissionService
 
 router = APIRouter(
     prefix="/api",
@@ -111,11 +112,8 @@ async def register_user(user: schemas.UserCreate, db: Session = Depends(get_db))
         server_link_group_ids = crud.get_server_link_groups_for_servers(db, server_ids)
         bound_player_id = player.id
 
-    default_user_role = str(sys_settings.get("default_user_role", "USER") or "USER").upper()
-    if default_user_role not in schemas.ROLE_HIERARCHY:
-        default_user_role = "USER"
-
-    return crud.create_user(db, user, role=default_user_role, bound_player_id=bound_player_id, server_link_group_ids=server_link_group_ids)
+    # 新用户默认不是管理员
+    return crud.create_user(db, user, is_owner=False, is_admin=False, bound_player_id=bound_player_id, server_link_group_ids=server_link_group_ids)
 
 
 @router.post("/token", response_model=schemas.Token)
@@ -179,12 +177,13 @@ async def read_users_me(current_user: models.User = Depends(get_current_user), d
         gname = group_map.get(p.group_id, f"Group {p.group_id}")
         group_permissions.append({'group_id': p.group_id, 'group_name': gname, 'role': p.role})
 
-    # 构建返回对象，包含 mc_uuid 和 mc_name
+    # 构建返回对象
     result = {
         'id': current_user.id,
         'username': current_user.username,
         'avatar_url': current_user.avatar_url,
-        'role': current_user.role,
+        'is_owner': current_user.is_owner,
+        'is_admin': current_user.is_admin,
         'email': current_user.email,
         'qq': current_user.qq,
         'bound_player_id': current_user.bound_player_id,
@@ -484,28 +483,27 @@ async def upload_avatar(
     return updated_user
 
 
-def _assert_role_change_allowed(db: Session, actor: models.User, target: models.User, new_role: Role):
-    actor_role = Role(actor.role)
-    target_role = Role(target.role)
-    if actor_role == Role.ADMIN:
-        # 仅可在 GUEST/USER/HELPER 间调整；且不能作用于 ADMIN/OWNER
-        if new_role not in (Role.GUEST, Role.USER, Role.HELPER):
-            raise HTTPException(403, "ADMIN 仅可调整至 GUEST/USER/HELPER")
-        if target_role in (Role.ADMIN, Role.OWNER):
-            raise HTTPException(403, "ADMIN 无法调整 ADMIN/OWNER 的权限")
-    elif actor_role == Role.OWNER:
-        # OWNER 可调整到 ADMIN 及以下；设为 OWNER 需全局唯一
-        if new_role == Role.OWNER:
-            owners = crud.count_owners(db)
-            if owners >= 1 and target_role != Role.OWNER:
-                raise HTTPException(400, "OWNER 最多 1 个")
-    else:
-        raise HTTPException(403, "无权调整权限")
-
-    # 保底：不得将唯一 OWNER 降级
-    if target_role == Role.OWNER and new_role != Role.OWNER:
-        if crud.count_owners(db) <= 1:
-            raise HTTPException(400, "必须至少保留 1 个 OWNER，无法降级唯一 OWNER")
+def _assert_permission_change_allowed(db: Session, actor: models.User, target: models.User, payload: UserUpdate):
+    """检查权限变更是否允许"""
+    # 只有 OWNER 可以修改全局权限 (is_owner/is_admin)
+    if payload.is_owner is not None or payload.is_admin is not None:
+        if not actor.is_owner:
+            raise HTTPException(403, "只有 OWNER 可以修改用户的全局权限")
+        # OWNER 不能降级自己
+        if actor.id == target.id:
+            if payload.is_owner is False:
+                raise HTTPException(400, "不能降级自己的 OWNER 权限")
+        # 保护唯一 OWNER
+        if target.is_owner and payload.is_owner is False:
+            if crud.count_owners(db) <= 1:
+                raise HTTPException(400, "必须至少保留 1 个 OWNER")
+    
+    # ADMIN 可以修改组权限（非 OWNER 用户的）
+    if payload.group_permissions is not None:
+        if not (actor.is_owner or actor.is_admin):
+            raise HTTPException(403, "需要管理员权限才能修改组权限")
+        if target.is_owner and not actor.is_owner:
+            raise HTTPException(403, "非 OWNER 不能修改 OWNER 的组权限")
 
 
 @router.patch("/users/{user_id}", response_model=schemas.UserOut)
@@ -513,29 +511,30 @@ async def update_user(
         user_id: int,
         payload: UserUpdate,
         db: Session = Depends(get_db),
-        actor: models.User = Depends(require_role(Role.ADMIN)),
+        actor: models.User = Depends(require_admin()),
 ):
     u = crud.get_user_by_id(db, user_id)
     if not u:
         raise HTTPException(404, "用户不存在")
     
-    # OWNER 保护：ADMIN 不能修改 OWNER
-    if u.role == Role.OWNER.value and actor.role != Role.OWNER.value:
-        raise HTTPException(403, "非 OWNER 不能修改 OWNER 用户")
+    # OWNER 保护
+    if u.is_owner and not actor.is_owner:
+        # 非 OWNER 只能修改 OWNER 的组权限（如果 ADMIN 被允许的话）
+        if payload.is_owner is not None or payload.is_admin is not None:
+            raise HTTPException(403, "非 OWNER 不能修改 OWNER 的全局权限")
     
-    if payload.role is not None:
-        _assert_role_change_allowed(db, actor, u, payload.role)
+    # 检查权限变更是否允许
+    _assert_permission_change_allowed(db, actor, u, payload)
     
-    # 如果角色变更，增加 token_version
-    if payload.role is not None and payload.role.value != u.role:
-        from backend.services.permission_service import PermissionService
+    # 如果权限变更，增加 token_version
+    if payload.is_owner is not None or payload.is_admin is not None:
         PermissionService.increment_token_version(db, u)
     
     try:
         u = crud.update_user_fields(db, user_id, payload)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    # 展开 mc 信息
+    # 返回更新后的用户信息
     for r in crud.list_users_sorted(db):
         if r['id'] == u.id:
             return r
@@ -545,11 +544,11 @@ async def update_user(
 @router.get("/users", response_model=list[schemas.UserOut])
 async def list_users(
         db: Session = Depends(get_db),
-        current_user: models.User = Depends(require_role(Role.ADMIN)),
+        current_user: models.User = Depends(require_owner()),
         search: str | None = Query(default=None),
-        role: str | None = Query(default=None),
+        is_admin: bool | None = Query(default=None),
 ):
-    return crud.list_users_sorted(db, search=search, role=role)
+    return crud.list_users_sorted(db, search=search, is_admin_filter=is_admin)
 
 
 @router.get("/users/permissions/check")
@@ -682,7 +681,7 @@ async def mc_avatar(mc_name_or_uuid: str):
 async def upload_avatar_for_user(
         user_id: int,
         file: UploadFile = File(...),
-        actor: models.User = Depends(require_role(Role.ADMIN)),
+        actor: models.User = Depends(require_admin()),
         db: Session = Depends(get_db)
 ):
     if file.content_type not in ["image/jpeg", "image/png"]:
@@ -719,17 +718,16 @@ async def upload_avatar_for_user(
 async def reset_password(
         user_id: int,
         db: Session = Depends(get_db),
-        actor: models.User = Depends(require_role(Role.ADMIN)),
+        actor: models.User = Depends(require_admin()),
 ):
     u = crud.get_user_by_id(db, user_id)
     if not u:
         raise HTTPException(404, "用户不存在")
     
     # OWNER 保护
-    if u.role == Role.OWNER.value and actor.role != Role.OWNER.value:
+    if u.is_owner and not actor.is_owner:
         raise HTTPException(403, "非 OWNER 不能重置 OWNER 的密码")
     
-    # 允许重置密码；删除/降级在其它接口限制
     new_password = uuid.uuid4().hex[:12]
     crud.reset_user_password(db, user_id, new_password)
     u.token_version = (u.token_version or 0) + 1
@@ -741,17 +739,17 @@ async def reset_password(
 async def delete_user(
         user_id: int,
         db: Session = Depends(get_db),
-        actor: models.User = Depends(require_role(Role.ADMIN)),
+        actor: models.User = Depends(require_admin()),
 ):
     u = crud.get_user_by_id(db, user_id)
     if not u:
         raise HTTPException(404, "用户不存在")
     
     # OWNER 保护
-    if u.role == Role.OWNER.value and actor.role != Role.OWNER.value:
+    if u.is_owner and not actor.is_owner:
         raise HTTPException(403, "非 OWNER 不能删除 OWNER 用户")
     
-    if u.role == Role.OWNER.value and crud.count_owners(db) <= 1:
+    if u.is_owner and crud.count_owners(db) <= 1:
         raise HTTPException(400, "系统必须至少保留 1 个 OWNER，无法删除唯一的 OWNER")
     crud.delete_user_by_id(db, user_id)
     return success({"id": user_id, "deleted": True})
@@ -761,16 +759,17 @@ async def delete_user(
 async def batch_delete_users(
         payload: schemas.BatchActionPayload,
         db: Session = Depends(get_db),
-        actor: models.User = Depends(require_role(Role.ADMIN)),
+        actor: models.User = Depends(require_admin()),
 ):
     ids = list(payload.ids or [])
-    # 保护唯一 OWNER
+    # 保护 OWNER
     if ids:
         to_keep = []
         for uid in ids:
             u = crud.get_user_by_id(db, uid)
-            if u and u.role == Role.OWNER.value and crud.count_owners(db) <= 1:
-                continue
+            if u and u.is_owner:
+                if not actor.is_owner or crud.count_owners(db) <= 1:
+                    continue
             to_keep.append(uid)
         ids = to_keep
     deleted = crud.delete_users_by_ids(db, ids)

@@ -30,33 +30,34 @@ def update_user_group_permissions(db: Session, user_id: int, permissions: List[s
     db.query(models.UserGroupPermission).filter(models.UserGroupPermission.user_id == user_id).delete()
     # Add new
     for perm in permissions:
+        # Handle both string and enum role values
+        role_value = perm.role.value if hasattr(perm.role, 'value') else str(perm.role)
         db_perm = models.UserGroupPermission(
             user_id=user_id,
             group_id=perm.group_id,
-            role=perm.role.value
+            role=role_value
         )
         db.add(db_perm)
     db.commit()
 
 
-def create_user(db: Session, user: schemas.UserCreate, role: Optional[schemas.Role] = None, bound_player_id: Optional[int] = None, server_link_group_ids: Optional[List[int]] = None) -> models.User:
+def create_user(db: Session, user: schemas.UserCreate, is_owner: bool = False, is_admin: bool = False, bound_player_id: Optional[int] = None, server_link_group_ids: Optional[List[int]] = None) -> models.User:
     hashed_password = get_password_hash(user.password)
     db_user = models.User(
         username=user.username,
         hashed_password=hashed_password,
-        role=role,
+        is_owner=is_owner,
+        is_admin=is_admin,
         email=getattr(user, 'email', None),
         qq=str(getattr(user, 'qq', '') or ''),
         bound_player_id=bound_player_id,
-        # server_link_group_ids is deprecated, we use it only for legacy compatibility if needed, but here we set empty
-        server_link_group_ids="[]", 
+        server_link_group_ids="[]",  # DEPRECATED
     )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
 
-    # Initialize group permissions based on server_link_group_ids if provided (Legacy migration during create)
-    # Assign DEFAULT_USER_ROLE (USER) for these groups
+    # Initialize group permissions based on server_link_group_ids if provided
     if server_link_group_ids:
         for gid in server_link_group_ids:
             perm = models.UserGroupPermission(user_id=db_user.id, group_id=gid, role="USER")
@@ -80,10 +81,13 @@ def get_all_users(db: Session) -> List[models.User]:
     return db.query(models.User).all()
 
 
-def list_users_sorted(db: Session, *, search: Optional[str] = None, role: Optional[str] = None) -> list[dict]:
+def list_users_sorted(db: Session, *, search: Optional[str] = None, is_admin_filter: Optional[bool] = None) -> list[dict]:
     q = db.query(models.User)
-    if role:
-        q = q.filter(models.User.role == str(role))
+    if is_admin_filter is not None:
+        if is_admin_filter:
+            q = q.filter((models.User.is_owner == True) | (models.User.is_admin == True))
+        else:
+            q = q.filter((models.User.is_owner == False) & (models.User.is_admin == False))
     users = q.order_by(models.User.id.asc()).all()
     rows: list[dict] = []
     pid_set = {u.bound_player_id for u in users if getattr(u, 'bound_player_id', None)}
@@ -99,6 +103,10 @@ def list_users_sorted(db: Session, *, search: Optional[str] = None, role: Option
         if p.user_id not in perms_map:
             perms_map[p.user_id] = []
         perms_map[p.user_id].append({'group_id': p.group_id, 'role': p.role})
+    
+    # Fetch all groups for name lookup
+    all_groups = db.query(models.ServerLinkGroup).all()
+    group_name_map = {g.id: g.name for g in all_groups}
 
     for u in users:
         # Legacy parsing
@@ -111,14 +119,18 @@ def list_users_sorted(db: Session, *, search: Optional[str] = None, role: Option
             'id': u.id,
             'username': u.username,
             'avatar_url': u.avatar_url,
-            'role': u.role,
+            'is_owner': u.is_owner,
+            'is_admin': u.is_admin,
             'email': getattr(u, 'email', None),
             'qq': getattr(u, 'qq', None),
             'bound_player_id': getattr(u, 'bound_player_id', None),
             'mc_uuid': None,
             'mc_name': None,
-            'server_link_group_ids': slg_ids, # Keep for legacy compat in response
-            'group_permissions': perms_map.get(u.id, [])
+            'server_link_group_ids': slg_ids,  # DEPRECATED
+            'group_permissions': [
+                {'group_id': p['group_id'], 'group_name': group_name_map.get(p['group_id'], f"Group {p['group_id']}"), 'role': p['role']}
+                for p in perms_map.get(u.id, [])
+            ]
         }
         bp = pmap.get(getattr(u, 'bound_player_id', None)) if getattr(u, 'bound_player_id', None) else None
         if bp is not None:
@@ -155,8 +167,11 @@ def update_user_fields(db: Session, user_id: int, payload: schemas.UserUpdate) -
             if not bp:
                 raise ValueError('绑定的玩家不存在')
             u.bound_player_id = payload.bound_player_id
-    if payload.role is not None:
-        u.role = payload.role
+    # 新权限模型
+    if payload.is_owner is not None:
+        u.is_owner = payload.is_owner
+    if payload.is_admin is not None:
+        u.is_admin = payload.is_admin
     
     # Update group permissions if provided
     if payload.group_permissions is not None:
@@ -169,7 +184,7 @@ def update_user_fields(db: Session, user_id: int, payload: schemas.UserUpdate) -
 
 
 def count_owners(db: Session) -> int:
-    return db.query(models.User).filter(models.User.role == schemas.Role.OWNER.value).count()
+    return db.query(models.User).filter(models.User.is_owner == True).count()
 
 
 def delete_user_by_id(db: Session, user_id: int) -> Optional[models.User]:

@@ -8,22 +8,59 @@ from typing import Callable
 
 from backend.core import security, crud, models, schemas
 from backend.core.database import get_db
-from backend.services.permission_service import PermissionService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
 
 
-def require_role(required_role: schemas.Role) -> Callable:
-    def role_checker(current_user: models.User = Depends(get_current_user)) -> models.User:
-        user_role_level = PermissionService.get_user_role_level(current_user.role)
-        required_role_level = schemas.ROLE_HIERARCHY[required_role]
-        if user_role_level < required_role_level:
+def require_owner() -> Callable:
+    """要求用户是 OWNER（超级管理员）"""
+    def owner_checker(current_user: models.User = Depends(get_current_user)) -> models.User:
+        if not current_user.is_owner:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"需要 '{required_role.value}' 或更高权限才能执行此操作。"
+                detail="需要 OWNER 权限才能执行此操作"
             )
         return current_user
+    return owner_checker
 
+
+def require_admin() -> Callable:
+    """要求用户是 ADMIN 或 OWNER"""
+    def admin_checker(current_user: models.User = Depends(get_current_user)) -> models.User:
+        if not (current_user.is_owner or current_user.is_admin):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="需要管理员权限才能执行此操作"
+            )
+        return current_user
+    return admin_checker
+
+
+def require_authenticated() -> Callable:
+    """只要求用户已登录"""
+    def auth_checker(current_user: models.User = Depends(get_current_user)) -> models.User:
+        return current_user
+    return auth_checker
+
+
+# DEPRECATED: 保留用于向后兼容，逐步迁移
+def require_role(required_role: schemas.Role) -> Callable:
+    """DEPRECATED: 使用 require_owner/require_admin 替代"""
+    from backend.services.permission_service import PermissionService
+    
+    def role_checker(current_user: models.User = Depends(get_current_user)) -> models.User:
+        # 新权限模型：OWNER/ADMIN 拥有所有权限
+        if current_user.is_owner or current_user.is_admin:
+            return current_user
+        
+        # 对于旧代码兼容：非管理员只能访问 USER 级别的功能
+        if required_role in (schemas.Role.GUEST, schemas.Role.USER):
+            return current_user
+        
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"需要管理员权限才能执行此操作"
+        )
     return role_checker
 
 

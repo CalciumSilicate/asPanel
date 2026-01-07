@@ -3,14 +3,14 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import type { RouteRecordRaw } from 'vue-router'
 import MainLayout from '../layout/MainLayout.vue';
-import { hasRole, fetchUser, user, clearUser, type UserRole } from '@/store/user';
+import { hasRole, fetchUser, user, clearUser, type LegacyRole } from '@/store/user';
 import { ElMessage } from 'element-plus';
 
 // 扩展 RouteMeta 类型
 declare module 'vue-router' {
   interface RouteMeta {
     requiresAuth?: boolean
-    requiredRole?: UserRole
+    requiredRole?: LegacyRole
   }
 }
 

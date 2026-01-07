@@ -20,8 +20,9 @@
         <el-input v-model="query" placeholder="搜索 用户名/邮箱/QQ/玩家/UUID" clearable style="max-width: 320px;">
           <template #prefix><el-icon><Search/></el-icon></template>
         </el-input>
-        <el-select v-model="roleFilter" clearable placeholder="筛选权限" style="width: 160px;">
-          <el-option v-for="r in ROLES" :key="r" :label="r" :value="r" />
+        <el-select v-model="adminFilter" clearable placeholder="筛选权限" style="width: 160px;">
+          <el-option label="管理员" :value="true" />
+          <el-option label="普通用户" :value="false" />
         </el-select>
       </div>
 
@@ -94,16 +95,14 @@
               </template>
             </template>
           </el-table-column>
-          <el-table-column label="权限" width="150" align="center">
+          <el-table-column label="全局权限" width="180" align="center">
             <template #default="{ row }">
-              <el-dropdown trigger="click" @command="changeRoleForRow(row)">
-                <el-tag :type="roleTagType(row.role)" class="clickable">{{ row.role }}</el-tag>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item v-for="r in allowedRoles" :key="r" :command="r">{{ r }}</el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+              <div class="global-perm-cell">
+                <el-tag v-if="row.is_owner" type="danger" size="small">OWNER</el-tag>
+                <el-tag v-else-if="row.is_admin" type="warning" size="small">ADMIN</el-tag>
+                <el-tag v-else type="info" size="small">普通用户</el-tag>
+              </div>
+              <el-button v-if="isOwner" size="small" type="primary" link @click="openGlobalPermDialog(row)">编辑</el-button>
             </template>
           </el-table-column>
           <el-table-column label="组权限" min-width="200" align="center">
@@ -114,7 +113,7 @@
                     v-for="perm in row.group_permissions.slice(0, 2)" 
                     :key="perm.group_id" 
                     size="small" 
-                    :type="roleTagType(perm.role)"
+                    :type="groupRoleTagType(perm.role)"
                     class="group-perm-tag"
                   >
                     {{ perm.group_name }}: {{ perm.role }}
@@ -162,7 +161,7 @@
         <el-table-column label="权限" width="180" align="center">
           <template #default="{ row, $index }">
             <el-select v-model="editingGroupPerms[$index].role" size="small" style="width: 140px;">
-              <el-option v-for="r in ROLES" :key="r" :label="r" :value="r" />
+              <el-option v-for="r in GROUP_ROLES" :key="r" :label="r" :value="r" />
             </el-select>
           </template>
         </el-table-column>
@@ -170,6 +169,27 @@
       <template #footer>
         <el-button @click="groupPermDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="saveGroupPerms">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 全局权限编辑弹窗 -->
+    <el-dialog v-model="globalPermDialogVisible" title="编辑全局权限" width="400px">
+      <el-form label-width="100px">
+        <el-form-item label="用户名">
+          <span>{{ editingGlobalPermUser?.username }}</span>
+        </el-form-item>
+        <el-form-item label="OWNER">
+          <el-switch v-model="editingIsOwner" :disabled="editingGlobalPermUser?.id === currentUserId" />
+          <span class="perm-desc">超级管理员，可管理所有权限</span>
+        </el-form-item>
+        <el-form-item label="ADMIN">
+          <el-switch v-model="editingIsAdmin" />
+          <span class="perm-desc">管理员，可管理组权限</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="globalPermDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveGlobalPerm">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -181,19 +201,23 @@ import { Search, Refresh, Delete, Key } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import AvatarUploader from '@/components/AvatarUploader.vue'
-import { hasRole } from '@/store/user'
+import { isOwner } from '@/store/user'
+
+// 组权限等级（新版本，不含 GUEST 和 OWNER）
+type GroupRole = 'USER' | 'HELPER' | 'ADMIN'
 
 type GroupPermission = {
   group_id: number
   group_name: string
-  role: 'GUEST'|'USER'|'HELPER'|'ADMIN'|'OWNER'
+  role: GroupRole
 }
 
 type UserRow = {
   id: number
   username: string
   avatar_url?: string | null
-  role: 'GUEST'|'USER'|'HELPER'|'ADMIN'|'OWNER'
+  is_owner: boolean
+  is_admin: boolean
   email?: string | null
   qq?: string | null
   bound_player_id?: number | null
@@ -209,14 +233,14 @@ type ServerGroup = {
 
 type Player = { id: number, uuid: string, player_name?: string | null }
 
-const ROLES = ['GUEST','USER','HELPER','ADMIN','OWNER']
-const allowedRoles = computed(() => hasRole('OWNER') ? ROLES : ['GUEST','USER','HELPER'])
+// 组权限等级选项（新版本）
+const GROUP_ROLES: GroupRole[] = ['USER', 'HELPER', 'ADMIN']
 
 const rows = ref<UserRow[]>([])
 const players = ref<Player[]>([])
 const serverGroups = ref<ServerGroup[]>([])
 const query = ref('')
-const roleFilter = ref<string|undefined>()
+const adminFilter = ref<boolean | undefined>()
 const page = ref(1)
 const pageSize = ref(20)
 const onPageChange = (p: number) => { page.value = p }
@@ -241,7 +265,9 @@ const loadServerGroups = async () => {
 
 const filteredRows = computed(() => {
   let base = rows.value
-  if (roleFilter.value) base = base.filter(r => r.role === roleFilter.value)
+  if (adminFilter.value !== undefined) {
+    base = base.filter(r => adminFilter.value ? (r.is_owner || r.is_admin) : (!r.is_owner && !r.is_admin))
+  }
   const q = query.value.trim().toLowerCase()
   if (!q) return base
   return base.filter(r => {
@@ -255,16 +281,19 @@ const pagedRows = computed(() => {
   return filteredRows.value.slice(start, start + pageSize.value)
 })
 
-const roleTagType = (role: string): 'primary' | 'success' | 'info' | 'warning' | 'danger' => {
+// 组权限标签颜色
+const groupRoleTagType = (role: string): 'primary' | 'success' | 'info' | 'warning' | 'danger' => {
   switch (role) {
-    case 'GUEST': return 'info'
     case 'USER': return 'primary'
     case 'HELPER': return 'success'
     case 'ADMIN': return 'warning'
-    case 'OWNER': return 'danger'
     default: return 'info'
   }
 }
+
+// 当前用户 ID
+import { user as currentUser } from '@/store/user'
+const currentUserId = computed(() => currentUser.id)
 
 // 编辑逻辑
 const editing = ref<{rowId:number|null, field:string|null, value:any}>({ rowId: null, field: null, value: '' })
@@ -302,18 +331,32 @@ const openAvatar = (row:UserRow) => {
   avatarVisible.value = true
 }
 
-// 权限
-const changeRole = async (row:UserRow, r: UserRow['role']) => {
-  try {
-    await api.patch(`/api/users/${row.id}`, { role: r })
-    await load()
-  } catch (e:any) {
-    ElMessage.error(e?.response?.data?.detail || '修改权限失败')
-  }
+// 全局权限编辑
+const globalPermDialogVisible = ref(false)
+const editingGlobalPermUser = ref<UserRow | null>(null)
+const editingIsOwner = ref(false)
+const editingIsAdmin = ref(false)
+
+const openGlobalPermDialog = (row: UserRow) => {
+  editingGlobalPermUser.value = row
+  editingIsOwner.value = row.is_owner
+  editingIsAdmin.value = row.is_admin
+  globalPermDialogVisible.value = true
 }
 
-const changeRoleForRow = (row: UserRow) => async (r: UserRow['role']) => {
-  await changeRole(row, r)
+const saveGlobalPerm = async () => {
+  if (!editingGlobalPermUser.value) return
+  try {
+    await api.patch(`/api/users/${editingGlobalPermUser.value.id}`, {
+      is_owner: editingIsOwner.value,
+      is_admin: editingIsAdmin.value
+    })
+    ElMessage.success('全局权限已更新')
+    globalPermDialogVisible.value = false
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '保存全局权限失败')
+  }
 }
 
 // 操作
@@ -419,4 +462,10 @@ onMounted(async () => {
 .avatar.placeholder { background: #e5e7eb; }
 .avatar-wrap { display: inline-flex; align-items:center; justify-content:center; width:36px; height:36px; margin: 2px auto; }
 .um-pagination { display: flex; justify-content: flex-end; margin-top: 8px; }
+.group-perms-cell { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; margin-bottom: 4px; }
+.group-perm-tag { margin: 1px; }
+.no-perm { color: var(--el-text-color-secondary); font-size: 12px; }
+.toolbar { display: flex; gap: 12px; align-items: center; }
+.global-perm-cell { margin-bottom: 4px; }
+.perm-desc { margin-left: 12px; color: var(--el-text-color-secondary); font-size: 12px; }
 </style>

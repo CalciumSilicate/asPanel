@@ -16,7 +16,11 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)
     hashed_password = Column(String)
-    role = Column(String, nullable=False, default=DEFAULT_USER_ROLE)
+    # 新权限模型：is_owner 和 is_admin 布尔字段
+    is_owner = Column(Boolean, default=False, nullable=False)  # 超级管理员，可管理所有人权限
+    is_admin = Column(Boolean, default=False, nullable=False)  # 管理员，可管理组权限但不能改全局权限
+    # role 字段保留用于兼容迁移，之后可移除 (DEPRECATED)
+    role = Column(String, nullable=True, default=None)
     avatar_url = Column(String, nullable=True)
     email = Column(String, nullable=True)
     qq = Column(String, nullable=True)
