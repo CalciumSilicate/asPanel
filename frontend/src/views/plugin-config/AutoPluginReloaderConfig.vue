@@ -104,7 +104,7 @@ const refreshInstalled = async () => {
 
 const installFor = async (s:any) => {
   installingServerId.value = s.id
-  try { await installMCDR(s.id, PLUGIN_ID); ElMessage.success(`已发起安装 ${PLUGIN_ID} 到 ${s.name}`); invalidateServerPlugins(s.id); installedMap.value.set(s.id, true) }
+  try { await installMCDR(s.id, PLUGIN_ID); ElMessage.success(`已发起安装 ${PLUGIN_ID} 到 ${s.name}`); fetchTasks().catch(() => {}); invalidateServerPlugins(s.id); installedMap.value.set(s.id, true) }
   catch (e:any) { ElMessage.error(e.response?.data?.detail || e.message || '安装失败') }
   finally { installingServerId.value = null }
 }

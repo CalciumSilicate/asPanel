@@ -186,6 +186,7 @@ const handleFileChange = async (e: Event) => {
     const fail = results.length - ok
     if (ok) ElMessage.success(`成功上传 ${ok} 个投影${fail ? `，失败 ${fail} 个` : ''}`)
     if (!ok && fail) ElMessage.error(`全部上传失败（${fail} 个）`)
+    fetchTasks().catch(() => {})
     await fetchList()
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.detail || '上传失败')
@@ -200,6 +201,7 @@ const generateCL = async (row: LtmRow) => {
   try {
     await apiClient.post(`/api/tools/litematic/generate_cl/${encodeURIComponent(row.file_name)}`)
     ElMessage.success('命令已生成')
+    fetchTasks().catch(() => {})
     await fetchList()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || '生成失败')

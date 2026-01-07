@@ -12,9 +12,9 @@ from backend.services.permission_service import permission_service
 
 mcdr_manager = MCDRManager()
 dependency_handler = DependencyHandler(PYTHON_EXECUTABLE)
-plugin_manager = PluginManager(dependency_handler)
 task_manager = TaskManager()
-mod_manager = ModManager()
+plugin_manager = PluginManager(dependency_handler, task_manager)
+mod_manager = ModManager(task_manager)
 archive_manager = ArchiveManager(task_manager, mcdr_manager)
 server_service = ServerService(mcdr_manager, plugin_manager, mod_manager, task_manager)
 

@@ -5,7 +5,7 @@ import ipaddress
 import uuid
 import hashlib
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pathlib import Path
@@ -19,6 +19,7 @@ from backend.core.dependencies import mcdr_manager
 from pydantic import BaseModel
 from backend.services import player_manager
 from backend.core.constants import UUID_HYPHEN_PATTERN
+from backend.core.dependencies import task_manager
 
 router = APIRouter(
     prefix="/api/players",
@@ -67,13 +68,10 @@ async def refresh_uuids(_user: models.User = Depends(require_role(Role.ADMIN))):
 
 
 @router.post("/refresh-names-official")
-async def refresh_names_official(background_tasks: BackgroundTasks,
-                                 _user: models.User = Depends(require_role(Role.ADMIN))):
-    """逻辑2（触发）：为 player_name 为空且 is_offline=False 的记录尝试解析正版玩家名；失败则标记 is_offline=True。
-    后台异步执行，避免阻塞请求。
-    """
-    background_tasks.add_task(player_manager.refresh_missing_official_names)
-    return {"scheduled": True, "task": "refresh-names-official"}
+async def refresh_names_official(_user: models.User = Depends(require_role(Role.ADMIN))):
+    """刷新正版玩家名，返回任务 ID 供前端跟踪进度。"""
+    task = player_manager.start_refresh_player_data_task(task_manager, "names_official")
+    return {"scheduled": True, "task": "refresh-names-official", "task_id": task.id}
 
 
 @router.post("/refresh-names-offline")
@@ -83,21 +81,17 @@ async def refresh_names_offline(_user: models.User = Depends(require_role(Role.A
 
 
 @router.post("/refresh-playtime")
-async def refresh_playtime(background_tasks: BackgroundTasks,
-                           _user: models.User = Depends(require_role(Role.ADMIN))):
-    """逻辑4（触发）：为所有玩家重算各服务器的时长（读取 world/stats/<uuid>.json）。
-    后台异步执行，避免阻塞请求。
-    """
-    background_tasks.add_task(player_manager.recalc_all_play_time)
-    return {"scheduled": True, "task": "refresh-playtime"}
+async def refresh_playtime(_user: models.User = Depends(require_role(Role.ADMIN))):
+    """刷新游戏时长，返回任务 ID 供前端跟踪进度。"""
+    task = player_manager.start_refresh_player_data_task(task_manager, "playtime")
+    return {"scheduled": True, "task": "refresh-playtime", "task_id": task.id}
 
 
 @router.post("/refresh-all-names")
-async def refresh_names_official(background_tasks: BackgroundTasks,
-                                 _user: models.User = Depends(require_role(Role.ADMIN))):
-    """逻辑2+3（触发）：为所有玩家尝试解析正版玩家名，失败则标记为离线玩家；为离线玩家再次尝试解析玩家名。"""
-    background_tasks.add_task(player_manager.refresh_all_names)
-    return {"scheduled": True, "task": "refresh-all-names"}
+async def refresh_all_names_endpoint(_user: models.User = Depends(require_role(Role.ADMIN))):
+    """刷新所有玩家名，返回任务 ID 供前端跟踪进度。"""
+    task = player_manager.start_refresh_player_data_task(task_manager, "names_all")
+    return {"scheduled": True, "task": "refresh-all-names", "task_id": task.id}
 
 
 @router.get("/whitelist-uuids", response_model=List[str])

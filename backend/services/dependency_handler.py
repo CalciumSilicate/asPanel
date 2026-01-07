@@ -55,7 +55,15 @@ class DependencyHandler:
         if not installed_version:
             logger.warning("未找到 mcdreforged。假定不满足版本要求。")
             return False
-        specifier = SpecifierSet(specifier_str, prereleases=True)
+        
+        # 清理非标准版本说明符（如 ">=2.0.0-" 末尾的 "-"）
+        cleaned_specifier = specifier_str.rstrip('-')
+        try:
+            specifier = SpecifierSet(cleaned_specifier, prereleases=True)
+        except Exception as e:
+            logger.warning(f"无法解析版本说明符 '{specifier_str}'，跳过检查: {e}")
+            return True
+        
         is_ok = installed_version in specifier
         if not is_ok:
             logger.error(f"MCDReforged 版本不匹配！要求: '{specifier_str}', 已安装: '{installed_version}'")

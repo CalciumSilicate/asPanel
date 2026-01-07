@@ -534,6 +534,12 @@ const TASK_TYPE_LABELS = {
   CREATE_SERVER: '创建服务器',
   DELETE_SERVER: '删除服务器',
   COMBINED: '组合任务',
+  INSTALL_MOD: '安装模组',
+  COPY_MODS: '复制模组',
+  UPLOAD_MOD: '上传模组',
+  CHECK_MOD_UPDATES: '检查模组更新',
+  LITEMATIC_UPLOAD: '上传投影',
+  LITEMATIC_GENERATE: '生成命令',
 }
 
 const taskTitle = (t) => t?.name || TASK_TYPE_LABELS[t?.type] || '任务'

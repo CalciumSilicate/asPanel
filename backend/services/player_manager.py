@@ -327,3 +327,87 @@ def on_server_deleted(server_name: str) -> dict:
     except Exception:
         pass
     return {"removed": n}
+
+
+# =========================================
+# TaskManager 集成的任务包装函数
+# =========================================
+def start_refresh_player_data_task(task_manager, task_type: str = "all") -> "schemas.Task":
+    """
+    创建并启动玩家数据刷新任务，返回 Task 对象供前端跟踪进度。
+    
+    task_type:
+        - "names_official": 刷新正版玩家名
+        - "names_offline": 重试离线玩家名
+        - "names_all": 刷新所有玩家名
+        - "playtime": 刷新游戏时长
+        - "all": 执行所有刷新
+    """
+    import asyncio
+    from backend.core import schemas
+    from backend.core.schemas import TaskType, TaskStatus
+
+    if task_manager is None:
+        raise RuntimeError("TaskManager 未设置，无法创建任务")
+
+    task_name_map = {
+        "names_official": "刷新正版玩家名",
+        "names_offline": "重试离线玩家名",
+        "names_all": "刷新所有玩家名",
+        "playtime": "刷新游戏时长",
+        "all": "刷新玩家数据",
+    }
+
+    task = task_manager.create_task(
+        TaskType.REFRESH_PLAYER_DATA,
+        name=task_name_map.get(task_type, "刷新玩家数据"),
+        message="准备刷新玩家数据..."
+    )
+
+    async def _runner():
+        task.status = TaskStatus.RUNNING
+        task.progress = 0
+        task.message = "正在刷新玩家数据..."
+
+        try:
+            results = {}
+
+            if task_type in ("names_official", "all"):
+                task.message = "正在刷新正版玩家名..."
+                task.progress = 10
+                results["names_official"] = await refresh_missing_official_names()
+
+            if task_type in ("names_offline", "all"):
+                task.message = "正在重试离线玩家名..."
+                task.progress = 40
+                results["names_offline"] = await refresh_offline_names()
+
+            if task_type in ("names_all",):
+                task.message = "正在刷新所有玩家名..."
+                task.progress = 30
+                results["names_all"] = await refresh_all_names()
+
+            if task_type in ("playtime", "all"):
+                task.message = "正在刷新游戏时长..."
+                task.progress = 70
+                results["playtime"] = await asyncio.to_thread(recalc_all_play_time)
+
+            task.status = TaskStatus.SUCCESS
+            task.progress = 100
+            task.message = "玩家数据刷新完成"
+            logger.info(f"[PlayerManager] 玩家数据刷新任务完成 | type={task_type} results={results}")
+
+        except Exception as e:
+            task.status = TaskStatus.FAILED
+            task.error = str(e)
+            task.message = "刷新玩家数据失败"
+            logger.opt(exception=e).error(f"[PlayerManager] 玩家数据刷新任务失败 | type={task_type}")
+
+        finally:
+            try:
+                task_manager.clear_finished_task(task.id)
+            except Exception:
+                pass
+
+    asyncio.create_task(_runner())
+    return task

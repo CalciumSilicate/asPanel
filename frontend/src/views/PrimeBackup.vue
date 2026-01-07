@@ -355,6 +355,7 @@ const installPB = async (server) => {
     installingServerId.value = server.id
     await apiClient.post(`/api/plugins/server/${server.id}/install/from-online`, null, { params: { plugin_id: 'prime_backup', tag_name: 'latest' } })
     ElNotification({ title: '安装成功', message: `已为 ${server.name} 安装 prime_backup`, type: 'success' })
+    fetchTasks().catch(() => {})
     // 安装后刷新所有服务器的插件状态
     await fetchAllServerPlugins()
   } catch (e) {
@@ -379,6 +380,7 @@ const updatePB = async (server) => {
     updatingServerId.value = server.id
     await apiClient.post(`/api/plugins/server/${server.id}/install/from-online`, null, { params: { plugin_id: 'prime_backup', tag_name: 'latest' } })
     ElNotification({ title: '更新成功', message: `已为 ${server.name} 更新 prime_backup 至最新版本`, type: 'success' })
+    fetchTasks().catch(() => {})
     // 更新后刷新所有服务器的插件状态
     await fetchAllServerPlugins()
   } catch (e) {
@@ -402,6 +404,7 @@ const doExport = async (row) => {
       URL.revokeObjectURL(url)
     } else {
       ElMessage.success('导出任务已发起')
+      fetchTasks().catch(() => {})
     }
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || '下载失败')

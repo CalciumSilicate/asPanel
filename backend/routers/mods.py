@@ -5,7 +5,7 @@ import json
 import os
 import shutil
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -18,8 +18,8 @@ from backend.core.constants import TEMP_PATH
 from backend.core.utils import get_file_md5, get_file_sha256, get_size_bytes, get_file_sha1
 from backend.core.database import get_db, SessionLocal
 from backend.core.logger import logger
-from backend.core.schemas import Role, ServerCoreConfig, ModDBCreate, ServerModsCount
-from backend.core.dependencies import mod_manager
+from backend.core.schemas import Role, ServerCoreConfig, ModDBCreate, ServerModsCount, TaskType, TaskStatus
+from backend.core.dependencies import mod_manager, task_manager
 
 router = APIRouter(prefix="/api", tags=["Mods"])
 
@@ -339,6 +339,14 @@ async def install_from_modrinth(
         raise HTTPException(status_code=404, detail='Server not found')
     core = ServerCoreConfig.model_validate(json.loads(server.core_config))
 
+    # Create task for tracking
+    task = task_manager.create_task(
+        TaskType.INSTALL_MOD,
+        name=f"安装模组 {payload.project_id}",
+        message=f"正在从 Modrinth 下载模组..."
+    )
+    task.status = TaskStatus.RUNNING
+
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
         version_id = payload.version_id
         if not version_id:
@@ -467,7 +475,14 @@ async def install_from_modrinth(
                 db_rec = crud.create_mod_record(db, rec)
                 crud.add_server_to_mod(db, db_rec.id, payload.server_id)
 
-            return {'message': '安装成功', 'file_name': target.name}
+            task.status = TaskStatus.SUCCESS
+            task.progress = 100
+            task.message = f"模组 {target.name} 安装成功"
+            return {'message': '安装成功', 'file_name': target.name, 'task_id': task.id}
+        except Exception as e:
+            task.status = TaskStatus.FAILED
+            task.error = str(e)
+            raise
         finally:
             if tmp.exists():
                 try:
@@ -482,7 +497,12 @@ async def _job_check_updates(server_id: int):
 
 
 @router.get('/mods/check-updates/{server_id}')
-async def check_updates(server_id: int, background_tasks: BackgroundTasks, _user=Depends(require_role(Role.ADMIN))):
-    """将检查更新任务放入后台，立即返回提示前端稍后刷新。"""
-    background_tasks.add_task(mod_manager.check_updates_background, server_id)
-    return {'status': 'accepted', 'message': '检查任务已开始，请稍后刷新'}
+async def check_updates(server_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
+    """启动检查模组更新任务，返回任务 ID 供前端跟踪进度。"""
+    from backend.core import crud
+    server = crud.get_server_by_id(db, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail='服务器不存在')
+    
+    task = mod_manager.start_check_updates_task(server_id, server.name)
+    return {'status': 'accepted', 'message': '检查任务已开始', 'task_id': task.id}

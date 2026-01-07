@@ -46,6 +46,13 @@ class ModManager:
     # key: project_id → value: (ts, slug or None)
     _project_slug_cache: Dict[str, Any] = {}
 
+    def __init__(self, task_manager=None):
+        self.task_manager = task_manager
+
+    def set_task_manager(self, task_manager):
+        """设置 TaskManager 实例（用于延迟注入）"""
+        self.task_manager = task_manager
+
     # ---------- 路径与通用构件 ----------
     @staticmethod
     def mods_dir_for_server(server: Any) -> Path:
@@ -627,7 +634,175 @@ class ModManager:
         raise HTTPException(status_code=400, detail='不支持的 source')
 
     # ---------- 后台任务 ----------
+    def start_check_updates_task(self, server_id: int, server_name: str) -> _schemas.Task:
+        """创建并启动模组更新检查任务，返回 Task 对象供前端跟踪进度。"""
+        import asyncio
+        from backend.core.schemas import TaskType, TaskStatus
+
+        if self.task_manager is None:
+            raise RuntimeError("TaskManager 未设置，无法创建任务")
+
+        task = self.task_manager.create_task(
+            TaskType.CHECK_MOD_UPDATES,
+            name=f"检查模组更新：{server_name}",
+            message="准备检查模组更新..."
+        )
+
+        async def _runner():
+            task.status = TaskStatus.RUNNING
+            task.progress = 0
+            task.message = "正在检查模组更新..."
+
+            try:
+                await self._do_check_updates(task, server_id)
+                task.status = TaskStatus.SUCCESS
+                task.progress = 100
+                task.message = "模组更新检查完成"
+            except Exception as e:
+                task.status = TaskStatus.FAILED
+                task.error = str(e)
+                task.message = "检查模组更新失败"
+                logger.opt(exception=e).error(f"检查服务器 {server_id} 的模组更新失败")
+            finally:
+                try:
+                    self.task_manager.clear_finished_task(task.id)
+                except Exception:
+                    pass
+
+        asyncio.create_task(_runner())
+        return task
+
+    async def _do_check_updates(self, task: _schemas.Task, server_id: int):
+        """实际执行模组更新检查逻辑"""
+        from backend.core.schemas import ServerCoreConfig, TaskStatus
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            with SessionLocal() as db:
+                server = crud.get_server_by_id(db, server_id)
+                if not server:
+                    raise ValueError(f"服务器 {server_id} 不存在")
+                
+                core = ServerCoreConfig.model_validate(json.loads(server.core_config))
+                preferred_loader = (
+                    'forge' if core.server_type == 'forge' else (
+                        'fabric' if core.is_fabric else (
+                            'velocity' if core.server_type == 'velocity' else None
+                        )
+                    )
+                )
+
+                task.message = "正在获取模组列表..."
+                task.progress = 10
+                mods = await self.list_server_mods(server, db=db, skip_enrich=True)
+                data = mods.get('data', [])
+
+                modrinth_mods = [m for m in data if (m.get('meta') or {}).get('source') == 'modrinth']
+                total = len(modrinth_mods)
+                checked = 0
+                updates_found = 0
+
+                for m in modrinth_mods:
+                    meta = m.get('meta') or {}
+                    project_id = meta.get('modrinth_project_id') or meta.get('id')
+                    if not project_id:
+                        checked += 1
+                        continue
+
+                    task.progress = 10 + int(80 * checked / max(total, 1))
+                    task.message = f"正在检查 {meta.get('name') or m.get('file_name')}... ({checked}/{total})"
+
+                    r = await client.get(f'https://api.modrinth.com/v2/project/{project_id}/version')
+                    if r.status_code != 200:
+                        checked += 1
+                        continue
+                    versions = r.json() or []
+
+                    def is_compatible(v: Dict[str, Any]) -> bool:
+                        gv = v.get('game_versions') or []
+                        ld = v.get('loaders') or []
+                        is_velocity = core.server_type == 'velocity'
+                        if (not is_velocity) and core.core_version and core.core_version not in gv:
+                            return False
+                        if preferred_loader and preferred_loader not in ld:
+                            return False
+                        return True
+
+                    compat = [v for v in versions if is_compatible(v)]
+
+                    def _sort_key(v):
+                        return v.get('date_published') or v.get('version_number') or ''
+
+                    compat.sort(key=_sort_key, reverse=True)
+
+                    current_version = (meta.get('version') or '').strip()
+                    if compat:
+                        latest_v = compat[0]
+                        latest_number = latest_v.get('version_number')
+                        latest_id = latest_v.get('id')
+                        if latest_number and current_version and latest_number != current_version:
+                            updates_found += 1
+                            try:
+                                file_hash = m.get('hash_md5') or get_file_md5(Path(m['path']))
+                                db_mod = crud.get_mod_by_hash(db, hash_md5=file_hash) if file_hash else None
+                                if db_mod:
+                                    mm = {}
+                                    try:
+                                        mm = json.loads(db_mod.meta) if db_mod.meta else {}
+                                    except Exception:
+                                        mm = {}
+                                    mm['modrinth_update_available'] = True
+                                    mm['modrinth_latest_version_number'] = latest_number
+                                    if latest_id:
+                                        mm['modrinth_latest_version_id'] = latest_id
+                                    db_mod.meta = json.dumps(mm)
+                                    db.add(db_mod)
+                                    db.commit()
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                file_hash = m.get('hash_md5') or get_file_md5(Path(m['path']))
+                                db_mod = crud.get_mod_by_hash(db, hash_md5=file_hash) if file_hash else None
+                                if db_mod:
+                                    mm = {}
+                                    try:
+                                        mm = json.loads(db_mod.meta) if db_mod.meta else {}
+                                    except Exception:
+                                        mm = {}
+                                    mm.pop('modrinth_update_available', None)
+                                    mm.pop('modrinth_latest_version_number', None)
+                                    mm.pop('modrinth_latest_version_id', None)
+                                    db_mod.meta = json.dumps(mm)
+                                    db.add(db_mod)
+                                    db.commit()
+                            except Exception:
+                                pass
+                    else:
+                        try:
+                            file_hash = m.get('hash_md5') or get_file_md5(Path(m['path']))
+                            db_mod = crud.get_mod_by_hash(db, hash_md5=file_hash) if file_hash else None
+                            if db_mod:
+                                mm = {}
+                                try:
+                                    mm = json.loads(db_mod.meta) if db_mod.meta else {}
+                                except Exception:
+                                    mm = {}
+                                mm.pop('modrinth_update_available', None)
+                                mm.pop('modrinth_latest_version_number', None)
+                                mm.pop('modrinth_latest_version_id', None)
+                                db_mod.meta = json.dumps(mm)
+                                db.add(db_mod)
+                                db.commit()
+                        except Exception:
+                            pass
+
+                    checked += 1
+
+                task.progress = 95
+                task.message = f"检查完成，发现 {updates_found} 个可更新模组"
+
     async def check_updates_background(self, server_id: int):
+        """兼容旧接口：直接执行检查（无 TaskManager 跟踪）"""
         from backend.core.schemas import ServerCoreConfig
         async with httpx.AsyncClient(timeout=30) as client:
             with SessionLocal() as db:
@@ -643,8 +818,7 @@ class ModManager:
                     )
                 )
 
-                # 仅快速列举（跳过补全），减少开销
-                mods = await self.list_server_mods(server, db=db, skip_enrich=True)  # type: ignore
+                mods = await self.list_server_mods(server, db=db, skip_enrich=True)
                 data = mods.get('data', [])
 
                 for m in data:

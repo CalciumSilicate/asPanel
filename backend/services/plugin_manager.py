@@ -32,11 +32,16 @@ def _plugin_cache_key(fp: Path):
 
 
 class PluginManager:
-    def __init__(self, dependency_handler: DependencyHandler):
+    def __init__(self, dependency_handler: DependencyHandler, task_manager=None):
         # 确保上传插件的存储目录存在
         UPLOADED_PLUGINS_PATH.mkdir(parents=True, exist_ok=True)
         TEMP_PATH.mkdir(parents=True, exist_ok=True)
         self.dependency_handler = dependency_handler
+        self.task_manager = task_manager
+
+    def set_task_manager(self, task_manager):
+        """设置 TaskManager 实例（用于延迟注入）"""
+        self.task_manager = task_manager
 
     @staticmethod
     def read_meta(fp: str | Path, plugin_type: ServerPluginType) -> Tuple[bool, Dict[str, Any]]:
@@ -370,20 +375,154 @@ class PluginManager:
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             return False, {}
 
-    # 这是一个辅助函数，将在 plugin_manager 中被调用
+    def start_install_plugin_task(
+            self,
+            server_id: int,
+            server_name: str,
+            plugin_id: str,
+            tag_name: str,
+            mcdr_plugins_catalogue: schemas.PluginCatalogue,
+            get_server_by_id_func,
+            db_session_factory
+    ) -> schemas.Task:
+        """
+        创建并启动插件安装任务，返回 Task 对象供前端跟踪进度。
+        """
+        import asyncio
+        from backend.core.schemas import TaskType, TaskStatus
+
+        if self.task_manager is None:
+            raise RuntimeError("TaskManager 未设置，无法创建任务")
+
+        task = self.task_manager.create_task(
+            TaskType.INSTALL_PLUGIN,
+            name=f"安装插件：{plugin_id}",
+            message=f"准备安装到服务器 {server_name}"
+        )
+
+        async def _runner():
+            task.status = TaskStatus.RUNNING
+            task.progress = 0
+            task.message = f"正在安装插件 {plugin_id}..."
+
+            try:
+                await self._do_install_plugin(
+                    task=task,
+                    server_id=server_id,
+                    plugin_id=plugin_id,
+                    tag_name=tag_name,
+                    mcdr_plugins_catalogue=mcdr_plugins_catalogue,
+                    get_server_by_id_func=get_server_by_id_func,
+                    db_session_factory=db_session_factory
+                )
+                task.status = TaskStatus.SUCCESS
+                task.progress = 100
+                task.message = f"插件 {plugin_id} 安装成功"
+            except Exception as e:
+                task.status = TaskStatus.FAILED
+                task.error = str(e)
+                task.message = f"安装插件 {plugin_id} 失败"
+                logger.opt(exception=e).error(f"安装插件 {plugin_id} 到服务器 {server_id} 失败")
+            finally:
+                try:
+                    self.task_manager.clear_finished_task(task.id)
+                except Exception:
+                    pass
+
+        asyncio.create_task(_runner())
+        return task
+
+    async def _do_install_plugin(
+            self,
+            task: schemas.Task,
+            server_id: int,
+            plugin_id: str,
+            tag_name: str,
+            mcdr_plugins_catalogue: schemas.PluginCatalogue,
+            get_server_by_id_func,
+            db_session_factory
+    ):
+        """实际执行插件安装逻辑"""
+        from collections import deque
+        from backend.core.schemas import TaskStatus
+
+        db = db_session_factory()
+        try:
+            server = get_server_by_id_func(db, server_id)
+            install_queue = deque([(plugin_id, tag_name)])
+            processed_plugins: Set[str] = set()
+            total_plugins = 1
+
+            logger.info(f"开始为服务器 {server.name} 安装插件 {plugin_id} 及其依赖...")
+            task.message = f"正在分析插件 {plugin_id} 的依赖..."
+            task.progress = 5
+
+            while install_queue:
+                current_plugin_id, current_tag = install_queue.popleft()
+                if current_plugin_id in processed_plugins:
+                    continue
+
+                progress_base = 10 + int(80 * len(processed_plugins) / max(total_plugins, 1))
+                task.progress = min(progress_base, 90)
+                task.message = f"正在处理插件: {current_plugin_id}"
+
+                logger.info(f"处理插件: {current_plugin_id}")
+
+                plugin_info = mcdr_plugins_catalogue.plugins.get(current_plugin_id)
+                if not plugin_info:
+                    logger.error(f"插件 '{current_plugin_id}' 在市场中未找到，跳过。")
+                    continue
+
+                release_info = plugin_info.release
+                target_release = next((r for r in release_info.releases if r.meta.version == current_tag),
+                                      None) if current_tag != "latest" else next(
+                    (r for r in release_info.releases if r.meta.version == release_info.latest_version), None)
+
+                if not target_release or not target_release.asset:
+                    logger.error(f"找不到插件 '{current_plugin_id}' 版本 '{current_tag}' 的可下载文件。")
+                    continue
+
+                task.message = f"正在下载 {target_release.asset.name}..."
+                logger.info(f"正在下载并安装 {target_release.asset.name}...")
+                await PluginManager.install_from_url(
+                    server_path=Path(server.path),
+                    download_url=target_release.asset.browser_download_url,
+                    file_name=target_release.asset.name
+                )
+                processed_plugins.add(current_plugin_id)
+
+                if target_release.meta and target_release.meta.requirements:
+                    task.message = f"正在安装 {current_plugin_id} 的 Python 依赖..."
+                    logger.info(f"正在为 {current_plugin_id} 安装 Python requirements: {target_release.meta.requirements}")
+                    await self.dependency_handler.install_python_requirements(target_release.meta.requirements)
+
+                if target_release.meta and target_release.meta.dependencies:
+                    logger.info(f"正在处理 {current_plugin_id} 的 MCDR 依赖: {target_release.meta.dependencies}")
+                    for dep_id, dep_specifier in target_release.meta.dependencies.items():
+                        if dep_id == "mcdreforged":
+                            if not await self.dependency_handler.check_mcdreforged_version(dep_specifier):
+                                raise RuntimeError(f"MCDReforged 版本不满足 '{current_plugin_id}' 的要求!")
+                        elif dep_id not in processed_plugins:
+                            install_queue.append((dep_id, "latest"))
+                            total_plugins += 1
+
+            task.progress = 95
+            task.message = f"插件 {plugin_id} 及其依赖安装完成"
+            logger.info(f"插件 {plugin_id} 及其所有依赖项已成功安装到服务器 {server.name}。")
+
+        finally:
+            db.close()
+
     async def process_installation_task(
             self,
             server_id: int,
             plugin_id: str,
             tag_name: str,
-            # 传递依赖注入的函数或类实例
             mcdr_plugins_catalogue: schemas.PluginCatalogue,
             get_server_by_id_func,
             db_session_factory
     ):
-        """
-        完整的后台安装任务，包括递归依赖处理。
-        """
+        """兼容旧接口：直接执行安装（无 TaskManager 跟踪）"""
         from collections import deque
         db = db_session_factory()
         try:
@@ -405,7 +544,6 @@ class PluginManager:
                     logger.error(f"插件 '{current_plugin_id}' 在市场中未找到，跳过。")
                     continue
 
-                # 查找目标版本
                 release_info = plugin_info.release
                 target_release = next((r for r in release_info.releases if r.meta.version == current_tag),
                                       None) if current_tag != "latest" else next(
@@ -415,7 +553,6 @@ class PluginManager:
                     logger.error(f"找不到插件 '{current_plugin_id}' 版本 '{current_tag}' 的可下载文件。")
                     continue
 
-                # 1. 安装插件本体
                 logger.info(f"正在下载并安装 {target_release.asset.name}...")
                 await PluginManager.install_from_url(
                     server_path=Path(server.path),
@@ -424,29 +561,23 @@ class PluginManager:
                 )
                 processed_plugins.add(current_plugin_id)
 
-                # 2. 处理 Python 依赖
                 if target_release.meta and target_release.meta.requirements:
-                    logger.info(
-                        f"正在为 {current_plugin_id} 安装 Python requirements: {target_release.meta.requirements}")
+                    logger.info(f"正在为 {current_plugin_id} 安装 Python requirements: {target_release.meta.requirements}")
                     await self.dependency_handler.install_python_requirements(target_release.meta.requirements)
 
-                # 3. 处理 MCDR 插件依赖
                 if target_release.meta and target_release.meta.dependencies:
                     logger.info(f"正在处理 {current_plugin_id} 的 MCDR 依赖: {target_release.meta.dependencies}")
                     for dep_id, dep_specifier in target_release.meta.dependencies.items():
                         if dep_id == "mcdreforged":
                             if not await self.dependency_handler.check_mcdreforged_version(dep_specifier):
-                                # 如果版本不匹配，可以选择是中止还是仅警告
                                 raise RuntimeError(f"MCDReforged 版本不满足 '{current_plugin_id}' 的要求!")
                         elif dep_id not in processed_plugins:
-                            # 对于插件依赖，我们总是尝试安装最新版，因为解析版本范围并从市场找到匹配版本非常复杂
-                            # 这是一个简化的、但通常有效的策略
                             install_queue.append((dep_id, "latest"))
 
             logger.info(f"插件 {plugin_id} 及其所有依赖项已成功安装到服务器 {server.name}。")
 
         except Exception as e:
-            raise e
             logger.error(f"为服务器 {server_id} 安装插件 {plugin_id} 时发生严重错误: {e}", exc_info=True)
+            raise
         finally:
             db.close()

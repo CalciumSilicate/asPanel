@@ -51,38 +51,35 @@ async def get_server_plugins(server_id: int, db: Session = Depends(get_db), _use
 
 @router.post(
     "/plugins/server/{server_id}/install/from-online",
-    status_code=status.HTTP_202_ACCEPTED  # 使用 202 Accepted 表示请求已接受，正在后台处理
+    status_code=status.HTTP_202_ACCEPTED
 )
 async def install_plugin_from_online(
         server_id: int,
-        background_tasks: BackgroundTasks,
         plugin_id: str = Query(...),
         tag_name: str = Query("latest"),
         db: Session = Depends(get_db),
         _user=Depends(require_role(Role.HELPER))
 ):
     """
-    从 MCDR 官方市场安装插件，并在后台处理其所有依赖。
+    从 MCDR 官方市场安装插件，返回任务 ID 供前端跟踪进度。
     """
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
-    # 仅在 API 层做初步检查，确保插件存在于市场
     catalogue = await get_mcdr_catalogue()
     if plugin_id not in catalogue.plugins:
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found in catalogue.")
-    # 将耗时任务添加到后台
-    background_tasks.add_task(
-        plugin_manager.process_installation_task,
+    
+    task = plugin_manager.start_install_plugin_task(
         server_id=server.id,
+        server_name=server.name,
         plugin_id=plugin_id,
         tag_name=tag_name,
-        # 传递依赖
         mcdr_plugins_catalogue=catalogue,
         get_server_by_id_func=crud.get_server_by_id,
-        db_session_factory=SessionLocal  # 传递 Session 工厂，以便后台任务创建自己的 DB session
+        db_session_factory=SessionLocal
     )
-    return {"message": f"Plugin installation for '{plugin_id}' has been started in the background."}
+    return {"message": f"Plugin installation for '{plugin_id}' has been started.", "task_id": task.id}
 
 
 @router.post("/plugins/upload", response_model=schemas.PluginDBRecord)
