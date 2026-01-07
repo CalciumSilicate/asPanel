@@ -8,20 +8,20 @@ from typing import Callable
 
 from backend.core import security, crud, models, schemas
 from backend.core.database import get_db
+from backend.services.permission_service import PermissionService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
 
 
 def require_role(required_role: schemas.Role) -> Callable:
     def role_checker(current_user: models.User = Depends(get_current_user)) -> models.User:
-        user_role_level = schemas.ROLE_HIERARCHY.get(current_user.role, -1)
+        user_role_level = PermissionService.get_user_role_level(current_user.role)
         required_role_level = schemas.ROLE_HIERARCHY[required_role]
         if user_role_level < required_role_level:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"需要 '{required_role.value}' 或更高权限才能执行此操作。"
             )
-
         return current_user
 
     return role_checker

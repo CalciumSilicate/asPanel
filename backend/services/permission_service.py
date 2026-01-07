@@ -1,10 +1,11 @@
 """权限服务层 - 统一处理用户权限和服务器访问控制"""
 import json
-from typing import List, Optional
+from typing import List, Optional, Callable
 from sqlalchemy.orm import Session
-from fastapi import HTTPException, status
+from fastapi import Depends, HTTPException, status
 
 from backend.core import models, crud, schemas
+from backend.core.database import get_db
 
 
 class PermissionService:
@@ -21,6 +22,39 @@ class PermissionService:
             return schemas.ROLE_HIERARCHY.get(role_enum, -1)
         except ValueError:
             return -1
+    
+    @staticmethod
+    def get_user_group_role_level(db: Session, user: models.User, group_id: int) -> int:
+        """获取用户在特定组的角色等级"""
+        user_perms = crud.get_user_group_permissions(db, user.id)
+        for perm in user_perms:
+            if perm.group_id == group_id:
+                return PermissionService.get_user_role_level(perm.role)
+        return -1
+    
+    @staticmethod
+    def get_effective_role_level(db: Session, user: models.User, server_id: Optional[int] = None) -> int:
+        """获取有效权限等级（全局和组权限取高）"""
+        global_level = PermissionService.get_user_role_level(user.role)
+        
+        if server_id is None:
+            return global_level
+        
+        # 获取服务器所属的组
+        server_groups = crud.get_server_link_groups_for_servers(db, [server_id])
+        if not server_groups:
+            return global_level
+        
+        # 获取用户在这些组中的最高权限
+        user_perms = crud.get_user_group_permissions(db, user.id)
+        max_group_level = -1
+        for perm in user_perms:
+            if perm.group_id in server_groups:
+                level = PermissionService.get_user_role_level(perm.role)
+                if level > max_group_level:
+                    max_group_level = level
+        
+        return max(global_level, max_group_level)
     
     @staticmethod
     def check_role(user: models.User, required_role: schemas.Role) -> bool:
@@ -54,9 +88,9 @@ class PermissionService:
         if not server:
             return False
         
-        # 检查用户是否有该服务器所在组的权限
+        # 检查用户是否有该服务器所在组的权限（且组内角色 >= GUEST）
         user_perms = crud.get_user_group_permissions(db, user.id)
-        user_group_ids = {p.group_id for p in user_perms}
+        user_group_ids = {p.group_id for p in user_perms if PermissionService.get_user_role_level(p.role) >= 0}
         
         # 获取服务器所属的组
         server_groups = crud.get_server_link_groups_for_servers(db, [server_id])
@@ -128,6 +162,42 @@ class PermissionService:
             return True
         
         return False
+    
+    @staticmethod
+    def increment_token_version(db: Session, user: models.User) -> int:
+        """增加用户的 token_version，使所有现有 token 失效"""
+        user.token_version = (user.token_version or 0) + 1
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user.token_version
+
+
+def require_server_access(server_id_param: str = "server_id") -> Callable:
+    """FastAPI 依赖工厂函数，检查用户是否有权访问指定服务器"""
+    from backend.core.auth import get_current_user
+    
+    def server_access_checker(
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user),
+        **kwargs
+    ) -> models.User:
+        # 从路径参数或查询参数获取 server_id
+        server_id = kwargs.get(server_id_param)
+        if server_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"缺少 {server_id_param} 参数"
+            )
+        
+        if not PermissionService.can_access_server(db, current_user, int(server_id)):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="您没有权限访问此服务器"
+            )
+        return current_user
+    
+    return server_access_checker
 
 
 # 单例实例

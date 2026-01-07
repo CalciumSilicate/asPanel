@@ -104,6 +104,30 @@ class ServerLinkGroup(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class GroupServer(Base):
+    """服务器组与服务器的关联表 - 替代 ServerLinkGroup.server_ids JSON 字段"""
+    __tablename__ = "group_servers"
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("server_link_groups.id", ondelete="CASCADE"), nullable=False, index=True)
+    server_id = Column(Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("group_id", "server_id", name="uq_group_server"),
+    )
+
+
+class GroupDataSource(Base):
+    """服务器组与数据源的关联表 - 替代 ServerLinkGroup.data_source_ids JSON 字段"""
+    __tablename__ = "group_data_sources"
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("server_link_groups.id", ondelete="CASCADE"), nullable=False, index=True)
+    data_source_id = Column(Integer, nullable=False, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("group_id", "data_source_id", name="uq_group_data_source"),
+    )
+
+
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
     id = Column(Integer, primary_key=True, index=True)

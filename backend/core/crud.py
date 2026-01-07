@@ -1068,6 +1068,111 @@ def get_server_link_groups_for_servers(db: Session, server_ids: List[int]) -> Li
     return list(group_ids)
 
 
+def get_server_link_groups_for_servers_v2(db: Session, server_ids: List[int]) -> List[int]:
+    """
+    使用关联表查询服务器所属的服务器组 ID 列表（新版本）
+    """
+    if not server_ids:
+        return []
+    
+    group_ids = db.query(models.GroupServer.group_id).filter(
+        models.GroupServer.server_id.in_(server_ids)
+    ).distinct().all()
+    
+    return [g[0] for g in group_ids]
+
+
+def get_servers_in_group(db: Session, group_id: int) -> List[int]:
+    """获取组内所有服务器 ID（使用关联表）"""
+    rows = db.query(models.GroupServer.server_id).filter(
+        models.GroupServer.group_id == group_id
+    ).all()
+    return [r[0] for r in rows]
+
+
+def get_servers_in_group_legacy(db: Session, group_id: int) -> List[int]:
+    """获取组内所有服务器 ID（使用 JSON 字段，向后兼容）"""
+    group = db.query(models.ServerLinkGroup).filter(
+        models.ServerLinkGroup.id == group_id
+    ).first()
+    if not group:
+        return []
+    try:
+        return json.loads(group.server_ids or "[]")
+    except:
+        return []
+
+
+def add_server_to_group(db: Session, group_id: int, server_id: int) -> bool:
+    """添加服务器到组（同时更新关联表和 JSON 字段）"""
+    existing = db.query(models.GroupServer).filter(
+        models.GroupServer.group_id == group_id,
+        models.GroupServer.server_id == server_id
+    ).first()
+    if not existing:
+        db.add(models.GroupServer(group_id=group_id, server_id=server_id))
+    
+    group = db.query(models.ServerLinkGroup).filter(
+        models.ServerLinkGroup.id == group_id
+    ).first()
+    if group:
+        try:
+            ids = json.loads(group.server_ids or "[]")
+            if server_id not in ids:
+                ids.append(server_id)
+                group.server_ids = json.dumps(ids)
+        except:
+            group.server_ids = json.dumps([server_id])
+    
+    db.commit()
+    return True
+
+
+def remove_server_from_group(db: Session, group_id: int, server_id: int) -> bool:
+    """从组中移除服务器（同时更新关联表和 JSON 字段）"""
+    db.query(models.GroupServer).filter(
+        models.GroupServer.group_id == group_id,
+        models.GroupServer.server_id == server_id
+    ).delete()
+    
+    group = db.query(models.ServerLinkGroup).filter(
+        models.ServerLinkGroup.id == group_id
+    ).first()
+    if group:
+        try:
+            ids = json.loads(group.server_ids or "[]")
+            if server_id in ids:
+                ids.remove(server_id)
+                group.server_ids = json.dumps(ids)
+        except:
+            pass
+    
+    db.commit()
+    return True
+
+
+def sync_group_servers_from_json(db: Session, group_id: int):
+    """从 JSON 字段同步到关联表（用于迁移）"""
+    group = db.query(models.ServerLinkGroup).filter(
+        models.ServerLinkGroup.id == group_id
+    ).first()
+    if not group:
+        return
+    
+    try:
+        json_ids = set(json.loads(group.server_ids or "[]"))
+    except:
+        json_ids = set()
+    
+    table_ids = set(get_servers_in_group(db, group_id))
+    
+    for sid in json_ids - table_ids:
+        if db.query(models.Server).filter(models.Server.id == sid).first():
+            db.add(models.GroupServer(group_id=group_id, server_id=sid))
+    
+    db.commit()
+
+
 def get_server_link_groups_for_player(db: Session, player_uuid: str) -> List[dict]:
     """
     根据玩家 UUID 获取其所属的服务器组列表（包含组ID和名称）。

@@ -23,6 +23,8 @@ from backend.core.constants import AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, AVATA
 from backend.core.rate_limit import login_limiter
 from backend.core.utils import get_str_md5, is_valid_mc_name
 from backend.core.schemas import Role, UserUpdate, UserSelfUpdate, PasswordChange
+from backend.core.bind_verification import bind_verification_service
+from backend.core.schemas import BindRequestCreate, BindRequestResponse, BindVerifyRequest, BindPendingResponse
 
 router = APIRouter(
     prefix="/api",
@@ -215,44 +217,9 @@ async def update_current_user(
             raise HTTPException(400, "QQ 必须为纯数字")
         current_user.qq = qq_str
     
-    # 处理玩家绑定
+    # 处理玩家绑定 - 现在只能通过验证流程绑定
     if payload.player_name is not None:
-        player_name = payload.player_name.strip()
-        if player_name:
-            player = crud.get_player_by_name(db, player_name)
-            if not player:
-                raise HTTPException(400, f"玩家 '{player_name}' 不存在")
-            # 检查该玩家是否已被其他用户绑定
-            existing_user = db.query(models.User).filter(
-                models.User.bound_player_id == player.id,
-                models.User.id != current_user.id
-            ).first()
-            if existing_user:
-                raise HTTPException(400, "该玩家已被其他账号绑定")
-            current_user.bound_player_id = player.id
-            
-            # 更新服务器组权限
-            import json
-            joined_servers = crud.get_servers_player_joined(db, player.uuid)
-            server_ids = [s.id for s in joined_servers]
-            server_link_group_ids = crud.get_server_link_groups_for_servers(db, server_ids)
-            current_user.server_link_group_ids = json.dumps(server_link_group_ids)
-
-            # Sync permissions (New)
-            existing_perms = crud.get_user_group_permissions(db, current_user.id)
-            existing_map = {p.group_id: p.role for p in existing_perms}
-            new_perms = []
-            for gid in server_link_group_ids:
-                role = existing_map.get(gid, "USER")
-                new_perms.append(schemas.GroupPermission(group_id=gid, role=role, group_name="")) # Name will be filled below
-            crud.update_user_group_permissions(db, current_user.id, new_perms)
-
-        else:
-            # 传空字符串表示解绑
-            current_user.bound_player_id = None
-            current_user.server_link_group_ids = "[]"
-            # Clear permissions
-            crud.update_user_group_permissions(db, current_user.id, [])
+        raise HTTPException(400, "玩家绑定需要通过验证流程，请使用 /users/me/bind-request 接口")
     
     db.add(current_user)
     db.commit()
@@ -290,6 +257,127 @@ async def update_current_user(
             result['mc_uuid'] = bound_player.uuid
             result['mc_name'] = bound_player.player_name
     return result
+
+
+@router.post("/users/me/bind-request", response_model=BindRequestResponse)
+async def request_player_bind(
+    payload: BindRequestCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """请求绑定玩家 - 返回验证码，需在游戏内确认"""
+    player_name = payload.player_name.strip()
+    if not player_name:
+        raise HTTPException(400, "玩家名不能为空")
+    if not is_valid_mc_name(player_name):
+        raise HTTPException(400, "玩家名格式不正确")
+    
+    # 检查玩家是否存在
+    player = crud.get_player_by_name(db, player_name)
+    if not player:
+        raise HTTPException(400, f"玩家 '{player_name}' 不存在")
+    
+    # 检查是否已被绑定
+    existing_user = db.query(models.User).filter(
+        models.User.bound_player_id == player.id,
+        models.User.id != current_user.id
+    ).first()
+    if existing_user:
+        raise HTTPException(400, "该玩家已被其他账号绑定")
+    
+    # 创建绑定请求
+    code = bind_verification_service.create_bind_request(current_user.id, player_name)
+    
+    return BindRequestResponse(
+        code=code,
+        player_name=player_name,
+        expires_in_seconds=300,
+        message=f"请在游戏内执行 /aspanel bind {code} 确认绑定"
+    )
+
+
+@router.get("/users/me/bind-pending", response_model=BindPendingResponse)
+async def get_pending_bind(current_user: models.User = Depends(get_current_user)):
+    """获取当前待验证的绑定请求"""
+    pending = bind_verification_service.get_pending_request(current_user.id)
+    if pending:
+        import time
+        return BindPendingResponse(
+            has_pending=True,
+            player_name=pending.player_name,
+            code=pending.code,
+            expires_at=pending.expires_at
+        )
+    return BindPendingResponse(has_pending=False)
+
+
+@router.delete("/users/me/bind-request")
+async def cancel_bind_request(current_user: models.User = Depends(get_current_user)):
+    """取消绑定请求"""
+    cancelled = bind_verification_service.cancel_request(current_user.id)
+    return {"cancelled": cancelled}
+
+
+@router.post("/bind/verify")
+async def verify_player_bind(
+    payload: BindVerifyRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    服务器回调验证绑定 - 由 MCDR 插件调用
+    验证成功后完成玩家绑定
+    """
+    result = bind_verification_service.verify_code(payload.code)
+    if not result:
+        raise HTTPException(400, "验证码无效或已过期")
+    
+    user_id, expected_player_name = result
+    
+    # 验证玩家名匹配（不区分大小写）
+    if payload.player_name.lower() != expected_player_name.lower():
+        raise HTTPException(400, "玩家名不匹配")
+    
+    # 获取用户和玩家
+    user = crud.get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(400, "用户不存在")
+    
+    player = crud.get_player_by_name(db, payload.player_name)
+    if not player:
+        raise HTTPException(400, "玩家不存在")
+    
+    # 检查是否已被绑定
+    existing = db.query(models.User).filter(
+        models.User.bound_player_id == player.id,
+        models.User.id != user_id
+    ).first()
+    if existing:
+        raise HTTPException(400, "该玩家已被其他账号绑定")
+    
+    # 执行绑定
+    user.bound_player_id = player.id
+    
+    # 更新服务器组权限
+    import json
+    joined_servers = crud.get_servers_player_joined(db, player.uuid)
+    server_ids = [s.id for s in joined_servers]
+    server_link_group_ids = crud.get_server_link_groups_for_servers(db, server_ids)
+    user.server_link_group_ids = json.dumps(server_link_group_ids)  # Legacy
+    
+    # Sync permissions
+    existing_perms = crud.get_user_group_permissions(db, user.id)
+    existing_map = {p.group_id: p.role for p in existing_perms}
+    new_perms = []
+    for gid in server_link_group_ids:
+        role = existing_map.get(gid, "USER")
+        new_perms.append(schemas.GroupPermission(group_id=gid, group_name="", role=role))
+    crud.update_user_group_permissions(db, user.id, new_perms)
+    
+    # 增加 token_version 使旧 token 失效
+    from backend.services.permission_service import PermissionService
+    PermissionService.increment_token_version(db, user)
+    
+    return success({"bound": True, "player_name": player.player_name})
 
 
 @router.post("/users/me/password")
@@ -430,8 +518,19 @@ async def update_user(
     u = crud.get_user_by_id(db, user_id)
     if not u:
         raise HTTPException(404, "用户不存在")
+    
+    # OWNER 保护：ADMIN 不能修改 OWNER
+    if u.role == Role.OWNER.value and actor.role != Role.OWNER.value:
+        raise HTTPException(403, "非 OWNER 不能修改 OWNER 用户")
+    
     if payload.role is not None:
         _assert_role_change_allowed(db, actor, u, payload.role)
+    
+    # 如果角色变更，增加 token_version
+    if payload.role is not None and payload.role.value != u.role:
+        from backend.services.permission_service import PermissionService
+        PermissionService.increment_token_version(db, u)
+    
     try:
         u = crud.update_user_fields(db, user_id, payload)
     except ValueError as e:
@@ -625,6 +724,11 @@ async def reset_password(
     u = crud.get_user_by_id(db, user_id)
     if not u:
         raise HTTPException(404, "用户不存在")
+    
+    # OWNER 保护
+    if u.role == Role.OWNER.value and actor.role != Role.OWNER.value:
+        raise HTTPException(403, "非 OWNER 不能重置 OWNER 的密码")
+    
     # 允许重置密码；删除/降级在其它接口限制
     new_password = uuid.uuid4().hex[:12]
     crud.reset_user_password(db, user_id, new_password)
@@ -642,6 +746,11 @@ async def delete_user(
     u = crud.get_user_by_id(db, user_id)
     if not u:
         raise HTTPException(404, "用户不存在")
+    
+    # OWNER 保护
+    if u.role == Role.OWNER.value and actor.role != Role.OWNER.value:
+        raise HTTPException(403, "非 OWNER 不能删除 OWNER 用户")
+    
     if u.role == Role.OWNER.value and crud.count_owners(db) <= 1:
         raise HTTPException(400, "系统必须至少保留 1 个 OWNER，无法删除唯一的 OWNER")
     crud.delete_user_by_id(db, user_id)

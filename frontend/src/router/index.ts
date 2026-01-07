@@ -105,7 +105,7 @@ const routes: RouteRecordRaw[] = [
                 path: 'users',
                 name: 'UserManager',
                 component: () => import('../views/UserManager.vue'),
-                meta: { requiredRole: 'ADMIN' }
+                meta: { requiredRole: 'OWNER' }
             },
             {
                 path: 'tools/litematica',

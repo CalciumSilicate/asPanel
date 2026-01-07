@@ -107,3 +107,40 @@ export const clearUser = () => {
   activeGroupIds.value = []
   avatarVersion.value = 0
 }
+
+// --- Capabilities ---
+export interface Capabilities {
+  canManageUsers: boolean
+  canManageServers: boolean
+  canManagePlugins: boolean
+  canViewConsole: boolean
+  canManageArchives: boolean
+  canViewStatistics: boolean
+  canChat: boolean
+  canManageSettings: boolean
+  canManageServerGroups: boolean
+  canManageMods: boolean
+  canViewDashboard: boolean
+}
+
+export const capabilities = computed<Capabilities>(() => {
+  const level = roleLevel.value
+  return {
+    canViewDashboard: level >= 1,      // USER+
+    canViewStatistics: level >= 1,     // USER+
+    canChat: level >= 1,               // USER+
+    canManageArchives: level >= 2,     // HELPER+
+    canManagePlugins: level >= 2,      // HELPER+
+    canViewConsole: level >= 3,        // ADMIN+
+    canManageServers: level >= 3,      // ADMIN+
+    canManageUsers: level >= 4,        // OWNER only
+    canManageSettings: level >= 3,     // ADMIN+
+    canManageServerGroups: level >= 3, // ADMIN+
+    canManageMods: level >= 3,         // ADMIN+
+  }
+})
+
+// Helper to check capability
+export const can = (capability: keyof Capabilities): boolean => {
+  return capabilities.value[capability]
+}

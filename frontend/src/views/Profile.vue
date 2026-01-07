@@ -147,18 +147,44 @@
 
     <!-- 绑定玩家对话框 -->
     <el-dialog v-model="showBindDialog" title="绑定 MC 玩家" width="400px" @closed="resetBindForm">
-      <el-form :model="bindForm" :rules="bindRules" ref="bindFormRef" label-position="top">
-        <el-form-item label="玩家名" prop="player_name">
-          <el-input v-model="bindForm.player_name" placeholder="请输入 MC 玩家名" />
-        </el-form-item>
-        <div class="bind-tip">
-          <el-icon><InfoFilled /></el-icon>
-          <span>请输入已在服务器中登录过的玩家名</span>
+      <!-- 待验证状态 -->
+      <template v-if="pendingBind">
+        <div class="pending-bind-info">
+          <el-alert type="info" :closable="false" show-icon>
+            <template #title>
+              <span>正在验证玩家: <strong>{{ pendingBind.player_name }}</strong></span>
+            </template>
+          </el-alert>
+          <div class="verification-code-section">
+            <div class="verification-label">请在游戏内输入以下验证码:</div>
+            <div class="verification-code">{{ pendingBind.code }}</div>
+            <div class="verification-expire">
+              验证码将在 {{ formatExpireTime(pendingBind.expires_at) }} 后过期
+            </div>
+          </div>
         </div>
-      </el-form>
+      </template>
+      <!-- 请求绑定表单 -->
+      <template v-else>
+        <el-form :model="bindForm" :rules="bindRules" ref="bindFormRef" label-position="top">
+          <el-form-item label="玩家名" prop="player_name">
+            <el-input v-model="bindForm.player_name" placeholder="请输入 MC 玩家名" />
+          </el-form-item>
+          <div class="bind-tip">
+            <el-icon><InfoFilled /></el-icon>
+            <span>请输入已在服务器中登录过的玩家名，提交后需在游戏内验证</span>
+          </div>
+        </el-form>
+      </template>
       <template #footer>
-        <el-button @click="showBindDialog = false">取消</el-button>
-        <el-button type="primary" @click="bindPlayer" :loading="binding">确认绑定</el-button>
+        <template v-if="pendingBind">
+          <el-button @click="cancelBindRequest" :loading="canceling">取消验证</el-button>
+          <el-button type="primary" @click="showBindDialog = false">关闭</el-button>
+        </template>
+        <template v-else>
+          <el-button @click="showBindDialog = false">取消</el-button>
+          <el-button type="primary" @click="requestBindPlayer" :loading="binding">请求绑定</el-button>
+        </template>
       </template>
     </el-dialog>
   </div>
@@ -170,7 +196,7 @@ import { UserFilled, Camera, InfoFilled } from '@element-plus/icons-vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { user, fullAvatarUrl, fetchUser, refreshAvatar } from '@/store/user'
 import AvatarUploader from '@/components/AvatarUploader.vue'
-import apiClient from '@/api'
+import apiClient, { bindApi } from '@/api'
 
 // 头像对话框
 const showAvatarDialog = ref(false)
@@ -208,6 +234,15 @@ const bindForm = reactive({
   player_name: ''
 })
 const binding = ref(false)
+const canceling = ref(false)
+
+// 待验证绑定信息
+interface PendingBind {
+  player_name: string
+  code: string
+  expires_at: string
+}
+const pendingBind = ref<PendingBind | null>(null)
 
 const bindRules: FormRules = {
   player_name: [
@@ -274,6 +309,7 @@ const mcAvatarUrl = computed(() => {
 // 初始化
 onMounted(async () => {
   await loadUserInfo()
+  await checkPendingBind()
   await fetchStats()
 })
 
@@ -386,7 +422,23 @@ function resetBindForm() {
   bindFormRef.value?.resetFields()
 }
 
-async function bindPlayer() {
+async function checkPendingBind() {
+  try {
+    const res = await bindApi.getPending()
+    if (res.data && res.data.code) {
+      pendingBind.value = res.data
+    } else {
+      pendingBind.value = null
+    }
+  } catch (e: any) {
+    if (e.response?.status !== 404) {
+      console.error('Failed to check pending bind:', e)
+    }
+    pendingBind.value = null
+  }
+}
+
+async function requestBindPlayer() {
   if (!bindFormRef.value) return
 
   try {
@@ -397,20 +449,40 @@ async function bindPlayer() {
 
   binding.value = true
   try {
-    await apiClient.patch('/api/users/me', {
-      player_name: bindForm.player_name.trim()
-    })
-    ElMessage.success('绑定成功')
-    showBindDialog.value = false
+    const res = await bindApi.requestBind(bindForm.player_name.trim())
+    pendingBind.value = res.data
+    ElMessage.success('绑定请求已提交，请在游戏内验证')
     resetBindForm()
-    // 刷新用户信息和统计
-    await loadUserInfo()
-    await fetchStats()
   } catch (e: any) {
-    ElMessage.error(e.response?.data?.detail || '绑定失败')
+    ElMessage.error(e.response?.data?.detail || '请求绑定失败')
   } finally {
     binding.value = false
   }
+}
+
+async function cancelBindRequest() {
+  canceling.value = true
+  try {
+    await bindApi.cancelBind()
+    pendingBind.value = null
+    ElMessage.success('已取消绑定请求')
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.detail || '取消失败')
+  } finally {
+    canceling.value = false
+  }
+}
+
+function formatExpireTime(expiresAt: string): string {
+  const expires = new Date(expiresAt)
+  const now = new Date()
+  const diffMs = expires.getTime() - now.getTime()
+  if (diffMs <= 0) return '已过期'
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return '不到1分钟'
+  if (diffMin < 60) return `${diffMin}分钟`
+  const diffHour = Math.floor(diffMin / 60)
+  return `${diffHour}小时${diffMin % 60}分钟`
 }
 </script>
 
@@ -644,6 +716,40 @@ async function bindPlayer() {
 
 .bind-tip .el-icon {
   font-size: 14px;
+}
+
+/* 待验证绑定信息 */
+.pending-bind-info {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.verification-code-section {
+  text-align: center;
+  padding: 16px;
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
+}
+
+.verification-label {
+  font-size: 14px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 12px;
+}
+
+.verification-code {
+  font-size: 32px;
+  font-weight: 700;
+  font-family: monospace;
+  letter-spacing: 4px;
+  color: var(--el-color-primary);
+  margin-bottom: 8px;
+}
+
+.verification-expire {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 /* 响应式 */

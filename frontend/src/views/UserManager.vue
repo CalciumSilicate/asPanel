@@ -106,6 +106,28 @@
               </el-dropdown>
             </template>
           </el-table-column>
+          <el-table-column label="组权限" min-width="200" align="center">
+            <template #default="{ row }">
+              <div class="group-perms-cell">
+                <template v-if="row.group_permissions && row.group_permissions.length > 0">
+                  <el-tag 
+                    v-for="perm in row.group_permissions.slice(0, 2)" 
+                    :key="perm.group_id" 
+                    size="small" 
+                    :type="roleTagType(perm.role)"
+                    class="group-perm-tag"
+                  >
+                    {{ perm.group_name }}: {{ perm.role }}
+                  </el-tag>
+                  <el-tag v-if="row.group_permissions.length > 2" size="small" type="info">
+                    +{{ row.group_permissions.length - 2 }}
+                  </el-tag>
+                </template>
+                <span v-else class="no-perm">无组权限</span>
+              </div>
+              <el-button size="small" type="primary" link @click="openGroupPermDialog(row)">编辑</el-button>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="220" align="center">
             <template #default="{ row }">
               <el-button-group>
@@ -132,6 +154,24 @@
     </el-card>
 
     <AvatarUploader v-model:visible="avatarVisible" :target-user-id="avatarUserId" @success="load" />
+
+    <!-- 组权限编辑弹窗 -->
+    <el-dialog v-model="groupPermDialogVisible" title="编辑组权限" width="600px">
+      <el-table :data="editingGroupPerms" size="small" max-height="400">
+        <el-table-column label="服务器组" prop="group_name" min-width="150" />
+        <el-table-column label="权限" width="180" align="center">
+          <template #default="{ row, $index }">
+            <el-select v-model="editingGroupPerms[$index].role" size="small" style="width: 140px;">
+              <el-option v-for="r in ROLES" :key="r" :label="r" :value="r" />
+            </el-select>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="groupPermDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveGroupPerms">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -143,6 +183,12 @@ import api from '@/api'
 import AvatarUploader from '@/components/AvatarUploader.vue'
 import { hasRole } from '@/store/user'
 
+type GroupPermission = {
+  group_id: number
+  group_name: string
+  role: 'GUEST'|'USER'|'HELPER'|'ADMIN'|'OWNER'
+}
+
 type UserRow = {
   id: number
   username: string
@@ -153,6 +199,12 @@ type UserRow = {
   bound_player_id?: number | null
   mc_uuid?: string | null
   mc_name?: string | null
+  group_permissions?: GroupPermission[]
+}
+
+type ServerGroup = {
+  id: number
+  name: string
 }
 
 type Player = { id: number, uuid: string, player_name?: string | null }
@@ -162,6 +214,7 @@ const allowedRoles = computed(() => hasRole('OWNER') ? ROLES : ['GUEST','USER','
 
 const rows = ref<UserRow[]>([])
 const players = ref<Player[]>([])
+const serverGroups = ref<ServerGroup[]>([])
 const query = ref('')
 const roleFilter = ref<string|undefined>()
 const page = ref(1)
@@ -180,6 +233,10 @@ const load = async () => {
 const loadPlayers = async () => {
   const { data } = await api.get('/api/players', { params: { scope: 'all' } })
   players.value = data || []
+}
+const loadServerGroups = async () => {
+  const { data } = await api.get('/api/tools/server-link/groups')
+  serverGroups.value = data || []
 }
 
 const filteredRows = computed(() => {
@@ -291,8 +348,52 @@ const batchDelete = async () => {
   }
 }
 
+// 组权限编辑
+const groupPermDialogVisible = ref(false)
+const editingGroupPermsUserId = ref<number | null>(null)
+const editingGroupPerms = ref<GroupPermission[]>([])
+
+const getUserGroupRole = (row: UserRow, groupId: number): string => {
+  const perm = row.group_permissions?.find(p => p.group_id === groupId)
+  return perm?.role || '—'
+}
+
+const openGroupPermDialog = (row: UserRow) => {
+  editingGroupPermsUserId.value = row.id
+  // 初始化：为每个服务器组设置当前权限（如果有）
+  editingGroupPerms.value = serverGroups.value.map(g => {
+    const existing = row.group_permissions?.find(p => p.group_id === g.id)
+    return {
+      group_id: g.id,
+      group_name: g.name,
+      role: existing?.role || 'USER'
+    } as GroupPermission
+  })
+  groupPermDialogVisible.value = true
+}
+
+const saveGroupPerms = async () => {
+  if (!editingGroupPermsUserId.value) return
+  try {
+    // 过滤掉没有设置的（保持默认USER的也发送）
+    const perms = editingGroupPerms.value.map(p => ({
+      group_id: p.group_id,
+      group_name: p.group_name,
+      role: p.role
+    }))
+    await api.patch(`/api/users/${editingGroupPermsUserId.value}`, {
+      group_permissions: perms
+    })
+    ElMessage.success('组权限已更新')
+    groupPermDialogVisible.value = false
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '保存组权限失败')
+  }
+}
+
 onMounted(async () => {
-  await Promise.all([load(), loadPlayers()])
+  await Promise.all([load(), loadPlayers(), loadServerGroups()])
 })
 </script>
 

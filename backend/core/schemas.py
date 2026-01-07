@@ -831,3 +831,31 @@ class Player(PlayerBase):
 
 class PlayerNameUpdate(BaseModel):
     name: str
+
+
+# --- Bind Verification Schemas ---
+class BindRequestCreate(BaseModel):
+    """请求绑定玩家"""
+    player_name: str
+
+
+class BindRequestResponse(BaseModel):
+    """绑定请求响应"""
+    code: str
+    player_name: str
+    expires_in_seconds: int = 300
+    message: str = "请在游戏内执行 /bindconfirm <code> 确认绑定"
+
+
+class BindVerifyRequest(BaseModel):
+    """验证绑定（从服务器回调）"""
+    code: str
+    player_name: str  # 从服务器获取的真实玩家名
+
+
+class BindPendingResponse(BaseModel):
+    """待验证绑定状态"""
+    has_pending: bool
+    player_name: Optional[str] = None
+    code: Optional[str] = None
+    expires_at: Optional[float] = None
