@@ -513,7 +513,7 @@ class ServerService:
                 if target_path.exists():
                     await asyncio.to_thread(shutil.rmtree, target_path)
                 raise HTTPException(status_code=500,
-                                    detail=f"从 '{source_path}' 复制文件到 '{target_path}' 时发生错误: {e}")
+                                    detail=f"发生错误: {e}")
         except Exception as e:
             task.status = TaskStatus.FAILED
             task.error = str(e)

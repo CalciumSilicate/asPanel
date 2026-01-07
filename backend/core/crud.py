@@ -48,6 +48,7 @@ def create_user(db: Session, user: schemas.UserCreate, is_owner: bool = False, i
         hashed_password=hashed_password,
         is_owner=is_owner,
         is_admin=is_admin,
+        role="USER",  # 保留用于数据库兼容，实际权限由 is_owner/is_admin 控制
         email=getattr(user, 'email', None),
         qq=str(getattr(user, 'qq', '') or ''),
         bound_player_id=bound_player_id,

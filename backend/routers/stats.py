@@ -8,8 +8,9 @@ from typing import List, Tuple, Optional, Dict
 from backend.services import stats_service
 from backend.core import crud, models
 from backend.core.database import get_db
-from backend.core.auth import require_role
+from backend.core.auth import require_role, get_current_user
 from backend.core.schemas import Role
+from backend.services.permission_service import PermissionService
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
 
@@ -17,29 +18,14 @@ router = APIRouter(prefix="/api/stats", tags=["stats"])
 def _get_allowed_server_ids(db: Session, user: models.User) -> Optional[set]:
     """
     获取用户允许访问的服务器 ID 集合。
-    HELPER 及以上返回 None（表示可以访问所有）。
-    USER 返回其 server_link_group_ids 中组的服务器 ID 集合。
+    平台管理员返回 None（表示可以访问所有）。
+    普通用户返回其组权限中可访问的服务器 ID 集合。
     """
-    role_level = {'GUEST': 0, 'USER': 1, 'HELPER': 2, 'ADMIN': 3, 'OWNER': 4}
-    if role_level.get(user.role, 0) >= role_level['HELPER']:
+    if PermissionService.is_platform_admin(user):
         return None  # 可以访问所有
     
-    try:
-        user_group_ids = json.loads(user.server_link_group_ids or '[]')
-    except Exception:
-        user_group_ids = []
-    
-    allowed_server_ids = set()
-    if user_group_ids:
-        groups = crud.list_server_link_groups(db)
-        for group in groups:
-            if group.id in user_group_ids:
-                try:
-                    server_ids = json.loads(group.server_ids or '[]')
-                    allowed_server_ids.update(server_ids)
-                except Exception:
-                    continue
-    return allowed_server_ids
+    accessible_ids = PermissionService.get_accessible_servers(db, user)
+    return set(accessible_ids) if accessible_ids else set()
 
 
 def _filter_server_ids(requested_ids: Optional[List[int]], allowed_ids: Optional[set]) -> Optional[List[int]]:

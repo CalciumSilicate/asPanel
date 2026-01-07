@@ -12,19 +12,53 @@ from pathlib import Path
 from typing import Optional, List
 
 from backend.core.api import get_mcdr_plugins_catalogue
-from backend.core import crud, schemas
-from backend.core.auth import require_role
+from backend.core import crud, schemas, models
+from backend.core.auth import require_role, get_current_user
 from backend.core.schemas import Role
 from backend.core.constants import UPLOADED_PLUGINS_PATH
 from backend.core.utils import get_file_md5, get_file_sha256
 from backend.core.database import get_db, SessionLocal
 from backend.core.dependencies import server_service, plugin_manager
 from backend.core.logger import logger
+from backend.services.permission_service import PermissionService, GroupAction
 
 router = APIRouter(
     prefix="/api",
     tags=["Plugins"],
 )
+
+
+def _require_server_access(
+    server_id: int,
+    db: Session,
+    user: models.User,
+    action: GroupAction = GroupAction.MANAGE
+) -> models.Server:
+    """检查用户是否有权访问指定服务器并返回服务器对象
+    
+    Args:
+        server_id: 服务器 ID
+        db: 数据库会话
+        user: 当前用户
+        action: 所需权限级别（默认 MANAGE）
+    
+    Returns:
+        Server 对象
+    
+    Raises:
+        HTTPException: 如果服务器不存在或用户无权访问
+    """
+    server = crud.get_server_by_id(db, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+    
+    if not PermissionService.can_manage_server(db, user, server_id, action):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="您没有权限操作此服务器的插件"
+        )
+    
+    return server
 
 
 @router.get("/plugins/mcdr/versions", response_model=schemas.PluginCatalogue)
@@ -36,13 +70,18 @@ async def get_mcdr_catalogue(do_refresh=False, _user=Depends(require_role(Role.H
 
 
 @router.get("/plugins/server/{server_id}", response_model=schemas.ServerPlugins)
-async def get_server_plugins(server_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
+async def get_server_plugins(
+    server_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
     """获取指定服务器已安装的插件列表"""
+    _require_server_access(server_id, db, current_user, GroupAction.VIEW)
+    
     catalogue = await get_mcdr_catalogue()
     server_plugins = await server_service.get_server_plugins_info_by_id(server_id, db)
     for plugin in server_plugins.data:
         if plugin.meta.get("id") not in catalogue.plugins:
-            # logger.info(f"查找{plugin.meta.get("id") or plugin.file_name}： {plugin.hash_md5}")
             db_plugin = crud.get_plugin_by_hash(db, plugin.hash_md5)
             if db_plugin is not None:
                 crud.add_server_to_plugin(db, db_plugin.id, server_id)
@@ -58,14 +97,13 @@ async def install_plugin_from_online(
         plugin_id: str = Query(...),
         tag_name: str = Query("latest"),
         db: Session = Depends(get_db),
-        _user=Depends(require_role(Role.HELPER))
+        current_user: models.User = Depends(get_current_user)
 ):
     """
     从 MCDR 官方市场安装插件，返回任务 ID 供前端跟踪进度。
     """
-    server = crud.get_server_by_id(db, server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
+    server = _require_server_access(server_id, db, current_user, GroupAction.MANAGE)
+    
     catalogue = await get_mcdr_catalogue()
     if plugin_id not in catalogue.plugins:
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found in catalogue.")
@@ -112,12 +150,14 @@ def get_db_plugins(db: Session = Depends(get_db), _user=Depends(require_role(Rol
 
 
 @router.post("/plugins/server/{server_id}/install/from-db/{plugin_db_id}", status_code=status.HTTP_201_CREATED)
-async def install_plugin_from_db(server_id: int, plugin_db_id: int, db: Session = Depends(get_db),
-                                 _user=Depends(require_role(Role.HELPER))):
+async def install_plugin_from_db(
+    server_id: int,
+    plugin_db_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
     """从中央仓库安装插件到服务器"""
-    server = crud.get_server_by_id(db, server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
+    server = _require_server_access(server_id, db, current_user, GroupAction.MANAGE)
 
     plugin_record = crud.get_plugin_by_id(db, plugin_db_id)
     if not plugin_record:
@@ -125,7 +165,7 @@ async def install_plugin_from_db(server_id: int, plugin_db_id: int, db: Session 
 
     source_path = Path(plugin_record.path)
     if not source_path.exists():
-        crud.delete_plugin_record(db, plugin_db_id)  # 文件丢失，清理脏数据
+        crud.delete_plugin_record(db, plugin_db_id)
         raise HTTPException(status_code=404, detail="Plugin file is missing from storage. Record cleaned.")
 
     installed_path = plugin_manager.install_from_local_path(
@@ -134,19 +174,21 @@ async def install_plugin_from_db(server_id: int, plugin_db_id: int, db: Session 
         file_name=plugin_record.file_name
     )
 
-    # 关联服务器和插件
     crud.add_server_to_plugin(db, plugin_db_id, server_id)
 
     return {"message": "Plugin installed successfully from DB.", "path": str(installed_path)}
 
 
 @router.post("/plugins/server/{server_id}/switch/{file_name}")
-async def switch_server_plugin(server_id: int, file_name: str, enable: Optional[bool] = None,
-                               db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
+async def switch_server_plugin(
+    server_id: int,
+    file_name: str,
+    enable: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
     """启用/禁用服务器上的一个插件"""
-    server = crud.get_server_by_id(db, server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
+    server = _require_server_access(server_id, db, current_user, GroupAction.MANAGE)
 
     new_path, new_status = plugin_manager.switch_plugin(
         server_path=Path(server.path),
@@ -157,11 +199,14 @@ async def switch_server_plugin(server_id: int, file_name: str, enable: Optional[
 
 
 @router.delete("/plugins/server/{server_id}/{file_name}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_server_plugin(server_id: int, file_name: str, db: Session = Depends(get_db),
-                               _user=Depends(require_role(Role.HELPER))):
-    server = crud.get_server_by_id(db, server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
+async def delete_server_plugin(
+    server_id: int,
+    file_name: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    server = _require_server_access(server_id, db, current_user, GroupAction.MANAGE)
+    
     server_path = Path(server.path)
     plugin_path = server_path / "plugins" / file_name
     if not plugin_path.is_file():
@@ -216,16 +261,14 @@ async def download_plugin_file(
         file_name: str,
         background_tasks: BackgroundTasks,
         db: Session = Depends(get_db),
-        _user=Depends(require_role(Role.HELPER))
+        current_user: models.User = Depends(get_current_user)
 ):
     """
     下载服务器上指定名称的插件（文件或目录）。
     - 自动处理路径遍历安全问题。
     - 如果是目录，则动态压缩为 .zip 文件后提供下载。
     """
-    db_server = crud.get_server_by_id(db, server_id)
-    if not db_server:
-        raise HTTPException(status_code=404, detail="服务器不存在")
+    db_server = _require_server_access(server_id, db, current_user, GroupAction.VIEW)
     # --- 安全性修复：防止路径遍历 ---
     # 1. 定义安全的根目录
     plugins_dir = Path(db_server.path) / "plugins"

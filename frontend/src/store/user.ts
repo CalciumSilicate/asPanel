@@ -186,8 +186,13 @@ export const hasRole = (required: LegacyRole) => {
   if (required === 'OWNER') return user.is_owner
   // ADMIN 权限只有 is_owner 或 is_admin 才能满足
   if (required === 'ADMIN') return user.is_owner || user.is_admin
-  // 其他权限检查组权限或平台管理员
+  // 平台管理员拥有所有低级权限
   if (user.is_owner || user.is_admin) return true
+  // GUEST 只需要登录
+  if (required === 'GUEST') return !!user.id
+  // USER/HELPER 需要有组权限
+  // 如果用户已登录但没有任何组权限，允许基本访问（USER 级别）
+  if (required === 'USER' && user.id) return true
   
   const target = LEGACY_ROLE_LEVELS[required] ?? 0
   return effectiveRoleLevel.value >= target

@@ -59,14 +59,13 @@ def _read_aspanel_port() -> int:
     # 默认值
     return 8013
 
-def get_config(server: PluginServerInterface) -> dict:
+def get_config() -> dict:
     """获取插件配置"""
     aspanel_port = _read_aspanel_port()
-    default_config = {
+    return {
         "api_url": "http://127.0.0.1:{}".format(aspanel_port),
         "enabled": True
     }
-    return server.load_config_simple(default_config=default_config)
 
 
 @new_thread("aspanel_bind")
@@ -77,7 +76,7 @@ def confirm_bind(source: CommandSource, code: str):
         return
     
     player_name = source.player
-    config = get_config(source.get_server())
+    config = get_config()
     
     if not config.get("enabled", True):
         source.reply(RText("绑定功能已禁用", RColor.red))
@@ -97,7 +96,7 @@ def confirm_bind(source: CommandSource, code: str):
             
             if response.status_code == 200:
                 data = response.json()
-                if data.get("success"):
+                if data.get("ok"):
                     source.reply(RText("✓ 绑定成功！你的账号已与面板账号关联", RColor.green))
                 else:
                     source.reply(RText(f"绑定失败: {data.get('message', '未知错误')}", RColor.red))

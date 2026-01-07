@@ -14,7 +14,7 @@ from pathlib import Path
 
 from backend.tools import server_parser
 from backend.core import crud, models, schemas
-from backend.core.auth import require_role
+from backend.core.auth import require_role, get_current_user
 from backend.core.database import get_db
 from backend.core.dependencies import mcdr_manager, server_service
 from backend.core.dependencies import task_manager
@@ -28,6 +28,7 @@ from backend.core.api import (
     get_fabric_version_meta,
     get_forge_installer_meta
 )
+from backend.services.permission_service import PermissionService
 
 router = APIRouter(
     prefix="/api",
@@ -37,36 +38,20 @@ router = APIRouter(
 
 # --- Server Endpoints ---
 @router.get('/servers', response_model=List[schemas.ServerDetail])
-async def get_servers(db: Session = Depends(get_db), current_user: models.User = Depends(require_role(Role.GUEST))):
+async def get_servers(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     all_servers = await server_service.get_servers_list(db)
     
-    # HELPER 及以上返回所有服务器
-    role_level = {'GUEST': 0, 'USER': 1, 'HELPER': 2, 'ADMIN': 3, 'OWNER': 4}
-    if role_level.get(current_user.role, 0) >= role_level['HELPER']:
+    # 平台管理员返回所有服务器
+    if PermissionService.is_platform_admin(current_user):
         return all_servers
     
-    # 对于 USER，根据 server_link_group_ids 过滤
-    try:
-        user_group_ids = json.loads(current_user.server_link_group_ids or '[]')
-    except Exception:
-        user_group_ids = []
+    # 普通用户根据组权限过滤
+    accessible_server_ids = set(PermissionService.get_accessible_servers(db, current_user))
     
-    if not user_group_ids:
+    if not accessible_server_ids:
         return []
     
-    # 获取用户有权限访问的服务器 ID 集合
-    allowed_server_ids = set()
-    groups = crud.list_server_link_groups(db)
-    for group in groups:
-        if group.id in user_group_ids:
-            try:
-                server_ids = json.loads(group.server_ids or '[]')
-                allowed_server_ids.update(server_ids)
-            except Exception:
-                continue
-    
-    # 过滤服务器列表
-    return [s for s in all_servers if s.id in allowed_server_ids]
+    return [s for s in all_servers if s.id in accessible_server_ids]
 
 
 @router.get('/servers/sizes', response_model=List[schemas.ServerSize])
@@ -514,29 +499,15 @@ async def save_server_config(
 
 @router.get("/servers/resource-usage")
 async def get_servers_resource_usage(db: Session = Depends(get_db),
-                                     current_user: models.User = Depends(require_role(Role.GUEST))):
-    # PERMISSION: USER
+                                     current_user: models.User = Depends(get_current_user)):
     usage_data = []
     
-    # 确定允许的服务器 ID
-    role_level = {'GUEST': 0, 'USER': 1, 'HELPER': 2, 'ADMIN': 3, 'OWNER': 4}
-    allowed_server_ids = None  # None 表示允许所有
-    if role_level.get(current_user.role, 0) < role_level['HELPER']:
-        try:
-            user_group_ids = json.loads(current_user.server_link_group_ids or '[]')
-        except Exception:
-            user_group_ids = []
-        
-        allowed_server_ids = set()
-        if user_group_ids:
-            groups = crud.list_server_link_groups(db)
-            for group in groups:
-                if group.id in user_group_ids:
-                    try:
-                        server_ids = json.loads(group.server_ids or '[]')
-                        allowed_server_ids.update(server_ids)
-                    except Exception:
-                        continue
+    # 平台管理员可以看到所有服务器
+    if PermissionService.is_platform_admin(current_user):
+        allowed_server_ids = None  # None 表示允许所有
+    else:
+        # 普通用户根据组权限过滤
+        allowed_server_ids = set(PermissionService.get_accessible_servers(db, current_user))
     
     for server_id, process in mcdr_manager.processes.items():
         # 如果有权限限制，检查服务器是否在允许列表中

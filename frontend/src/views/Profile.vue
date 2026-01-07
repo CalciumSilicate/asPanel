@@ -159,7 +159,7 @@
             <div class="verification-label">请在游戏内输入以下验证码:</div>
             <div class="verification-code">{{ pendingBind.code }}</div>
             <div class="verification-expire">
-              验证码将在 {{ formatExpireTime(pendingBind.expires_at) }} 后过期
+              验证码将在 {{ formatExpireTime(pendingBind) }} 后过期
             </div>
           </div>
         </div>
@@ -240,7 +240,8 @@ const canceling = ref(false)
 interface PendingBind {
   player_name: string
   code: string
-  expires_at: string
+  expires_at?: number  // Unix timestamp (seconds) - from getPending
+  expires_in_seconds?: number  // from requestBind
 }
 const pendingBind = ref<PendingBind | null>(null)
 
@@ -473,10 +474,20 @@ async function cancelBindRequest() {
   }
 }
 
-function formatExpireTime(expiresAt: string): string {
-  const expires = new Date(expiresAt)
-  const now = new Date()
-  const diffMs = expires.getTime() - now.getTime()
+function formatExpireTime(pending: PendingBind): string {
+  let expiresMs: number
+  
+  if (pending.expires_at) {
+    // Unix timestamp (seconds) from getPending
+    expiresMs = pending.expires_at * 1000
+  } else if (pending.expires_in_seconds) {
+    // Relative seconds from requestBind - calculate from now
+    expiresMs = Date.now() + pending.expires_in_seconds * 1000
+  } else {
+    return '未知'
+  }
+  
+  const diffMs = expiresMs - Date.now()
   if (diffMs <= 0) return '已过期'
   const diffMin = Math.floor(diffMs / 60000)
   if (diffMin < 1) return '不到1分钟'

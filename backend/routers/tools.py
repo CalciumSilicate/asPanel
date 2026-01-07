@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.orm import Session
 
 from backend.core import crud, models, models as _models, schemas
-from backend.core.auth import require_role
+from backend.core.auth import require_role, get_current_user
 from backend.core.utils import to_local_iso, to_local_dt
 from backend.core.database import get_db
 from backend.core.schemas import Role, TaskType, TaskStatus
@@ -26,6 +26,7 @@ from backend.core.constants import (
     LITEMATIC_COMMAND_LIST_PATH,
 )
 from backend.core.database import SessionLocal
+from backend.services.permission_service import PermissionService
 
 router = APIRouter(prefix="/api", tags=["Utils"])
 
@@ -436,21 +437,16 @@ from backend.services import onebot
 
 
 @router.get("/tools/server-link/groups", response_model=list[schemas.ServerLinkGroup])
-async def sl_groups_list(db: Session = Depends(get_db), current_user: _models.User = Depends(require_role(Role.USER))):
+async def sl_groups_list(db: Session = Depends(get_db), current_user: _models.User = Depends(get_current_user)):
     all_groups = await sl.sl_list_groups(db)
     
-    # HELPER 及以上返回所有组
-    role_level = {'GUEST': 0, 'USER': 1, 'HELPER': 2, 'ADMIN': 3, 'OWNER': 4}
-    if role_level.get(current_user.role, 0) >= role_level['HELPER']:
+    # 平台管理员返回所有组
+    if PermissionService.is_platform_admin(current_user):
         return all_groups
     
-    # USER 只返回其有权限的组
-    try:
-        user_group_ids = json.loads(current_user.server_link_group_ids or '[]')
-    except Exception:
-        user_group_ids = []
-    
-    return [g for g in all_groups if g.id in user_group_ids]
+    # 普通用户只返回其有权限的组
+    accessible_group_ids = set(PermissionService.get_user_groups(db, current_user))
+    return [g for g in all_groups if g.id in accessible_group_ids]
 
 
 @router.post("/tools/server-link/groups", response_model=schemas.ServerLinkGroup)
@@ -579,24 +575,15 @@ async def sl_groups_by_server(server_name: Optional[str] = None, server_id: Opti
 
 # ===================== Chat =====================
 
-def _user_can_access_group(user: _models.User, group_id: int) -> bool:
+def _user_can_access_group(db: Session, user: _models.User, group_id: int) -> bool:
     """检查用户是否有权限访问指定的服务器组"""
-    role_level = {'GUEST': 0, 'USER': 1, 'HELPER': 2, 'ADMIN': 3, 'OWNER': 4}
-    # HELPER 及以上可以访问所有组
-    if role_level.get(user.role, 0) >= role_level['HELPER']:
-        return True
-    # USER 只能访问其 server_link_group_ids 中的组
-    try:
-        user_group_ids = json.loads(user.server_link_group_ids or '[]')
-    except Exception:
-        user_group_ids = []
-    return group_id in user_group_ids
+    return PermissionService.check_group_permission(db, user, group_id)
 
 
 @router.get("/tools/chat/history", response_model=list[schemas.ChatMessageOut])
-async def chat_history(group_id: int, limit: int = 200, offset: int = 0, db: Session = Depends(get_db), current_user: _models.User = Depends(require_role(Role.USER))):
+async def chat_history(group_id: int, limit: int = 200, offset: int = 0, db: Session = Depends(get_db), current_user: _models.User = Depends(get_current_user)):
     # 权限验证
-    if not _user_can_access_group(current_user, group_id):
+    if not _user_can_access_group(db, current_user, group_id):
         raise HTTPException(status_code=403, detail="无权限访问该服务器组")
     
     # 历史需要包含当前组内 NORMAL 消息 + 全局 ALERT 消息
@@ -631,20 +618,19 @@ async def chat_history(group_id: int, limit: int = 200, offset: int = 0, db: Ses
 
 
 @router.post("/tools/chat/send", response_model=schemas.ChatMessageOut)
-async def chat_send(payload: schemas.ChatSendPayload, db: Session = Depends(get_db), current_user: _models.User = Depends(require_role(Role.USER))):
+async def chat_send(payload: schemas.ChatSendPayload, db: Session = Depends(get_db), current_user: _models.User = Depends(get_current_user)):
     level = payload.level or "NORMAL"
     if level == "NORMAL" and not payload.group_id:
         raise HTTPException(status_code=400, detail="NORMAL 级别需要提供 group_id")
     
     # 权限验证
     if level == "NORMAL" and payload.group_id:
-        if not _user_can_access_group(current_user, payload.group_id):
+        if not _user_can_access_group(db, current_user, payload.group_id):
             raise HTTPException(status_code=403, detail="无权限访问该服务器组")
     
-    # ALERT 消息只有 HELPER 及以上才能发送
+    # ALERT 消息只有平台管理员才能发送
     if level == "ALERT":
-        role_level = {'GUEST': 0, 'USER': 1, 'HELPER': 2, 'ADMIN': 3, 'OWNER': 4}
-        if role_level.get(current_user.role, 0) < role_level['HELPER']:
+        if not PermissionService.is_platform_admin(current_user):
             raise HTTPException(status_code=403, detail="无权限发送全局消息")
     
     # 保存消息（不再持久化 sender_avatar）

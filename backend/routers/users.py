@@ -152,7 +152,7 @@ def login_for_access_token(request: Request, form_data: OAuth2PasswordRequestFor
             new_perms = []
             for gid in new_group_ids:
                 role = existing_map.get(gid, "USER")
-                new_perms.append(schemas.GroupPermission(group_id=gid, role=role))
+                new_perms.append(schemas.GroupPermission(group_id=gid, group_name="", role=role))
             
             crud.update_user_group_permissions(db, user.id, new_perms)
     

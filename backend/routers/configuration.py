@@ -4,7 +4,7 @@ import json
 import yaml
 import tomli
 import tomli_w
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -14,10 +14,11 @@ from typing import Any, Dict, List, Optional
 
 from backend.core.database import get_db
 from backend.core.constants import BASE_DIR
-from backend.core import crud
+from backend.core import crud, models
 from backend.core.logger import logger
-from backend.core.auth import require_role
+from backend.core.auth import require_role, get_current_user
 from backend.core.schemas import Role
+from backend.services.permission_service import PermissionService, GroupAction
 
 router = APIRouter(prefix="/api/configs", tags=["Configurations"])
 
@@ -295,13 +296,35 @@ class ConfigUpdatePayload(BaseModel):
     updates: Dict[str, Any]
 
 
-@router.get("/{plugin}/{server_id}", response_model=ConfigResponse)
-async def get_config(plugin: str, server_id: int, db: Session = Depends(get_db),
-                     _user=Depends(require_role(Role.HELPER))):
-    spec = _spec_or_404(plugin)
+def _require_server_access(
+    server_id: int,
+    db: Session,
+    user: models.User,
+    action: GroupAction = GroupAction.MANAGE
+) -> models.Server:
+    """检查用户是否有权访问指定服务器"""
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail='服务器不存在')
+    
+    if not PermissionService.can_manage_server(db, user, server_id, action):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="您没有权限操作此服务器的配置"
+        )
+    
+    return server
+
+
+@router.get("/{plugin}/{server_id}", response_model=ConfigResponse)
+async def get_config(
+    plugin: str,
+    server_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    spec = _spec_or_404(plugin)
+    server = _require_server_access(server_id, db, current_user, GroupAction.VIEW)
 
     target = _server_target_path(server.path, spec)
     default_cfg = _read_default(spec)
@@ -327,12 +350,15 @@ async def get_config(plugin: str, server_id: int, db: Session = Depends(get_db),
 
 
 @router.patch("/{plugin}/{server_id}")
-async def update_config(plugin: str, server_id: int, payload: ConfigUpdatePayload, db: Session = Depends(get_db),
-                        _user=Depends(require_role(Role.HELPER))):
+async def update_config(
+    plugin: str,
+    server_id: int,
+    payload: ConfigUpdatePayload,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
     spec = _spec_or_404(plugin)
-    server = crud.get_server_by_id(db, server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail='服务器不存在')
+    server = _require_server_access(server_id, db, current_user, GroupAction.MANAGE)
 
     target = _server_target_path(server.path, spec)
     default_cfg = _read_default(spec)
@@ -369,11 +395,15 @@ class RawPayload(BaseModel):
 
 
 @router.get("/{plugin}/{server_id}/raw", response_class=Response)
-async def get_raw(plugin: str, server_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
+async def get_raw(
+    plugin: str,
+    server_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
     spec = _spec_or_404(plugin)
-    server = crud.get_server_by_id(db, server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail='服务器不存在')
+    server = _require_server_access(server_id, db, current_user, GroupAction.VIEW)
+    
     target = _server_target_path(server.path, spec)
     text: str
     if not target.exists():
@@ -396,12 +426,16 @@ async def get_raw(plugin: str, server_id: int, db: Session = Depends(get_db), _u
 
 
 @router.post("/{plugin}/{server_id}/raw")
-async def save_raw(plugin: str, server_id: int, payload: RawPayload, db: Session = Depends(get_db),
-                   _user=Depends(require_role(Role.HELPER))):
+async def save_raw(
+    plugin: str,
+    server_id: int,
+    payload: RawPayload,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
     spec = _spec_or_404(plugin)
-    server = crud.get_server_by_id(db, server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail='服务器不存在')
+    server = _require_server_access(server_id, db, current_user, GroupAction.MANAGE)
+    
     target = _server_target_path(server.path, spec)
 
     # 先尝试解析，避免写入非法格式
