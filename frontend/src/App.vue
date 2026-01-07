@@ -11,7 +11,16 @@
  </template>
 
 <script setup lang="ts">
-// 目前不需要逻辑，但 setup 语法是推荐的
+import { onMounted, onUnmounted } from 'vue'
+import { setupBeforeUnloadWarning, removeBeforeUnloadWarning } from '@/store/transfers'
+
+onMounted(() => {
+  setupBeforeUnloadWarning()
+})
+
+onUnmounted(() => {
+  removeBeforeUnloadWarning()
+})
 </script>
 
 <style>

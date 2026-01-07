@@ -1,8 +1,10 @@
 # backend/routers/tools.py
 
+import asyncio
 import uuid
+from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status, File, UploadFile
 from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.orm import Session
 
@@ -10,7 +12,8 @@ from backend.core import crud, models, models as _models, schemas
 from backend.core.auth import require_role
 from backend.core.utils import to_local_iso, to_local_dt
 from backend.core.database import get_db
-from backend.core.schemas import Role
+from backend.core.schemas import Role, TaskType, TaskStatus
+from backend.core.dependencies import task_manager
 from backend.tools.flat_world_generator import generate_flat_level_dat, apply_level_dat_to_server
 from backend.tools import prime_backup as pb
 from backend.tools.litematic_parser import (
@@ -22,6 +25,7 @@ from backend.core.constants import (
     UPLOADED_LITEMATIC_PATH,
     LITEMATIC_COMMAND_LIST_PATH,
 )
+from backend.core.database import SessionLocal
 
 router = APIRouter(prefix="/api", tags=["Utils"])
 
@@ -244,11 +248,9 @@ async def litematic_generate_cl(
     _user=Depends(require_role(Role.USER)),
 ):
     """
-    根据指定 litematic 生成命令清单（command list），并写入配置路径：
+    根据指定 litematic 生成命令清单（command list），返回任务 ID 供前端跟踪进度。
     - 输入：按原始文件名匹配（选最新一条）
     - 输出：LITEMATIC_COMMAND_LIST_PATH / '<litematic-uuid>.mccl.txt'
-    - 若该 litematic 已有 command list，则覆盖
-    - 将生成文件记录到数据库 models.Download（url='litematic-command-list'）
     """
     rec = _query_latest_download_by_name_and_url(db, file_name, url_marker="litematic-upload")
     if not rec:
@@ -258,40 +260,68 @@ async def litematic_generate_cl(
     if not src_path.is_file():
         raise HTTPException(status_code=404, detail="源 litematic 文件不存在")
 
-    # 目标路径：以 UUID 作为 mapping 键，避免同名冲突
     try:
-        uuid_stem = src_path.stem  # e.g. 'xxxxxxxx....' from '<uuid>.litematic'
+        uuid_stem = src_path.stem
     except Exception:
         uuid_stem = uuid.uuid4().hex
 
     LITEMATIC_COMMAND_LIST_PATH.mkdir(parents=True, exist_ok=True)
     out_path = LITEMATIC_COMMAND_LIST_PATH / f"{uuid_stem}.mccl.txt"
-
-    try:
-        generate_command_list(src_path, out_path)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"生成命令清单失败: {e}")
-
-    # upsert 到 Download（优先按 path 匹配）
-    db_rec: models.Download | None = (
-        db.query(models.Download).filter(models.Download.path == str(out_path.resolve())).first()
-    )
-    # 友好展示名：以原始文件名的 stem 命名
     display_name = f"{Path(rec.file_name).stem}.mccl.txt"
-    if db_rec is None:
-        db_rec = models.Download(url="litematic-command-list", path=str(out_path.resolve()), file_name=display_name)
-        db.add(db_rec)
-    else:
-        db_rec.file_name = display_name
-    db.commit()
-    db.refresh(db_rec)
+    rec_id = rec.id
 
-    return {
-        "message": "生成成功",
-        "file_name": db_rec.file_name,
-        "stored_path": db_rec.path,
-        "id": db_rec.id,
-    }
+    task = task_manager.create_task(
+        TaskType.LITEMATIC_GENERATE,
+        name=f"生成命令清单：{file_name}",
+        message="准备生成..."
+    )
+
+    async def _runner():
+        task.status = TaskStatus.RUNNING
+        task.progress = 0
+        task.message = "正在解析投影文件..."
+
+        try:
+            task.progress = 10
+            task.message = "正在生成命令..."
+
+            await asyncio.to_thread(generate_command_list, src_path, out_path)
+
+            task.progress = 90
+            task.message = "正在保存到数据库..."
+
+            with SessionLocal() as db_session:
+                db_rec = db_session.query(models.Download).filter(
+                    models.Download.path == str(out_path.resolve())
+                ).first()
+                if db_rec is None:
+                    db_rec = models.Download(
+                        url="litematic-command-list",
+                        path=str(out_path.resolve()),
+                        file_name=display_name
+                    )
+                    db_session.add(db_rec)
+                else:
+                    db_rec.file_name = display_name
+                db_session.commit()
+
+            task.status = TaskStatus.SUCCESS
+            task.progress = 100
+            task.message = f"命令清单生成完成：{display_name}"
+
+        except Exception as e:
+            task.status = TaskStatus.FAILED
+            task.error = str(e)
+            task.message = f"生成命令清单失败"
+
+        finally:
+            try:
+                task_manager.clear_finished_task(task.id)
+            except Exception:
+                pass
+
+    asyncio.create_task(_runner())
+    return {"message": "生成任务已启动", "task_id": task.id, "file_name": display_name}
 
 
 @router.get("/tools/litematic/list")

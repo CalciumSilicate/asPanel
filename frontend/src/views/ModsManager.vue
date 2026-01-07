@@ -326,6 +326,7 @@ import apiClient, { isRequestCanceled } from '@/api'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import router from '@/router'
 import { fetchTasks } from '@/store/tasks'
+import { startDownload } from '@/store/transfers'
 
 // 左侧数据
 const servers = ref([])
@@ -534,15 +535,11 @@ const toggleMod = async (row) => {
 const downloadMod = async (row) => {
   row.loading = true
   try {
-    const res = await apiClient.get(`/api/mods/download/${selectedServer.value.id}/${row.file_name}`, { responseType: 'blob' })
-    const url = window.URL.createObjectURL(new Blob([res.data]))
-    const link = document.createElement('a')
-    link.href = url
-    link.setAttribute('download', row.file_name)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    window.URL.revokeObjectURL(url)
+    await startDownload({
+      url: `/api/mods/download/${selectedServer.value.id}/${row.file_name}`,
+      title: row.meta?.name || row.file_name,
+      fallbackFilename: row.file_name,
+    })
   } catch (e) {
     ElMessage.error('下载失败: ' + (e.response?.data?.detail || e.message))
   } finally {

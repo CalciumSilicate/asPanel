@@ -157,6 +157,7 @@ import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import { settings } from '@/store/settings'
 import { hasRole } from '@/store/user'
 import { fetchTasks } from '@/store/tasks'
+import { startDownload } from '@/store/transfers'
 
 const PB_PLUGIN_META_ID = 'prime_backup'
 
@@ -393,19 +394,13 @@ const updatePB = async (server) => {
 // 下载导出
 const doExport = async (row) => {
   try {
-    const res = await apiClient.post(`/api/tools/pb/${activeServer.value.id}/export`, { id: row.id }, { responseType: 'blob' })
-    if (res?.data) {
-      const blob = new Blob([res.data])
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `pb_${activeServer.value.id}_${row.id}.tar`
-      a.click()
-      URL.revokeObjectURL(url)
-    } else {
-      ElMessage.success('导出任务已发起')
-      fetchTasks().catch(() => {})
-    }
+    await startDownload({
+      url: `/api/tools/pb/${activeServer.value.id}/export`,
+      method: 'post',
+      data: { id: row.id },
+      title: `PrimeBackup 备份 #${row.id}`,
+      fallbackFilename: `pb_${activeServer.value.id}_${row.id}.tar`,
+    })
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || '下载失败')
   }

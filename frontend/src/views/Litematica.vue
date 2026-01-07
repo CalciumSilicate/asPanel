@@ -112,6 +112,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import apiClient from '@/api'
 import { ArrowDown } from '@element-plus/icons-vue'
 import { fetchTasks } from '@/store/tasks'
+import { startDownload } from '@/store/transfers'
 
 interface LtmRow {
   file_name: string
@@ -238,19 +239,13 @@ const deleteRow = async (row: LtmRow) => {
   } finally { row.loadingDel = false }
 }
 
-const downloadBlob = (blob: Blob, filename: string) => {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
 const downloadLtm = async (row: LtmRow) => {
   try {
-    const res = await apiClient.get(`/api/tools/litematic/download/${encodeURIComponent(row.file_name)}`, { responseType: 'blob' })
-    downloadBlob(res.data, row.file_name)
+    await startDownload({
+      url: `/api/tools/litematic/download/${encodeURIComponent(row.file_name)}`,
+      title: row.file_name,
+      fallbackFilename: row.file_name,
+    })
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || '下载失败')
   }
@@ -258,9 +253,12 @@ const downloadLtm = async (row: LtmRow) => {
 
 const downloadCL = async (row: LtmRow) => {
   try {
-    const res = await apiClient.get(`/api/tools/litematic/download_cl/${encodeURIComponent(row.file_name)}`, { responseType: 'blob' })
     const outName = `${(row.file_name || '').replace(/\.litematic$/i, '')}.mccl.txt`
-    downloadBlob(res.data, outName)
+    await startDownload({
+      url: `/api/tools/litematic/download_cl/${encodeURIComponent(row.file_name)}`,
+      title: outName,
+      fallbackFilename: outName,
+    })
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || '下载失败')
   }
@@ -368,8 +366,11 @@ const doBatchDownloadLtm = async () => {
   if (!targets.length) return ElMessage.warning('请先选择投影')
   for (const r of targets) {
     try {
-      const res = await apiClient.get(`/api/tools/litematic/download/${encodeURIComponent(r.file_name)}`, { responseType: 'blob' })
-      downloadBlob(res.data, r.file_name)
+      await startDownload({
+        url: `/api/tools/litematic/download/${encodeURIComponent(r.file_name)}`,
+        title: r.file_name,
+        fallbackFilename: r.file_name,
+      })
     } catch {}
   }
 }
@@ -378,9 +379,12 @@ const doBatchDownloadCL = async () => {
   if (!targets.length) return ElMessage.warning('请先选择投影')
   for (const r of targets) {
     try {
-      const res = await apiClient.get(`/api/tools/litematic/download_cl/${encodeURIComponent(r.file_name)}`, { responseType: 'blob' })
       const outName = `${(r.file_name || '').replace(/\.litematic$/i, '')}.mccl.txt`
-      downloadBlob(res.data, outName)
+      await startDownload({
+        url: `/api/tools/litematic/download_cl/${encodeURIComponent(r.file_name)}`,
+        title: outName,
+        fallbackFilename: outName,
+      })
     } catch {}
   }
 }

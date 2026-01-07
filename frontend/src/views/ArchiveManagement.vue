@@ -213,7 +213,7 @@ import {Upload, Download, Delete, WarningFilled, FolderAdd, Search, Refresh, Fol
 import apiClient, { isRequestCanceled } from '@/api';
 import { settings } from '@/store/settings'
 import { fetchTasks, onTaskEvent } from '@/store/tasks'
-import { downloadArchive } from '@/store/downloads'
+import { downloadArchive, startUpload } from '@/store/transfers'
 
 // --- 状态 ---
 const allArchives = ref([]);
@@ -387,19 +387,23 @@ const handleUpload = async () => {
   isUploading.value = true;
   const formData = new FormData();
   formData.append('file', uploadForm.value.file);
-  try {
-    const {data} = await apiClient.post('/api/archives/create/from-upload', formData, {
-      params: uploadForm.value.mc_version ? {mc_version: uploadForm.value.mc_version} : undefined,
-      timeout: 0,
-    });
+  
+  const { id, response, error } = await startUpload({
+    url: '/api/archives/create/from-upload',
+    data: formData,
+    title: uploadForm.value.file?.name || '存档上传',
+    filename: uploadForm.value.file?.name,
+    params: uploadForm.value.mc_version ? { mc_version: uploadForm.value.mc_version } : undefined,
+  });
+  
+  if (error) {
+    ElMessage.error(error || '上传失败');
+  } else {
     ElMessage.info('文件上传成功，正在后台处理...');
     uploadDialogVisible.value = false;
     fetchTasks().catch(() => {});
-  } catch (error) {
-    ElMessage.error(error.response?.data?.detail || error.message || '上传失败');
-  } finally {
-    isUploading.value = false;
   }
+  isUploading.value = false;
 };
 
 // --- [新增] 恢复功能 ---

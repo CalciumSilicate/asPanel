@@ -515,6 +515,7 @@ import {Search, Refresh, Plus, Coin, Delete, Download, Star, Upload} from '@elem
 import apiClient, { isRequestCanceled } from '@/api';
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import { fetchTasks } from '@/store/tasks'
+import { startDownload } from '@/store/transfers'
 
 // --- Interfaces ---
 interface Asset {
@@ -893,19 +894,12 @@ const handlePluginDownload = async (plugin: any) => {
   if (!selectedServerId.value) return;
   plugin.loading = true;
   try {
-    const response = await apiClient.get(
-        `/api/plugins/download/${selectedServerId.value}/${plugin.file_name}`,
-        {responseType: 'blob'}
-    );
     const downloadFilename = plugin.type === 'FOLDER' ? `${plugin.file_name}.zip` : plugin.file_name;
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', downloadFilename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
+    await startDownload({
+      url: `/api/plugins/download/${selectedServerId.value}/${plugin.file_name}`,
+      title: plugin.meta?.name || plugin.file_name,
+      fallbackFilename: downloadFilename,
+    });
   } catch (error: any) {
     ElMessage.error(`下载失败: ${error.response?.data?.detail || error.message}`);
   } finally {
