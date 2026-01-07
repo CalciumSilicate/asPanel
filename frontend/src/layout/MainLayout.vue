@@ -12,9 +12,9 @@
       <div class="header-right">
         <!-- Group Context Selector -->
         <div class="group-selector" v-if="user.id && user.group_permissions.length > 0" style="margin-right: 12px;">
-          <!-- OWNER: Multi-select -->
+          <!-- OWNER/ADMIN: Multi-select -->
           <el-select
-            v-if="user.role === 'OWNER'"
+            v-if="isPlatformAdmin"
             v-model="activeGroupIds"
             multiple
             collapse-tags
@@ -500,7 +500,7 @@ import {
   LocationInformation, Place, List, RefreshRight, Comment, DocumentCopy, Operation, Download, Upload,
   Moon, Sunny
 } from '@element-plus/icons-vue';
-import {user, fullAvatarUrl, fetchUser, clearUser, hasRole, activeGroupIds} from '@/store/user';
+import {user, fullAvatarUrl, fetchUser, clearUser, hasRole, activeGroupIds, isPlatformAdmin} from '@/store/user';
 import { isDark, toggleTheme } from '@/store/theme'
 import {
   tasks,

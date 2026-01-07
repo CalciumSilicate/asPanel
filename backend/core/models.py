@@ -32,9 +32,13 @@ class User(Base):
 class UserGroupPermission(Base):
     __tablename__ = "user_group_permissions"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), index=True)
-    group_id = Column(Integer, ForeignKey("server_link_groups.id"), index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    group_id = Column(Integer, ForeignKey("server_link_groups.id", ondelete="CASCADE"), index=True)
     role = Column(String, default=DEFAULT_USER_ROLE)
+    
+    __table_args__ = (
+        UniqueConstraint("user_id", "group_id", name="uq_user_group_permission"),
+    )
 
 
 class Server(Base):
