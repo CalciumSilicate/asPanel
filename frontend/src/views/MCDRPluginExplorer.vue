@@ -301,6 +301,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import {ElMessage, ElNotification} from 'element-plus'
 import {Search, Star, Download, Upload} from '@element-plus/icons-vue'
 import apiClient, { isRequestCanceled } from '@/api'
+import { fetchTasks } from '@/store/tasks'
 
 // --- Interfaces ---
 interface Asset {
@@ -673,6 +674,7 @@ async function confirmInstall() {
   });
   isInstalling.value = false;
   installDialogVisible.value = false;
+  fetchTasks().catch(() => {});
 }
 
 async function fetchServers() {

@@ -1,11 +1,20 @@
 // src/router/index.ts
 
 import { createRouter, createWebHistory } from 'vue-router';
+import type { RouteRecordRaw } from 'vue-router'
 import MainLayout from '../layout/MainLayout.vue';
-import { hasRole, fetchUser, user, type UserRole } from '@/store/user';
+import { hasRole, fetchUser, user, clearUser, type UserRole } from '@/store/user';
 import { ElMessage } from 'element-plus';
 
-const routes = [
+// 扩展 RouteMeta 类型
+declare module 'vue-router' {
+  interface RouteMeta {
+    requiresAuth?: boolean
+    requiredRole?: UserRole
+  }
+}
+
+const routes: RouteRecordRaw[] = [
     {
         path: '/login',
         name: 'Login',
@@ -185,11 +194,15 @@ router.beforeEach(async (to, from, next) => {
             await fetchUser();
         }
     } catch (e) {
-        // 忽略用户信息拉取失败，后端会最终裁决
+        // 用户信息拉取失败，清除登录状态
+        localStorage.removeItem('token');
+        clearUser();
+        ElMessage.warning('登录已过期，请重新登录');
+        return next({ path: '/login', query: { redirect: to.fullPath } });
     }
 
     // 角色不足：提示并回到上一个页面；若无来源（直达），回到仪表盘
-    const requiredRole = (to.meta as any)?.requiredRole as UserRole | undefined;
+    const requiredRole = to.meta.requiredRole;
     if (requiredRole && !hasRole(requiredRole)) {
         ElMessage.error('无权限访问该页面');
         if (from && from.name) {

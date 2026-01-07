@@ -1104,6 +1104,7 @@ import ConfigEditor from '@/components/ConfigEditor.vue';
 import draggable from 'vuedraggable';
 import { settings } from '@/store/settings'
 import { hasRole } from '@/store/user';
+import { fetchTasks } from '@/store/tasks'
 
 	const router = useRouter();
 	const serverList = ref([]);
@@ -1679,6 +1680,7 @@ const handleSaveConfig = async () => {
     if (data.status === 'downloading' && data.task_id) {
       currentView.value = 'downloading';
       pollDownloadStatus(data.task_id);
+      fetchTasks().catch(() => {});
     } else {
       ElMessage.success(data.message || '配置已成功保存！');
       if (configFormData.value.core_config.server_type === 'velocity' && !dialogState.configFileExists) {

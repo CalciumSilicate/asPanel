@@ -514,6 +514,7 @@ import {ElMessage, ElNotification} from 'element-plus';
 import {Search, Refresh, Plus, Coin, Delete, Download, Star, Upload} from '@element-plus/icons-vue';
 import apiClient, { isRequestCanceled } from '@/api';
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
+import { fetchTasks } from '@/store/tasks'
 
 // --- Interfaces ---
 interface Asset {
@@ -1084,6 +1085,7 @@ const executeInstallation = async () => {
   isInstallingPlugins.value = false;
   if (successCount > 0) {
     installConfirmDialogVisible.value = false;
+    fetchTasks().catch(() => {});
     setTimeout(initialLoad, 1000);
   }
 };
@@ -1122,6 +1124,7 @@ const handleInstallDbPlugins = async () => {
   isInstallingPlugins.value = false;
   if (successCount > 0) {
     addDbPluginDialogVisible.value = false;
+    fetchTasks().catch(() => {});
     await initialLoad();
   }
 };

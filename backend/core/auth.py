@@ -44,4 +44,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     user = crud.get_user_by_username(db, username=token_data.username)
     if user is None:
         raise credentials_exception
+    token_version = payload.get("tv", 0)
+    if token_version != getattr(user, "token_version", 0):
+        raise credentials_exception
     return user

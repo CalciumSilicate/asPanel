@@ -1,26 +1,58 @@
-fastapi
-uvicorn[standard]
-python-socketio
-SQLAlchemy
-pydantic
-python-multipart
-passlib[bcrypt]
-python-jose[cryptography]
-requests
-httpx
-loguru
-PyYAML
-ruamel.yaml
-tomli
-tomli-w
-psutil
-nbtlib
-cachetools
-packaging
-argon2-cffi
-async-cache
-mcdreforged
-websocket-client
-litemapy
-matplotlib
-scipy
+# ASPanel 依赖清单 (版本已锁定)
+# 生成时间: 2026-01-07
+# 使用 pip install -r requirements.txt 安装
+
+# === 核心框架 ===
+fastapi==0.128.0
+uvicorn[standard]==0.40.0
+starlette==0.50.0
+
+# === 数据库 ===
+SQLAlchemy==2.0.45
+
+# === 数据验证 ===
+pydantic==2.12.5
+pydantic_core==2.41.5
+
+# === 认证与安全 ===
+passlib[bcrypt]==1.7.4
+bcrypt==5.0.0
+python-jose[cryptography]==3.5.0
+cryptography==46.0.3
+argon2-cffi==25.1.0
+
+# === HTTP 客户端 ===
+requests==2.32.5
+httpx==0.28.1
+
+# === WebSocket ===
+python-socketio==5.16.0
+python-engineio==4.13.0
+websocket-client==1.9.0
+
+# === 配置与日志 ===
+PyYAML==6.0.3
+ruamel.yaml==0.18.17
+loguru==0.7.3
+
+# === 文件处理 ===
+python-multipart==0.0.21
+tomli==2.3.0
+tomli_w==1.2.0
+
+# === 系统监控 ===
+psutil==7.2.1
+
+# === Minecraft 相关 ===
+nbtlib==2.0.4
+mcdreforged==2.15.6
+litemapy==0.11.0b0
+
+# === 工具库 ===
+cachetools==6.2.4
+packaging==25.0
+
+# === 可选：统计图表 (可单独安装) ===
+matplotlib==3.10.8
+scipy==1.16.3
+numpy==2.4.0

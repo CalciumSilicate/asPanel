@@ -325,6 +325,7 @@ import { Search, Plus, Delete, Download, Upload, UploadFilled, Refresh, CopyDocu
 import apiClient, { isRequestCanceled } from '@/api'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import router from '@/router'
+import { fetchTasks } from '@/store/tasks'
 
 // 左侧数据
 const servers = ref([])
@@ -745,6 +746,7 @@ const doCopy = async () => {
     })
     ElMessage.success('复制完成')
     copyDialog.value.visible = false
+    fetchTasks().catch(() => {})
     await fetchMods()
   } catch (e) {
     ElMessage.error('复制失败: ' + (e.response?.data?.detail || e.message))

@@ -49,12 +49,12 @@ export const currentRole = computed(() => {
   // OWNER always has full access
   if (user.role === 'OWNER') return 'OWNER'
   
-  // If no group selected, fall back to global role or GUEST
-  if (activeGroupIds.value.length === 0) return 'GUEST'
+  // If no group selected, fall back to global role (not GUEST!)
+  if (activeGroupIds.value.length === 0) return user.role
 
   // Find max role among selected groups
-  let maxLevel = -1
-  let maxRole: UserRole = 'GUEST'
+  let maxLevel = ROLE_LEVELS[user.role] // 以全局角色为基准
+  let maxRole: UserRole = user.role
 
   for (const gid of activeGroupIds.value) {
     const perm = user.group_permissions.find(p => p.group_id === gid)

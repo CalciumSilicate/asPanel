@@ -2,18 +2,21 @@ import axios from 'axios';
 import {ElMessage} from 'element-plus';
 import router from '@/router'; // 引入 router
 
-const isRequestCanceled = (error: any) => {
-    if (!error) return false;
+let isRedirectingToLogin = false;
+
+const isRequestCanceled = (error: unknown): boolean => {
+    if (!error || typeof error !== 'object') return false;
+    const err = error as Record<string, unknown>;
     // Axios CancelToken / CanceledError
     if (typeof axios.isCancel === 'function' && axios.isCancel(error)) return true;
-    if (error?.__CANCEL__ === true) return true;
+    if (err.__CANCEL__ === true) return true;
     // AbortController (axios v1 supports `signal`)
-    if (error?.config?.signal?.aborted) return true;
-    if (error?.cause?.name === 'AbortError') return true;
+    if ((err.config as Record<string, unknown>)?.signal && ((err.config as Record<string, unknown>).signal as AbortSignal)?.aborted) return true;
+    if ((err.cause as Record<string, unknown>)?.name === 'AbortError') return true;
     // Common axios cancellation shape
-    if (error?.code === 'ERR_CANCELED') return true;
-    if (error?.name === 'CanceledError' || error?.name === 'AbortError') return true;
-    const msg = typeof error?.message === 'string' ? error.message.toLowerCase() : '';
+    if (err.code === 'ERR_CANCELED') return true;
+    if (err.name === 'CanceledError' || err.name === 'AbortError') return true;
+    const msg = typeof err.message === 'string' ? err.message.toLowerCase() : '';
     if (msg.includes('canceled') || msg.includes('cancelled') || msg.includes('aborted')) return true;
     return false;
 };
@@ -86,14 +89,24 @@ apiClient.interceptors.response.use(
             switch (error.response.status) {
                 case 401:
                     // 未授权，通常是 token 过期或无效
-                    localStorage.removeItem('token');
-                    // 跳转到登录页，并携带当前页面路径以便登录后重定向
-                    router.push({
-                        path: '/login',
-                        query: {redirect: router.currentRoute.value.fullPath},
-                    });
+                    if (!isRedirectingToLogin) {
+                        isRedirectingToLogin = true;
+                        localStorage.removeItem('token');
+                        // 动态导入避免循环依赖
+                        import('@/store/user').then(({ clearUser }) => {
+                            clearUser();
+                        });
+                        router.push({
+                            path: '/login',
+                            query: { redirect: router.currentRoute.value.fullPath },
+                        }).finally(() => {
+                            // 延迟重置，避免并发请求多次触发
+                            setTimeout(() => { isRedirectingToLogin = false; }, 1000);
+                        });
+                    }
                     break;
                 case 403:
+                    ElMessage.error('无权限执行此操作');
                     break;
                 case 404:
                     // 通常由具体业务处理，但也可以在此统一提示

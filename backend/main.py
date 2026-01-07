@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.core import models, crud
+from backend.core.config import get_config
 from backend.core.database import engine, SessionLocal
 from backend.core.constants import (
     ALLOWED_ORIGINS, AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, ARCHIVE_STORAGE_PATH, ARCHIVE_URL_PREFIX,
@@ -35,6 +36,7 @@ from backend.services.ws import router as ws_router
 from backend.services import onebot
 from backend.routers.system import cpu_sampler
 from backend.services import stats_service
+from backend.core.dependencies import task_manager
 from backend.core.api import *
 from backend.core.ws import sio
 from backend.core.logger import logger
@@ -42,6 +44,23 @@ from backend.core.schemas import ServerCoreConfig
 from backend.core.dependencies import mcdr_manager
 
 models.Base.metadata.create_all(bind=engine)
+
+# 数据库迁移：添加缺失的列
+def _migrate_database():
+    """检查并添加缺失的数据库列"""
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    
+    # 检查 users 表的 token_version 列
+    if 'users' in inspector.get_table_names():
+        columns = [c['name'] for c in inspector.get_columns('users')]
+        if 'token_version' not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0"))
+                conn.commit()
+                logger.info("数据库迁移：已添加 users.token_version 列")
+
+_migrate_database()
 
 
 def _ensure_default_admin():
@@ -130,7 +149,7 @@ async def _unhandled_exception_handler(request: Request, exc: Exception):
     logger.opt(exception=exc).error(
         f"未捕获异常 | {request.method} {request.url.path}"
     )
-    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+    return JSONResponse(status_code=500, content={"ok": False, "error": {"code": "INTERNAL_ERROR", "message": "Internal Server Error"}})
 
 
 @app.middleware("http")
@@ -168,10 +187,14 @@ async def request_timer_middleware(request: Request, call_next):
         logger.info(log_msg)
 
 
+_allow_credentials = get_config().cors.allow_credentials
+if "*" in ALLOWED_ORIGINS:
+    _allow_credentials = False
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -264,8 +287,8 @@ async def _auto_start_servers_on_boot():
 @app.on_event("startup")
 async def startup_event():
     logger.warning(f"服务器启动中")
-    asyncio.create_task(cpu_sampler())
-    asyncio.create_task(warmup_cache())
+    await task_manager.register_coroutine("cpu_sampler", cpu_sampler())
+    await task_manager.register_coroutine("warmup_cache", warmup_cache())
     try:
         await onebot.startup_sync()
     except Exception:
@@ -293,26 +316,32 @@ async def startup_event():
     logger.success("服务器启动完成")
     # 启动统计入库定时任务（每逢 10 分钟整点）
     try:
-        asyncio.create_task(stats_service.ingest_scheduler_loop())
+        await task_manager.register_coroutine("stats_ingest", stats_service.ingest_scheduler_loop())
         logger.info("统计入库后台任务已启动（10min 对齐）")
     except Exception as e:
         logger.warning(f"启动统计入库任务失败：{e}")
 
     # TaskManager：Socket.IO 实时任务推送
     try:
-        from backend.core.dependencies import task_manager as _task_manager
-        _task_manager.attach_socketio(sio)
-        _task_manager.start_broadcaster()
+        task_manager.attach_socketio(sio)
+        task_manager.start_broadcaster()
         logger.info("TaskManager 实时任务推送已启动")
     except Exception as e:
         logger.warning(f"TaskManager 实时推送启动失败：{e}")
 
     # 自动启动：按 core_config.auto_start 拉起服务器
     try:
-        asyncio.create_task(_auto_start_servers_on_boot())
+        await task_manager.register_coroutine("auto_start_servers", _auto_start_servers_on_boot())
         logger.info("自动启动后台任务已创建")
     except Exception as e:
         logger.warning(f"创建自动启动任务失败：{e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.warning("服务器关闭中...")
+    await task_manager.cancel_all_coroutines()
+    logger.success("服务器已关闭")
 
 
 main_asgi_app = socketio.ASGIApp(sio, other_asgi_app=app, socketio_path='/ws/socket.io')

@@ -64,6 +64,7 @@ import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import { installMCDR, fetchServerPlugins, fetchServersCached, invalidateServerPlugins } from './_Shared'
+import { fetchTasks } from '@/store/tasks'
 import PluginConfigForm from './components/PluginConfigForm.vue'
 
 const PLUGIN_ID = 'auto_plugin_reloader'

@@ -36,6 +36,7 @@ class StorageConfig(BaseModel):
 class CorsConfig(BaseModel):
     """CORS 配置"""
     origins: List[str] = Field(default=["*"], description="允许的源列表")
+    allow_credentials: bool = Field(default=False, description="是否允许携带凭证")
 
 
 class LogConfig(BaseModel):

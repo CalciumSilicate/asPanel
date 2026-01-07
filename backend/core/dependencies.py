@@ -8,6 +8,7 @@ from backend.services.task_manager import TaskManager
 from backend.services.plugin_manager import PluginManager
 from backend.services.dependency_handler import DependencyHandler
 from backend.services.mod_manager import ModManager
+from backend.services.permission_service import permission_service
 
 mcdr_manager = MCDRManager()
 dependency_handler = DependencyHandler(PYTHON_EXECUTABLE)

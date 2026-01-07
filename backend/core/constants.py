@@ -88,7 +88,7 @@ else:
     _SECRET_KEY_FILE.write_text(SECRET_KEY, encoding="utf-8")
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 10080  # 7 days
+ACCESS_TOKEN_EXPIRE_MINUTES = 60  # 1 hour
 
 # --- CORS Configure ---
 ALLOWED_ORIGINS = _cfg.cors.origins

@@ -156,6 +156,7 @@ import apiClient from '@/api'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import { settings } from '@/store/settings'
 import { hasRole } from '@/store/user'
+import { fetchTasks } from '@/store/tasks'
 
 const PB_PLUGIN_META_ID = 'prime_backup'
 

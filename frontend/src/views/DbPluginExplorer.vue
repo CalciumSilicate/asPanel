@@ -280,6 +280,7 @@ import {ElMessage, ElNotification} from 'element-plus';
 // [MODIFIED] Import Remove icon
 import {Search, Refresh, UploadFilled, Download, Delete, Remove} from '@element-plus/icons-vue';
 import apiClient, { isRequestCanceled } from '@/api';
+import { fetchTasks } from '@/store/tasks'
 
 // --- State ---
 const loading = ref(false);
@@ -422,6 +423,7 @@ const handleUploadSuccess = (response, uploadFile) => {
   isUploading.value = false;
   uploadDialogVisible.value = false;
   uploadRef.value.clearFiles();
+  fetchTasks().catch(() => {});
   load();
 };
 
@@ -515,6 +517,7 @@ const confirmInstall = async () => {
 
   isInstalling.value = false;
   installDialogVisible.value = false;
+  fetchTasks().catch(() => {});
   await fetchAllServerPlugins(); // Refresh status after installation
 };
 

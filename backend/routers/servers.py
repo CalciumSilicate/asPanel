@@ -598,10 +598,10 @@ async def get_config_file(
         file_path = server_path / 'server' / 'velocity.toml'
     else:
         raise HTTPException(status_code=400, detail="Invalid file type specified.")
-    if not file_path.exists():
+    if not await asyncio.to_thread(file_path.exists):
         return Response(content="", media_type="text/plain")
     try:
-        content = file_path.read_text(encoding='utf-8')
+        content = await asyncio.to_thread(file_path.read_text, encoding='utf-8')
         return Response(content=content, media_type="text/plain")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read file: {e}")
@@ -629,8 +629,8 @@ async def save_config_file(
         raise HTTPException(status_code=400, detail="Invalid file type specified.")
     try:
         # 确保目录存在
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(payload.content, encoding='utf-8')
+        await asyncio.to_thread(file_path.parent.mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread(file_path.write_text, payload.content, encoding='utf-8')
         return {"message": "File saved successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
@@ -661,11 +661,14 @@ async def upload_server_map_json(
     tmp_path = dst_path.with_suffix(dst_path.suffix + ".tmp")
 
     try:
-        with open(tmp_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        def _write_upload():
+            with open(tmp_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+        await asyncio.to_thread(_write_upload)
         # 先验证 JSON，避免写入脏数据
         try:
-            json.loads(tmp_path.read_text(encoding="utf-8"))
+            tmp_content = await asyncio.to_thread(tmp_path.read_text, encoding="utf-8")
+            json.loads(tmp_content)
         except Exception as e:
             try:
                 tmp_path.unlink(missing_ok=True)

@@ -6,10 +6,35 @@ import asyncio
 import threading
 import time
 import uuid
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from datetime import datetime
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Coroutine, Dict, Iterable, List, Optional, Tuple
 
 from backend.core.logger import logger
 from backend.core.schemas import Task, TaskStatus, TaskType
+
+
+# =========================================
+# 后台协程状态枚举
+# =========================================
+class CoroutineStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+@dataclass
+class CoroutineInfo:
+    """后台协程信息"""
+    name: str
+    status: CoroutineStatus = CoroutineStatus.PENDING
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    error: Optional[str] = None
+    task: Optional[asyncio.Task] = field(default=None, repr=False)
 
 
 class TaskManager:
@@ -30,6 +55,10 @@ class TaskManager:
         self._sio: Any = None
         self._broadcast_task: Optional[asyncio.Task] = None
         self._last_snapshot: Dict[str, Dict[str, Any]] = {}
+
+        # 后台协程管理
+        self._coroutines: Dict[str, CoroutineInfo] = {}
+        self._coroutine_lock = asyncio.Lock()
 
     # -------------------------
     # Basic CRUD
@@ -271,4 +300,102 @@ class TaskManager:
             await self._sio.emit("task_update", {"action": action, "task": task})
         except Exception:
             logger.exception(f"TaskManager emit 失败: action={action} task_id={task.get('id')}")
+
+    # =========================================
+    # 后台协程生命周期管理
+    # =========================================
+    async def register_coroutine(
+        self,
+        name: str,
+        coro: Coroutine[Any, Any, Any],
+        replace: bool = False
+    ) -> asyncio.Task:
+        """注册并启动一个后台协程"""
+        async with self._coroutine_lock:
+            # 检查是否已存在
+            if name in self._coroutines:
+                existing = self._coroutines[name]
+                if existing.status == CoroutineStatus.RUNNING:
+                    if not replace:
+                        raise ValueError(f"协程 '{name}' 正在运行中")
+                    await self.cancel_coroutine(name)
+
+            # 创建任务
+            task = asyncio.create_task(self._run_coroutine(name, coro))
+            info = CoroutineInfo(
+                name=name,
+                status=CoroutineStatus.RUNNING,
+                started_at=datetime.now(),
+                task=task
+            )
+            self._coroutines[name] = info
+            logger.debug(f"后台协程已注册: {name}")
+            return task
+
+    async def _run_coroutine(self, name: str, coro: Coroutine) -> Any:
+        """包装协程执行，记录状态"""
+        try:
+            result = await coro
+            async with self._coroutine_lock:
+                if name in self._coroutines:
+                    self._coroutines[name].status = CoroutineStatus.COMPLETED
+                    self._coroutines[name].finished_at = datetime.now()
+            logger.debug(f"后台协程完成: {name}")
+            return result
+        except asyncio.CancelledError:
+            async with self._coroutine_lock:
+                if name in self._coroutines:
+                    self._coroutines[name].status = CoroutineStatus.CANCELLED
+                    self._coroutines[name].finished_at = datetime.now()
+            logger.debug(f"后台协程已取消: {name}")
+            raise
+        except Exception as e:
+            async with self._coroutine_lock:
+                if name in self._coroutines:
+                    self._coroutines[name].status = CoroutineStatus.FAILED
+                    self._coroutines[name].finished_at = datetime.now()
+                    self._coroutines[name].error = str(e)
+            logger.opt(exception=e).error(f"后台协程失败: {name}")
+            raise
+
+    async def cancel_coroutine(self, name: str) -> bool:
+        """取消指定协程"""
+        async with self._coroutine_lock:
+            if name not in self._coroutines:
+                return False
+
+            info = self._coroutines[name]
+            if info.task and not info.task.done():
+                info.task.cancel()
+                try:
+                    await info.task
+                except asyncio.CancelledError:
+                    pass
+            return True
+
+    async def cancel_all_coroutines(self) -> None:
+        """取消所有运行中的协程"""
+        async with self._coroutine_lock:
+            for name, info in self._coroutines.items():
+                if info.task and not info.task.done():
+                    info.task.cancel()
+
+        # 等待所有协程完成
+        tasks = [info.task for info in self._coroutines.values() if info.task]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        logger.info("所有后台协程已取消")
+
+    def get_coroutine_status(self, name: str) -> Optional[CoroutineInfo]:
+        """获取协程状态"""
+        return self._coroutines.get(name)
+
+    def list_coroutines(self) -> Dict[str, CoroutineInfo]:
+        """列出所有协程"""
+        return dict(self._coroutines)
+
+    def get_running_coroutine_count(self) -> int:
+        """获取运行中的协程数量"""
+        return sum(1 for c in self._coroutines.values() if c.status == CoroutineStatus.RUNNING)
 

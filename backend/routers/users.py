@@ -1,23 +1,26 @@
 # backend/routers/users.py
 
+import asyncio
 import os
 import uuid
 import hashlib
 import shutil
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from pathlib import Path
 
 from backend.core import security, crud, models, schemas
+from backend.core.responses import success, error, ErrorCodes
 from backend.core.api import get_uuid_by_name
 from backend.core.logger import logger
 from backend.core.database import get_db
 from backend.core.auth import get_current_user, require_role
 from backend.core.constants import AVATAR_STORAGE_PATH, AVATAR_URL_PREFIX, AVATAR_MC_PATH, \
     UUID_HYPHEN_PATTERN
+from backend.core.rate_limit import login_limiter
 from backend.core.utils import get_str_md5, is_valid_mc_name
 from backend.core.schemas import Role, UserUpdate, UserSelfUpdate, PasswordChange
 
@@ -114,9 +117,14 @@ async def register_user(user: schemas.UserCreate, db: Session = Depends(get_db))
 
 
 @router.post("/token", response_model=schemas.Token)
-def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login_for_access_token(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    client_ip = request.client.host if request.client else "unknown"
+    if not login_limiter.check(client_ip):
+        raise HTTPException(429, "登录尝试过于频繁，请5分钟后重试")
+    
     user = crud.get_user_by_username(db, form_data.username)
     if not user or not security.verify_password(form_data.password, user.hashed_password):
+        login_limiter.record(client_ip)
         raise HTTPException(401, "账号名或密码错误", {"WWW-Authenticate": "Bearer"})
     
     # 登录时更新用户的 server_link_group_ids (Legacy & New)
@@ -150,8 +158,8 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     
     # 从数据库读取 token 过期时间
     sys_settings = crud.get_system_settings_data(db)
-    expire_minutes = sys_settings.get("token_expire_minutes", 10080)
-    return {"access_token": security.create_access_token({"sub": user.username}, expire_minutes=expire_minutes), "token_type": "bearer"}
+    expire_minutes = sys_settings.get("token_expire_minutes", 60)
+    return {"access_token": security.create_access_token({"sub": user.username, "tv": getattr(user, "token_version", 0)}, expire_minutes=expire_minutes), "token_type": "bearer"}
 
 
 @router.get("/users/me", response_model=schemas.UserOut)
@@ -489,11 +497,12 @@ async def check_permissions_config(db: Session = Depends(get_db), actor: models.
             from pathlib import Path
             dir_name = Path(s.path).name
             yml_path = Path(s.path) / 'permission.yml'
-            if not yml_path.exists():
+            if not await asyncio.to_thread(yml_path.exists):
                 results.append({ 'server': dir_name, 'path': str(yml_path), 'error': 'missing_file' })
                 continue
             try:
-                data = yaml.safe_load(yml_path.read_text(encoding='utf-8')) or {}
+                yml_content = await asyncio.to_thread(yml_path.read_text, encoding='utf-8')
+                data = yaml.safe_load(yml_content) or {}
             except Exception:
                 results.append({ 'server': dir_name, 'path': str(yml_path), 'error': 'parse_failed' })
                 continue
@@ -619,7 +628,9 @@ async def reset_password(
     # 允许重置密码；删除/降级在其它接口限制
     new_password = uuid.uuid4().hex[:12]
     crud.reset_user_password(db, user_id, new_password)
-    return {"id": user_id, "new_password": new_password}
+    u.token_version = (u.token_version or 0) + 1
+    db.commit()
+    return success({"id": user_id}, message="密码已重置")
 
 
 @router.delete("/users/{user_id}")
@@ -634,7 +645,7 @@ async def delete_user(
     if u.role == Role.OWNER.value and crud.count_owners(db) <= 1:
         raise HTTPException(400, "系统必须至少保留 1 个 OWNER，无法删除唯一的 OWNER")
     crud.delete_user_by_id(db, user_id)
-    return {"id": user_id, "deleted": True}
+    return success({"id": user_id, "deleted": True})
 
 
 @router.delete("/users")
@@ -654,4 +665,4 @@ async def batch_delete_users(
             to_keep.append(uid)
         ids = to_keep
     deleted = crud.delete_users_by_ids(db, ids)
-    return {"deleted": deleted}
+    return success({"deleted": deleted})

@@ -37,6 +37,6 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None, e
         # 使用传入的 expire_minutes，否则使用常量默认值
         minutes = expire_minutes if expire_minutes is not None else ACCESS_TOKEN_EXPIRE_MINUTES
         expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt

@@ -22,6 +22,7 @@ class User(Base):
     qq = Column(String, nullable=True)
     bound_player_id = Column(Integer, nullable=True)
     server_link_group_ids = Column(String, nullable=True, default="[]")  # JSON array of group IDs (DEPRECATED)
+    token_version = Column(Integer, default=0, nullable=False)
 
 
 class UserGroupPermission(Base):
