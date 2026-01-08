@@ -9,13 +9,18 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pathlib import Path
 
-from backend.core import crud, schemas
+from backend.core import crud, schemas, models
 from backend.core.database import get_db
 from backend.core.constants import ARCHIVE_STORAGE_PATH, TEMP_PATH
 from backend.core.dependencies import task_manager, archive_manager
-from backend.core.schemas import TaskType, Role
+from backend.core.schemas import TaskType
 from backend.core.logger import logger
-from backend.core.auth import require_role
+from backend.core.auth import get_current_user
+from backend.services.permission_service import (
+    PermissionService,
+    require_server_manage,
+    GroupAction,
+)
 
 router = APIRouter(
     prefix="/api",
@@ -24,7 +29,8 @@ router = APIRouter(
 
 
 @router.get("/archives", response_model=List[schemas.Archive])
-async def read_archives(_user=Depends(require_role(Role.USER))):
+async def read_archives(current_user: models.User = Depends(get_current_user)):
+    """获取存档列表（所有已认证用户可访问）"""
     return await archive_manager.list_archives()
 
 
@@ -32,8 +38,9 @@ async def read_archives(_user=Depends(require_role(Role.USER))):
 async def create_archive_from_server(
         server_id: int,
         db: Session = Depends(get_db),
-        _user=Depends(require_role(Role.HELPER)),
+        current_user: models.User = Depends(require_server_manage(GroupAction.MANAGE)),
 ):
+    """从服务器创建存档（需要服务器 MANAGE 权限）"""
     task = await archive_manager.start_create_archive_from_server_task(db, server_id)
     return {"task_id": task.id, "message": "已开始创建存档任务"}
 
@@ -42,8 +49,11 @@ async def create_archive_from_server(
 async def upload_archive(
         file: UploadFile,
         mc_version: Optional[str] = None,
-        _user=Depends(require_role(Role.HELPER))
+        current_user: models.User = Depends(get_current_user)
 ):
+    """上传存档（需要平台管理员权限）"""
+    if not PermissionService.is_platform_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要平台管理员权限")
     if not any(file.filename.endswith(ext) for ext in ['.zip', '.tar', '.gz', '.7z', '.rar']):
         raise HTTPException(status_code=400, detail="不支持的文件格式。仅支持 zip, tar, tar.gz, 7z, rar。")
     archive_name = Path(file.filename).stem
@@ -55,8 +65,10 @@ async def upload_archive(
 
 
 @router.get("/archives/active-tasks", response_model=List[schemas.Task])
-async def get_active_archive_tasks(_user=Depends(require_role(Role.HELPER))):
-    """获取所有正在进行的存档任务的列表"""
+async def get_active_archive_tasks(current_user: models.User = Depends(get_current_user)):
+    """获取所有正在进行的存档任务的列表（需要平台管理员权限）"""
+    if not PermissionService.is_platform_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要平台管理员权限")
     active_list = []
     # 遍历全局任务字典
     for task_id, status_obj in task_manager.get_tasks(TaskType.CREATE_ARCHIVE, TaskType.UPLOAD_ARCHIVE).items():
@@ -77,12 +89,15 @@ async def download_archive(
         archive_id: int,
         background_tasks: BackgroundTasks,
         db: Session = Depends(get_db),
-        _user=Depends(require_role(Role.ADMIN))
+        current_user: models.User = Depends(get_current_user)
 ):
     """
+    下载存档（需要平台管理员权限）
     - 'SERVER' 类型，发送 .tar.gz 文件
     - 'UPLOADED' 类型，压缩目录为 .zip 文件并发送
     """
+    if not PermissionService.is_platform_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要平台管理员权限")
     db_archive = crud.get_archive_by_id(db, archive_id)
     if not db_archive:
         raise HTTPException(status_code=404, detail="存档不存在")
@@ -130,7 +145,14 @@ async def download_archive(
 
 
 @router.delete("/archives/delete/{archive_id}", status_code=204)
-def delete_archive(archive_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
+def delete_archive(
+        archive_id: int,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user)
+):
+    """删除存档（需要平台管理员权限）"""
+    if not PermissionService.is_platform_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要平台管理员权限")
     db_archive = crud.delete_archive(db, archive_id)
     file_path = db_archive.path
     if os.path.exists(file_path):
@@ -148,7 +170,14 @@ def delete_archive(archive_id: int, db: Session = Depends(get_db), _user=Depends
 
 
 @router.post("/archives/batch-delete", status_code=204)
-def batch_delete_archives(payload: schemas.BatchActionPayload, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
+def batch_delete_archives(
+        payload: schemas.BatchActionPayload,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user)
+):
+    """批量删除存档（需要平台管理员权限）"""
+    if not PermissionService.is_platform_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要平台管理员权限")
     if not payload.ids:
         raise HTTPException(status_code=400, detail="No archive IDs provided")
     archives_to_delete = crud.delete_archives_by_ids(db, payload.ids)
@@ -171,7 +200,8 @@ def batch_delete_archives(payload: schemas.BatchActionPayload, db: Session = Dep
 async def restore_archive_to_server(
         archive_id: int,
         server_id: int,
-        _user=Depends(require_role(Role.HELPER))
+        current_user: models.User = Depends(require_server_manage(GroupAction.MANAGE))
 ):
+    """恢复存档到服务器（需要服务器 MANAGE 权限）"""
     task = await archive_manager.start_restore_archive_task(archive_id, server_id)
     return {"task_id": task.id, "message": "已开始恢复存档任务"}

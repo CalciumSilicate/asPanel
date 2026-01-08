@@ -131,7 +131,7 @@ def on_load(server: PluginServerInterface, prev_module):
     
     # 也注册 /bindconfirm 作为快捷方式
     server.register_command(
-        Literal("!!bindconfirm")
+        Literal("!!bindcode")
         .then(
             Text("code")
             .runs(lambda src, ctx: confirm_bind(src, ctx["code"]))

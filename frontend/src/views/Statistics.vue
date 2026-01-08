@@ -163,7 +163,7 @@ const servers = ref<any[]>([])
 const scope = ref<'official_only'|'include_cracked'|'all'>('official_only')
 // 白名单筛选
 const whitelistUUIDs = ref<string[]>([])
-const whitelistOnly = ref<boolean>(true)
+const whitelistOnly = ref<boolean>(false)
 const whitelistSet = computed(() => new Set(whitelistUUIDs.value))
 
 const serverNames = computed(() => servers.value.map((s:any) => (s.path?.split('/').pop()) || s.name))

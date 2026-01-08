@@ -17,7 +17,7 @@ class BindVerificationService:
     """玩家绑定验证服务 - 内存存储待验证的绑定请求"""
     
     CODE_LENGTH = 6
-    CODE_EXPIRE_SECONDS = 300  # 5分钟过期
+    CODE_EXPIRE_SECONDS = 86400  # 24小时过期
     
     def __init__(self):
         self._pending: Dict[str, BindRequest] = {}  # code -> BindRequest

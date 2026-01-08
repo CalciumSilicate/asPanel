@@ -7,7 +7,7 @@
         <el-avatar :size="70" :src="fullAvatarUrl" :icon="UserFilled" />
         <div class="welcome-text">
           <div class="title">欢迎回来, {{ user.username || 'admin' }}!</div>
-          <div class="subtitle">这是您的服务器状态总览。</div>
+          <div class="subtitle">这是服务器状态总览。</div>
         </div>
       </div>
     </el-card>

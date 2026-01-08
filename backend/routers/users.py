@@ -732,7 +732,7 @@ async def reset_password(
     crud.reset_user_password(db, user_id, new_password)
     u.token_version = (u.token_version or 0) + 1
     db.commit()
-    return success({"id": user_id}, message="密码已重置")
+    return {"id": user_id, "new_password": new_password}
 
 
 @router.delete("/users/{user_id}")

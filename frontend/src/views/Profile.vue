@@ -86,7 +86,7 @@
         <el-card shadow="never" class="profile-card stats-card">
           <template #header>
             <div class="stats-header">
-              <span>游戏统计</span>
+              <span>游戏统计 (待完善)</span>
               <el-select v-model="statsRange" size="small" style="width: 120px;" @change="fetchStats">
                 <el-option label="今天" value="1d" />
                 <el-option label="本周" value="1w" />
@@ -156,8 +156,10 @@
             </template>
           </el-alert>
           <div class="verification-code-section">
-            <div class="verification-label">请在游戏内输入以下验证码:</div>
-            <div class="verification-code">{{ pendingBind.code }}</div>
+            <div class="verification-label">请在游戏内输入以下命令:</div>
+            <div class="verification-command">
+              <code class="command-text">!!bindcode {{ pendingBind.code }}</code>
+            </div>
             <div class="verification-expire">
               验证码将在 {{ formatExpireTime(pendingBind) }} 后过期
             </div>
@@ -192,7 +194,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { UserFilled, Camera, InfoFilled } from '@element-plus/icons-vue'
+import { UserFilled, Camera, InfoFilled, CopyDocument } from '@element-plus/icons-vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { user, fullAvatarUrl, fetchUser, refreshAvatar } from '@/store/user'
 import AvatarUploader from '@/components/AvatarUploader.vue'
@@ -495,6 +497,17 @@ function formatExpireTime(pending: PendingBind): string {
   const diffHour = Math.floor(diffMin / 60)
   return `${diffHour}小时${diffMin % 60}分钟`
 }
+
+const copyBindCommand = async () => {
+  if (!pendingBind.value?.code) return
+  const command = `!!bindcode ${pendingBind.value.code}`
+  try {
+    await navigator.clipboard.writeText(command)
+    ElMessage.success('命令已复制到剪贴板')
+  } catch {
+    ElMessage.error('复制失败，请手动复制')
+  }
+}
 </script>
 
 <style scoped>
@@ -756,6 +769,25 @@ function formatExpireTime(pending: PendingBind): string {
   letter-spacing: 4px;
   color: var(--el-color-primary);
   margin-bottom: 8px;
+}
+
+.verification-command {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.command-text {
+  font-size: 18px;
+  font-weight: 600;
+  font-family: monospace;
+  color: var(--el-color-primary);
+  background: var(--el-fill-color);
+  padding: 8px 16px;
+  border-radius: 6px;
+  user-select: all;
 }
 
 .verification-expire {
