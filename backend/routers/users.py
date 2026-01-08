@@ -544,7 +544,7 @@ async def update_user(
 @router.get("/users", response_model=list[schemas.UserOut])
 async def list_users(
         db: Session = Depends(get_db),
-        current_user: models.User = Depends(require_owner()),
+        current_user: models.User = Depends(require_admin()),
         search: str | None = Query(default=None),
         is_admin: bool | None = Query(default=None),
 ):

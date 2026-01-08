@@ -1,15 +1,15 @@
 <template>
   <div class="sl-page">
     <div class="left-wrap" :class="{ 'is-collapsed': asideCollapsed, 'is-collapsing': asideCollapsing }">
-      <!-- 左侧：服务器组列表（去除套娃 el-card，仅保留一个卡片） -->
-      <el-card class="left-panel" shadow="never">
+      <!-- 左侧：服务器组列表（仅平台管理员显示，非平台管理员自动使用顶栏选中的组） -->
+      <el-card class="left-panel" shadow="never" v-if="isPlatformAdmin">
         <template #header>
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
               <span class="text-base font-medium">聊天室</span>
             </div>
             <div class="flex items-center gap-2">
-              <el-button type="danger" size="small" @click="sendAlert" v-if="hasRole('ADMIN')">全局通知</el-button>
+              <el-button type="danger" size="small" @click="sendAlert" v-if="canSendAlert">全局通知</el-button>
             </div>
           </div>
         </template>
@@ -39,9 +39,9 @@
       </el-card>
 
       <!-- 右侧：聊天窗口 -->
-      <div class="right-panel">
+      <div class="right-panel" :class="{ 'full-width': !isPlatformAdmin }">
         <div v-if="!activeGroup" class="main-placeholder">
-          <el-empty description="请从左侧选择一个服务器组以进行聊天"/>
+          <el-empty :description="isPlatformAdmin ? '请从左侧选择一个服务器组以进行聊天' : '请在顶栏选择服务器组'"/>
         </div>
         <el-card v-else shadow="never" class="mb-3">
           <template #header>
@@ -49,6 +49,9 @@
               <div class="flex items-center gap-2">
                 <span class="text-base font-medium">{{ activeGroup ? activeGroup.name : '请选择服务器组' }}</span>
                 <el-tag v-if="activeGroup" size="small" type="info">在线服务器：{{ activeGroup ? onlineCount(activeGroup) : 0 }}</el-tag>
+              </div>
+              <div class="flex items-center gap-2" v-if="!isPlatformAdmin">
+                <el-button type="danger" size="small" @click="sendAlert" v-if="canSendAlert">全局通知</el-button>
               </div>
             </div>
           </template>
@@ -146,14 +149,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, ArrowDown, Promotion, UserFilled } from '@element-plus/icons-vue'
 import apiClient from '@/api'
 import { io } from 'socket.io-client'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import { settings } from '@/store/settings'
-import { hasRole } from '@/store/user'
+import { hasRole, isPlatformAdmin, activeGroupId, capabilities, user } from '@/store/user'
 
 
 // 同源连接 WebSocket（开发环境走 Vite 代理 /ws，生产由反代处理）
@@ -211,10 +214,23 @@ const selectGroup = (row) => {
   loadHistory()
 }
 
+// 非平台管理员是否应隐藏左侧组列表（自动使用顶栏选中的组）
+const shouldHideGroupList = computed(() => !isPlatformAdmin.value)
+
+// 能否发送 Alert（需要 HELPER+）
+const canSendAlert = computed(() => capabilities.value.canSendAlert)
+
 const loadGroups = async () => {
   const { data } = await apiClient.get('/api/tools/server-link/groups')
   groups.value = data || []
-  // 默认不自动进入第一个聊天室，保持空白，等待用户手动选择
+  
+  // 非平台管理员：自动使用顶栏选中的组
+  if (shouldHideGroupList.value && activeGroupId.value) {
+    const targetGroup = groups.value.find(g => g.id === activeGroupId.value)
+    if (targetGroup && targetGroup.id !== activeGroup.value?.id) {
+      selectGroup(targetGroup)
+    }
+  }
 }
 const loadServers = async () => {
   const { data } = await apiClient.get('/api/servers')
@@ -380,6 +396,16 @@ const onPresence = (payload) => {
 // 尽早注册实时事件监听，避免在 onMounted 之前到达的消息被丢弃
 socket.on('chat_message', onChatMessage)
 socket.on('chat_presence', onPresence)
+
+// 监听顶栏组切换（非平台管理员）
+watch(activeGroupId, (newGroupId) => {
+  if (!shouldHideGroupList.value) return
+  if (!newGroupId) return
+  const targetGroup = groups.value.find(g => g.id === newGroupId)
+  if (targetGroup && targetGroup.id !== activeGroup.value?.id) {
+    selectGroup(targetGroup)
+  }
+})
 
 onMounted(async () => {
   await loadMe()
@@ -627,6 +653,7 @@ const buildMessageSegments = (content) => {
 .left-panel :deep(.el-table) { width: 100%; }
 .left-panel :deep(.el-table__inner-wrapper) { width: 100%; }
 .right-panel { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.right-panel.full-width { width: 100%; }
 .right-panel :deep(.el-descriptions) { border-radius: 8px; overflow: hidden; }
 /* 让右侧唯一卡片填满高度，且去除外边距 */
 .right-panel > :deep(.el-card) { flex: 1 1 auto; height: 100%; }

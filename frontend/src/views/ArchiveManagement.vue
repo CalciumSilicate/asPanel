@@ -206,7 +206,7 @@
 </template>
 
 <script setup>
-import {ref, onMounted, onUnmounted, computed, reactive} from 'vue';
+import {ref, onMounted, onUnmounted, computed, reactive, watch} from 'vue';
 import {useRoute} from 'vue-router';
 import {ElMessage, ElMessageBox} from 'element-plus';
 import {Upload, Download, Delete, WarningFilled, FolderAdd, Search, Refresh, Folder, Document} from '@element-plus/icons-vue';
@@ -214,6 +214,7 @@ import apiClient, { isRequestCanceled } from '@/api';
 import { settings } from '@/store/settings'
 import { fetchTasks, onTaskEvent } from '@/store/tasks'
 import { downloadArchive, startUpload } from '@/store/transfers'
+import { activeGroupIds } from '@/store/user'
 
 // --- 状态 ---
 const allArchives = ref([]);
@@ -502,6 +503,12 @@ const scheduleRefreshArchives = () => {
     await fetchArchives();
   }, 800);
 };
+
+// 监听组切换，重新加载存档和服务器列表
+watch(activeGroupIds, () => {
+  allServers.value = []
+  fetchArchives()
+}, { deep: true })
 
 onMounted(async () => {
   const route = useRoute();

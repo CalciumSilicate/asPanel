@@ -516,6 +516,7 @@ import apiClient, { isRequestCanceled } from '@/api';
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import { fetchTasks } from '@/store/tasks'
 import { startDownload } from '@/store/transfers'
+import { activeGroupIds } from '@/store/user'
 
 // --- Interfaces ---
 interface Asset {
@@ -1124,6 +1125,14 @@ const handleInstallDbPlugins = async () => {
 };
 
 // --- Lifecycle ---
+// 监听组切换，重新加载服务器和插件列表
+watch(activeGroupIds, () => {
+  selectedServerId.value = null
+  currentPlugins.value = []
+  serverPluginsMap.clear()
+  initialLoad()
+}, { deep: true })
+
 onMounted(() => {
   initialLoad();
 });

@@ -7,9 +7,9 @@ import yaml
 import asyncio
 import psutil
 import shutil
-from fastapi import APIRouter, Depends, HTTPException, status, Response, BackgroundTasks, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, Response, BackgroundTasks, UploadFile, Header, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from pathlib import Path
 
 from backend.tools import server_parser
@@ -28,7 +28,20 @@ from backend.core.api import (
     get_fabric_version_meta,
     get_forge_installer_meta
 )
-from backend.services.permission_service import PermissionService
+from backend.services.permission_service import PermissionService, GroupAction
+
+
+def check_server_admin_permission(db: Session, user: models.User, server_id: int) -> None:
+    """检查用户是否有管理该服务器的权限（组 ADMIN 或平台管理员）
+    
+    如果没有权限，抛出 403 异常
+    """
+    if not PermissionService.can_manage_server(db, user, server_id, GroupAction.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="您没有权限管理此服务器（需要在服务器所属组拥有 ADMIN 权限）"
+        )
+
 
 router = APIRouter(
     prefix="/api",
@@ -38,18 +51,48 @@ router = APIRouter(
 
 # --- Server Endpoints ---
 @router.get('/servers', response_model=List[schemas.ServerDetail])
-async def get_servers(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+async def get_servers(
+    db: Session = Depends(get_db), 
+    current_user: models.User = Depends(get_current_user),
+    x_active_group_id: Optional[int] = Header(None, alias="X-Active-Group-Id"),
+    group_id: Optional[int] = Query(None, description="组上下文过滤，优先级低于 header")
+):
+    """获取服务器列表
+    
+    - 平台管理员（OWNER/ADMIN）：
+      - 无组上下文：返回所有服务器
+      - 有组上下文：返回该组内服务器
+    - 普通用户：
+      - 必须按组上下文过滤（若无则按用户可访问的所有服务器）
+    """
     all_servers = await server_service.get_servers_list(db)
     
-    # 平台管理员返回所有服务器
+    # 解析组上下文：header 优先
+    active_group_id = x_active_group_id or group_id
+    
+    # 平台管理员
     if PermissionService.is_platform_admin(current_user):
+        if active_group_id:
+            # 有组上下文，按组过滤
+            group_server_ids = set(PermissionService.filter_servers_by_groups(db, current_user, [active_group_id]))
+            return [s for s in all_servers if s.id in group_server_ids]
         return all_servers
     
-    # 普通用户根据组权限过滤
+    # 普通用户：先获取可访问的服务器
     accessible_server_ids = set(PermissionService.get_accessible_servers(db, current_user))
     
     if not accessible_server_ids:
         return []
+    
+    # 如果有组上下文，进一步过滤
+    if active_group_id:
+        # 验证用户是否有权访问该组
+        if not PermissionService.check_group_permission(db, current_user, active_group_id):
+            raise HTTPException(status_code=403, detail="无权访问该服务器组")
+        group_server_ids = set(PermissionService.filter_servers_by_groups(db, current_user, [active_group_id]))
+        # 取交集
+        final_ids = accessible_server_ids & group_server_ids
+        return [s for s in all_servers if s.id in final_ids]
     
     return [s for s in all_servers if s.id in accessible_server_ids]
 
@@ -60,23 +103,42 @@ async def get_server_sizes(db: Session = Depends(get_db), _user: models.User = D
 
 
 @router.post('/servers/create', status_code=status.HTTP_202_ACCEPTED)
-async def create_server(server: schemas.ServerCreate, user: models.User = Depends(require_role(Role.ADMIN))):
-    # PERMISSION: ADMIN
+async def create_server(
+    server: schemas.ServerCreate, 
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user)
+):
+    # PERMISSION: 用户必须在要加入的所有组中有 ADMIN 权限，或者是平台管理员
+    if not PermissionService.is_platform_admin(user):
+        if not server.server_link_group_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="必须指定至少一个服务器组"
+            )
+        for group_id in server.server_link_group_ids:
+            if not PermissionService.check_group_permission(db, user, group_id, GroupAction.ADMIN):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"您没有权限在组 ID={group_id} 中创建服务器"
+                )
     task = await server_service.start_create_server_task(server, user.id)
     return {"task_id": task.id, "message": "已开始创建服务器任务"}
 
 
 @router.delete("/servers/{server_id}", status_code=status.HTTP_202_ACCEPTED)
-async def delete_server(server_id: int, _user: models.User = Depends(require_role(Role.ADMIN))):
-    # PERMISSION: ADMIN
+async def delete_server(server_id: int, db: Session = Depends(get_db),
+                       current_user: models.User = Depends(get_current_user)):
+    # PERMISSION: 组 ADMIN 或平台管理员
+    check_server_admin_permission(db, current_user, server_id)
     task = await server_service.start_delete_server_task(server_id)
     return {"task_id": task.id, "message": "已开始删除服务器任务"}
 
 
 @router.post("/servers/{server_id}/rename")
 async def rename_server(server_id: int, new_name: str, db: Session = Depends(get_db),
-                        _user: models.User = Depends(require_role(Role.ADMIN))):
-    # PERMISSION: ADMIN
+                        current_user: models.User = Depends(get_current_user)):
+    # PERMISSION: 组 ADMIN 或平台管理员
+    check_server_admin_permission(db, current_user, server_id)
     if not new_name or not new_name.strip():
         raise HTTPException(status_code=400, detail="服务器名称不能为空")
     new_name = new_name.strip()
@@ -92,8 +154,9 @@ async def rename_server(server_id: int, new_name: str, db: Session = Depends(get
 # --- Server Action Endpoints ---
 @router.post('/servers/start')
 async def start_server(server_id: int, db: Session = Depends(get_db),
-                       _user: models.User = Depends(require_role(Role.ADMIN))):
-    # PERMISSION: ADMIN
+                       current_user: models.User = Depends(get_current_user)):
+    # PERMISSION: 组 ADMIN 或平台管理员
+    check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(404, "Server not found")
@@ -107,8 +170,10 @@ async def start_server(server_id: int, db: Session = Depends(get_db),
 async def set_server_auto_start(
         payload: schemas.ServerAutoStartPayload,
         db: Session = Depends(get_db),
-        _user: models.User = Depends(require_role(Role.ADMIN)),
+        current_user: models.User = Depends(get_current_user),
 ):
+    # PERMISSION: 组 ADMIN 或平台管理员
+    check_server_admin_permission(db, current_user, payload.server_id)
     db_server = crud.set_server_auto_start(db, payload.server_id, payload.auto_start)
     if not db_server:
         raise HTTPException(404, "Server not found")
@@ -121,8 +186,9 @@ async def set_server_auto_start(
 
 @router.post("/servers/stop")
 async def stop_server(server_id: int, db: Session = Depends(get_db),
-                      _user: models.User = Depends(require_role(Role.ADMIN))):
-    # PERMISSION: ADMIN
+                      current_user: models.User = Depends(get_current_user)):
+    # PERMISSION: 组 ADMIN 或平台管理员
+    check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
     await mcdr_manager.stop(server)
     return {"status": "success"}
@@ -130,8 +196,9 @@ async def stop_server(server_id: int, db: Session = Depends(get_db),
 
 @router.post("/servers/force-kill")
 async def force_kill_server(server_id: int, db: Session = Depends(get_db),
-                            _user: models.User = Depends(require_role(Role.ADMIN))):
-    # PERMISSION: ADMIN
+                            current_user: models.User = Depends(get_current_user)):
+    # PERMISSION: 组 ADMIN 或平台管理员
+    check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
     server_status, _ = await mcdr_manager.get_status(server_id, server.path)
     success, message = await mcdr_manager.force_kill(server)
@@ -143,8 +210,9 @@ async def force_kill_server(server_id: int, db: Session = Depends(get_db),
 
 @router.post("/servers/restart")
 async def restart_server_endpoint(server_id: int, db: Session = Depends(get_db),
-                                  _user: models.User = Depends(require_role(Role.ADMIN))):
-    # PERMISSION: ADMIN
+                                  current_user: models.User = Depends(get_current_user)):
+    # PERMISSION: 组 ADMIN 或平台管理员
+    check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(404, "Server not found")
@@ -165,18 +233,28 @@ async def get_server_status(server_id: int, db: Session = Depends(get_db),
 
 @router.post("/servers/start-for-while")
 async def start_for_while(server_id: int, delay: int = 3, db: Session = Depends(get_db),
-                          _user: models.User = Depends(require_role(Role.ADMIN))):
-    # PERMISSION: ADMIN
+                          current_user: models.User = Depends(get_current_user)):
+    # PERMISSION: 组 ADMIN 或平台管理员
+    check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
     await mcdr_manager.start_for_a_while(server, delay)
 
 
 @router.post('/servers/batch-action')
 async def batch_action_on_servers(action: str, payload: schemas.BatchActionPayload, db: Session = Depends(get_db),
-                                  _user: models.User = Depends(require_role(Role.ADMIN))):
-    # PERMISSION: ADMIN
+                                  current_user: models.User = Depends(get_current_user)):
+    # PERMISSION: 对每个服务器检查组 ADMIN 权限
     if not payload.ids:
         raise HTTPException(400, "No server IDs provided")
+    
+    # 验证用户对所有服务器都有权限
+    for sid in payload.ids:
+        if not PermissionService.can_manage_server(db, current_user, int(sid), GroupAction.ADMIN):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"您没有权限管理服务器 ID={sid}"
+            )
+    
     if action == "delete":
         task_ids: List[str] = []
         failed: List[dict] = []
@@ -208,8 +286,9 @@ async def batch_action_on_servers(action: str, payload: schemas.BatchActionPaylo
 
 @router.get("/servers/config", response_model=schemas.ServerConfigResponse)
 async def get_server_config(server_id: int, db: Session = Depends(get_db),
-                            _user: models.User = Depends(require_role(Role.ADMIN))):
-    # PERMISSION: ADMIN
+                            current_user: models.User = Depends(get_current_user)):
+    # PERMISSION: 组 ADMIN 或平台管理员
+    check_server_admin_permission(db, current_user, server_id)
     db_server = crud.get_server_by_id(db, server_id)
     if not db_server:
         raise HTTPException(404, "Server not found")
@@ -297,9 +376,10 @@ async def save_server_config(
         payload: schemas.ServerConfigPayload,
         background_tasks: BackgroundTasks,
         db: Session = Depends(get_db),
-        _user: models.User = Depends(require_role(Role.ADMIN))
+        current_user: models.User = Depends(get_current_user)
 ):
-    # PERMISSION: ADMIN
+    # PERMISSION: 组 ADMIN 或平台管理员
+    check_server_admin_permission(db, current_user, payload.server_id)
     server = crud.get_server_by_id(db, payload.server_id)
     legacy_server_core_config = ServerCoreConfig.model_validate(json.loads(server.core_config))
     if not server:
@@ -536,9 +616,10 @@ async def get_servers_resource_usage(db: Session = Depends(get_db),
 async def read_server_logs(
         server_id: int, line_limit: int = 200,
         db: Session = Depends(get_db),
-        _user: models.User = Depends(require_role(Role.ADMIN))
+        current_user: models.User = Depends(get_current_user)
 ):
-    # PERMISSION: ADMIN
+    # PERMISSION: 组 ADMIN 或平台管理员
+    check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id=server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
@@ -554,9 +635,10 @@ async def get_config_file(
         server_id: int,
         file_type: str,
         db: Session = Depends(get_db),
-        _user: models.User = Depends(require_role(Role.ADMIN))
+        current_user: models.User = Depends(get_current_user)
 ):
-    # PERMISSION: ADMIN
+    # PERMISSION: 组 ADMIN 或平台管理员
+    check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
@@ -583,9 +665,10 @@ async def save_config_file(
         server_id: int,
         payload: schemas.FileContentUpdate,
         db: Session = Depends(get_db),
-        _user: models.User = Depends(require_role(Role.ADMIN))
+        current_user: models.User = Depends(get_current_user)
 ):
-    # PERMISSION: ADMIN
+    # PERMISSION: 组 ADMIN 或平台管理员
+    check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
@@ -613,9 +696,11 @@ async def upload_server_map_json(
         map_kind: str,
         file: UploadFile,
         db: Session = Depends(get_db),
-        _user: models.User = Depends(require_role(Role.ADMIN))
+        current_user: models.User = Depends(get_current_user)
 ):
     """上传位置地图 json（nether/overworld 双维度、end 单维度）并写入 Server.map。"""
+    # PERMISSION: 组 ADMIN 或平台管理员
+    check_server_admin_permission(db, current_user, server_id)
     if map_kind not in ["nether", "end"]:
         raise HTTPException(status_code=400, detail="Invalid map_kind, must be 'nether' or 'end'.")
     if not file or not file.filename or not file.filename.lower().endswith(".json"):

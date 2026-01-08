@@ -26,7 +26,7 @@ from backend.core.constants import (
     LITEMATIC_COMMAND_LIST_PATH,
 )
 from backend.core.database import SessionLocal
-from backend.services.permission_service import PermissionService
+from backend.services.permission_service import PermissionService, GroupAction
 
 router = APIRouter(prefix="/api", tags=["Utils"])
 
@@ -628,10 +628,18 @@ async def chat_send(payload: schemas.ChatSendPayload, db: Session = Depends(get_
         if not _user_can_access_group(db, current_user, payload.group_id):
             raise HTTPException(status_code=403, detail="无权限访问该服务器组")
     
-    # ALERT 消息只有平台管理员才能发送
+    # ALERT 消息：平台管理员 或 任意组的 HELPER+ 才能发送
     if level == "ALERT":
         if not PermissionService.is_platform_admin(current_user):
-            raise HTTPException(status_code=403, detail="无权限发送全局消息")
+            # 检查用户是否在任何组有 HELPER+ 权限
+            user_group_ids = PermissionService.get_user_groups(db, current_user)
+            has_helper_role = False
+            for gid in user_group_ids:
+                if PermissionService.check_group_permission(db, current_user, gid, GroupAction.MANAGE):
+                    has_helper_role = True
+                    break
+            if not has_helper_role:
+                raise HTTPException(status_code=403, detail="无权限发送全局消息（需要 HELPER 或更高权限）")
     
     # 保存消息（不再持久化 sender_avatar）
     msg = models.ChatMessage(

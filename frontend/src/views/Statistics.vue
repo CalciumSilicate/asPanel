@@ -155,6 +155,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import apiClient from '@/api'
 import { fetchDeltaSeries, fetchTotalSeries, fetchMetrics, fetchLeaderboardTotal } from '@/api/stats'
 import { loadECharts } from '@/utils/echartsLoader'
+import { activeGroupIds } from '@/store/user'
 
 const players = ref<any[]>([])
 const servers = ref<any[]>([])
@@ -847,6 +848,22 @@ const onWhitelistToggle = async () => {
   // 同步刷新全服总计（命中缓存）
   scheduleGlobalTotalRefresh(currentRankContextTs())
 }
+
+// 监听组切换，重新加载数据
+watch(activeGroupIds, async () => {
+  players.value = []
+  servers.value = []
+  selectedServerNames.value = []
+  selectedServerIds.value = []
+  selectedPlayers.value = []
+  rankItems.value = []
+  await Promise.all([fetchPlayers(), fetchServers(), fetchWhitelist()])
+  if (canQuery.value) {
+    await refreshRanks(false)
+    const ts = rankAtTs.value || currentTotalEndTs || Math.floor(Date.now()/1000)
+    await refreshGlobalTotalAtTs(ts)
+  }
+}, { deep: true })
 
 onMounted(async () => {
   await Promise.all([fetchPlayers(), fetchServers(), fetchWhitelist()])

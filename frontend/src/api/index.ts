@@ -41,6 +41,21 @@ const apiClient = axios.create({
     timeout: 10000, // 请求超时时间
 });
 
+// 不需要注入组上下文的 URL 白名单（精确匹配或前缀匹配）
+const GROUP_CONTEXT_SKIP_PATTERNS = [
+    '/api/auth',
+    '/api/users/me',
+    '/api/login',
+    '/api/register',
+    '/api/settings',
+    '/api/tools/server-link/groups', // 获取组列表本身不需要组上下文
+];
+
+const shouldSkipGroupContext = (url: string | undefined): boolean => {
+    if (!url) return true;
+    return GROUP_CONTEXT_SKIP_PATTERNS.some(pattern => url.startsWith(pattern));
+};
+
 // 请求拦截器 (Request Interceptor)
 apiClient.interceptors.request.use(
     config => {
@@ -48,6 +63,24 @@ apiClient.interceptors.request.use(
         if (token) {
             // 在每个请求的头部附加 Authorization
             config.headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        // 注入组上下文 header（非平台管理员且有选中组时）
+        // 动态导入避免循环依赖
+        const skipGroupContext = (config as any)?.skipGroupContext === true;
+        if (!skipGroupContext && !shouldSkipGroupContext(config.url)) {
+            try {
+                // 从 localStorage 读取保存的组选择（避免循环依赖）
+                const savedGroupIds = localStorage.getItem('asPanel_activeGroupIds');
+                if (savedGroupIds) {
+                    const parsed = JSON.parse(savedGroupIds);
+                    if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'number') {
+                        config.headers['X-Active-Group-Id'] = String(parsed[0]);
+                    }
+                }
+            } catch {
+                // ignore
+            }
         }
 
         // 默认：在路由切换时中断未完成的请求，避免切换栏目时被旧请求拖住

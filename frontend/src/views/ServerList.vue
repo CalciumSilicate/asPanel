@@ -165,21 +165,21 @@
             :loading="serverLinkGroupsLoading"
           >
             <el-option
-              v-for="g in serverLinkGroups"
+              v-for="g in selectableGroups"
               :key="g.id"
               :label="g.name"
               :value="g.id"
             />
           </el-select>
-          <div class="el-form-item__info" v-if="serverLinkGroups.length === 0 && !serverLinkGroupsLoading">
-            暂无服务器组，请先<a class="text-link" @click="goToServerLinkGroups">创建服务器组</a>
+          <div class="el-form-item__info" v-if="selectableGroups.length === 0 && !serverLinkGroupsLoading">
+            暂无可用的服务器组<template v-if="!isPlatformAdmin">（需要组 ADMIN 权限）</template>
           </div>
         </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="createDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleCreateServer" :disabled="serverLinkGroups.length === 0">创建</el-button>
+          <el-button type="primary" @click="handleCreateServer" :disabled="selectableGroups.length === 0">创建</el-button>
         </span>
       </template>
     </el-dialog>
@@ -238,21 +238,21 @@
             :loading="serverLinkGroupsLoading"
           >
             <el-option
-              v-for="g in serverLinkGroups"
+              v-for="g in selectableGroups"
               :key="g.id"
               :label="g.name"
               :value="g.id"
             />
           </el-select>
-          <div class="el-form-item__info" v-if="serverLinkGroups.length === 0 && !serverLinkGroupsLoading">
-            暂无服务器组，请先<a class="text-link" @click="goToServerLinkGroups">创建服务器组</a>
+          <div class="el-form-item__info" v-if="selectableGroups.length === 0 && !serverLinkGroupsLoading">
+            暂无可用的服务器组<template v-if="!isPlatformAdmin">（需要组 ADMIN 权限）</template>
           </div>
         </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="copyDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleCopyServer" :disabled="serverLinkGroups.length === 0">复制</el-button>
+          <el-button type="primary" @click="handleCopyServer" :disabled="selectableGroups.length === 0">复制</el-button>
         </span>
       </template>
     </el-dialog>
@@ -1103,7 +1103,7 @@ import {ElMessage, ElMessageBox, ElNotification} from 'element-plus';
 import ConfigEditor from '@/components/ConfigEditor.vue';
 import draggable from 'vuedraggable';
 import { settings } from '@/store/settings'
-import { hasRole } from '@/store/user';
+import { hasRole, activeGroupIds, activeGroupId, user, isPlatformAdmin } from '@/store/user';
 import { fetchTasks } from '@/store/tasks'
 
 	const router = useRouter();
@@ -1177,6 +1177,22 @@ const serverToRename = ref(null);
 // --- 服务器组相关状态 ---
 const serverLinkGroups = ref([]);
 const serverLinkGroupsLoading = ref(false);
+
+// 可选择的服务器组（非平台管理员只能选择自己有 ADMIN 权限的组）
+const selectableGroups = computed(() => {
+  // 平台管理员可以选择所有组
+  if (isPlatformAdmin.value) {
+    return serverLinkGroups.value;
+  }
+  // 非平台管理员只能选择自己有 ADMIN 权限的组
+  const adminGroupIds = new Set(
+    user.group_permissions
+      .filter(p => p.role === 'ADMIN')
+      .map(p => p.group_id)
+  );
+  return serverLinkGroups.value.filter(g => adminGroupIds.has(g.id));
+});
+
 const batchCommand = ref('');
 const configLoading = ref(false);
 const isSavingConfig = ref(false);
@@ -1361,6 +1377,11 @@ watch(
       }
     }
 );
+
+// 监听组切换，重新获取服务器列表
+watch(activeGroupIds, () => {
+  fetchServers();
+}, { deep: true });
 
 
 let serverSizesRequestSeq = 0;
@@ -1898,7 +1919,17 @@ const openCreateDialog = async () => {
   await fetchServerLinkGroups();
   createDialogVisible.value = true;
   if (formRef.value) formRef.value.resetFields();
-  newServerForm.value = {name: '', serverLinkGroupIds: []};
+  // 非平台管理员：预选当前组（如果有 ADMIN 权限）
+  let preselectedIds = [];
+  if (!isPlatformAdmin.value && activeGroupId.value) {
+    const hasAdminInCurrentGroup = user.group_permissions.some(
+      p => p.group_id === activeGroupId.value && p.role === 'ADMIN'
+    );
+    if (hasAdminInCurrentGroup) {
+      preselectedIds = [activeGroupId.value];
+    }
+  }
+  newServerForm.value = {name: '', serverLinkGroupIds: preselectedIds};
 };
 	const handleCreateServer = async () => {
 	  if (!formRef.value) return;
@@ -2078,7 +2109,17 @@ const handleImportServer = async () => {
 const openCopyDialog = async (server) => {
   await fetchServerLinkGroups();
   sourceServerToCopy.value = server;
-  copyServerForm.value = {name: '', serverLinkGroupIds: []}; // 重置表单
+  // 非平台管理员：预选当前组（如果有 ADMIN 权限）
+  let preselectedIds = [];
+  if (!isPlatformAdmin.value && activeGroupId.value) {
+    const hasAdminInCurrentGroup = user.group_permissions.some(
+      p => p.group_id === activeGroupId.value && p.role === 'ADMIN'
+    );
+    if (hasAdminInCurrentGroup) {
+      preselectedIds = [activeGroupId.value];
+    }
+  }
+  copyServerForm.value = {name: '', serverLinkGroupIds: preselectedIds};
   copyDialogVisible.value = true;
   nextTick(() => {
     if (copyFormRef.value) {

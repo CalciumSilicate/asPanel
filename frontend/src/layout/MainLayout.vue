@@ -10,34 +10,9 @@
         <span class="brand" v-show="!isCollapse">AS Panel</span>
       </div>
       <div class="header-right">
-        <!-- Group Context Selector -->
-        <div class="group-selector" v-if="user.id && user.group_permissions.length > 0" style="margin-right: 12px;">
-          <!-- OWNER/ADMIN: Multi-select -->
+        <!-- Group Context Selector: 只对非平台管理员显示 -->
+        <div class="group-selector" v-if="user.id && !isPlatformAdmin && user.group_permissions.length > 0" style="margin-right: 12px;">
           <el-select
-            v-if="isPlatformAdmin"
-            v-model="activeGroupIds"
-            multiple
-            collapse-tags
-            collapse-tags-tooltip
-            placeholder="全选/全局"
-            style="width: 180px;"
-            :max-collapse-tags="1"
-            clearable
-          >
-            <el-option
-              v-for="perm in user.group_permissions"
-              :key="perm.group_id"
-              :label="perm.group_name || `Group ${perm.group_id}`"
-              :value="perm.group_id"
-            >
-              <span style="float: left">{{ perm.group_name || `Group ${perm.group_id}` }}</span>
-              <span style="float: right; color: var(--el-text-color-secondary); font-size: 12px; margin-left: 10px;">{{ perm.role }}</span>
-            </el-option>
-          </el-select>
-          
-          <!-- Others: Single-select -->
-          <el-select
-            v-else
             :model-value="activeGroupIds[0]"
             @update:model-value="(val) => activeGroupIds = val ? [val] : []"
             placeholder="选择上下文"
@@ -291,7 +266,7 @@
           </el-sub-menu>
 
           <!-- Mods 管理 -->
-          <el-menu-item index="/tools/mods-manager" v-if="hasRole('ADMIN')">
+          <el-menu-item index="/tools/mods-manager" v-if="capabilities.canManageMods">
             <el-icon>
               <Grid/>
             </el-icon>
@@ -500,7 +475,7 @@ import {
   LocationInformation, Place, List, RefreshRight, Comment, DocumentCopy, Operation, Download, Upload,
   Moon, Sunny
 } from '@element-plus/icons-vue';
-import {user, fullAvatarUrl, fetchUser, clearUser, hasRole, activeGroupIds, isPlatformAdmin} from '@/store/user';
+import {user, fullAvatarUrl, fetchUser, clearUser, hasRole, activeGroupIds, isPlatformAdmin, capabilities} from '@/store/user';
 import { isDark, toggleTheme } from '@/store/theme'
 import {
   tasks,

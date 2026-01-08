@@ -95,36 +95,63 @@
               </template>
             </template>
           </el-table-column>
-          <el-table-column label="全局权限" width="180" align="center">
+          <el-table-column label="全局权限" width="140" align="center">
             <template #default="{ row }">
-              <div class="global-perm-cell">
-                <el-tag v-if="row.is_owner" type="danger" size="small">OWNER</el-tag>
-                <el-tag v-else-if="row.is_admin" type="warning" size="small">ADMIN</el-tag>
-                <el-tag v-else type="info" size="small">普通用户</el-tag>
-              </div>
-              <el-button v-if="isOwner" size="small" type="primary" link @click="openGlobalPermDialog(row)">编辑</el-button>
+              <!-- OWNER 标签不可点击 -->
+              <el-tag 
+                v-if="row.is_owner" 
+                type="danger" 
+                size="small"
+                class="perm-tag"
+              >
+                OWNER
+              </el-tag>
+              <!-- ADMIN 标签：非 OWNER 可以点击切换 -->
+              <el-tag 
+                v-else-if="row.is_admin" 
+                type="warning" 
+                size="small"
+                class="perm-tag clickable-tag"
+                :class="{ disabled: !canEditGlobalPerm(row) }"
+                @click="toggleAdmin(row)"
+              >
+                ADMIN
+              </el-tag>
+              <!-- 普通用户：可以点击变为 ADMIN -->
+              <el-tag 
+                v-else 
+                type="info" 
+                size="small"
+                class="perm-tag clickable-tag"
+                :class="{ disabled: !canEditGlobalPerm(row) }"
+                @click="toggleAdmin(row)"
+              >
+                用户
+              </el-tag>
             </template>
           </el-table-column>
           <el-table-column label="组权限" min-width="200" align="center">
             <template #default="{ row }">
-              <div class="group-perms-cell">
-                <template v-if="row.group_permissions && row.group_permissions.length > 0">
-                  <el-tag 
-                    v-for="perm in row.group_permissions.slice(0, 2)" 
-                    :key="perm.group_id" 
-                    size="small" 
-                    :type="groupRoleTagType(perm.role)"
-                    class="group-perm-tag"
-                  >
-                    {{ perm.group_name }}: {{ perm.role }}
-                  </el-tag>
-                  <el-tag v-if="row.group_permissions.length > 2" size="small" type="info">
-                    +{{ row.group_permissions.length - 2 }}
-                  </el-tag>
-                </template>
-                <span v-else class="no-perm">无组权限</span>
+              <div class="group-perms-row">
+                <div class="group-perms-tags">
+                  <template v-if="row.group_permissions && row.group_permissions.length > 0">
+                    <el-tag 
+                      v-for="perm in row.group_permissions.slice(0, 2)" 
+                      :key="perm.group_id" 
+                      size="small" 
+                      :type="groupRoleTagType(perm.role)"
+                      class="group-perm-tag"
+                    >
+                      {{ perm.group_name }}: {{ perm.role }}
+                    </el-tag>
+                    <el-tag v-if="row.group_permissions.length > 2" size="small" type="info">
+                      +{{ row.group_permissions.length - 2 }}
+                    </el-tag>
+                  </template>
+                  <span v-else class="no-perm">无组权限</span>
+                </div>
+                <el-button size="small" :icon="Edit" circle @click="openGroupPermDialog(row)" />
               </div>
-              <el-button size="small" type="primary" link @click="openGroupPermDialog(row)">编辑</el-button>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="220" align="center">
@@ -160,7 +187,13 @@
         <el-table-column label="服务器组" prop="group_name" min-width="150" />
         <el-table-column label="权限" width="180" align="center">
           <template #default="{ row, $index }">
-            <el-select v-model="editingGroupPerms[$index].role" size="small" style="width: 140px;">
+            <el-select 
+              v-model="editingGroupPerms[$index].role" 
+              size="small" 
+              style="width: 140px;"
+              clearable
+              placeholder="无权限"
+            >
               <el-option v-for="r in GROUP_ROLES" :key="r" :label="r" :value="r" />
             </el-select>
           </template>
@@ -171,45 +204,23 @@
         <el-button type="primary" @click="saveGroupPerms">保存</el-button>
       </template>
     </el-dialog>
-
-    <!-- 全局权限编辑弹窗 -->
-    <el-dialog v-model="globalPermDialogVisible" title="编辑全局权限" width="400px">
-      <el-form label-width="100px">
-        <el-form-item label="用户名">
-          <span>{{ editingGlobalPermUser?.username }}</span>
-        </el-form-item>
-        <el-form-item label="OWNER">
-          <el-switch v-model="editingIsOwner" :disabled="editingGlobalPermUser?.id === currentUserId" />
-          <span class="perm-desc">超级管理员，可管理所有权限</span>
-        </el-form-item>
-        <el-form-item label="ADMIN">
-          <el-switch v-model="editingIsAdmin" />
-          <span class="perm-desc">管理员，可管理组权限</span>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="globalPermDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveGlobalPerm">保存</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Search, Refresh, Delete, Key } from '@element-plus/icons-vue'
+import { Search, Refresh, Delete, Key, Edit } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import AvatarUploader from '@/components/AvatarUploader.vue'
-import { isOwner } from '@/store/user'
+import { isOwner, isPlatformAdmin } from '@/store/user'
 
-// 组权限等级（新版本，不含 GUEST 和 OWNER）
 type GroupRole = 'USER' | 'HELPER' | 'ADMIN'
 
 type GroupPermission = {
   group_id: number
   group_name: string
-  role: GroupRole
+  role: GroupRole | null | ''
 }
 
 type UserRow = {
@@ -233,7 +244,6 @@ type ServerGroup = {
 
 type Player = { id: number, uuid: string, player_name?: string | null }
 
-// 组权限等级选项（新版本）
 const GROUP_ROLES: GroupRole[] = ['USER', 'HELPER', 'ADMIN']
 
 const rows = ref<UserRow[]>([])
@@ -281,8 +291,7 @@ const pagedRows = computed(() => {
   return filteredRows.value.slice(start, start + pageSize.value)
 })
 
-// 组权限标签颜色
-const groupRoleTagType = (role: string): 'primary' | 'success' | 'info' | 'warning' | 'danger' => {
+const groupRoleTagType = (role: string | null): 'primary' | 'success' | 'info' | 'warning' | 'danger' => {
   switch (role) {
     case 'USER': return 'primary'
     case 'HELPER': return 'success'
@@ -291,11 +300,27 @@ const groupRoleTagType = (role: string): 'primary' | 'success' | 'info' | 'warni
   }
 }
 
-// 当前用户 ID
 import { user as currentUser } from '@/store/user'
 const currentUserId = computed(() => currentUser.id)
 
-// 编辑逻辑
+const canEditGlobalPerm = (row: UserRow): boolean => {
+  if (row.is_owner) return false
+  return isOwner.value
+}
+
+const toggleAdmin = async (row: UserRow) => {
+  if (!canEditGlobalPerm(row)) return
+  
+  const newIsAdmin = !row.is_admin
+  try {
+    await api.patch(`/api/users/${row.id}`, { is_admin: newIsAdmin })
+    ElMessage.success(newIsAdmin ? '已设为管理员' : '已取消管理员')
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '操作失败')
+  }
+}
+
 const editing = ref<{rowId:number|null, field:string|null, value:any}>({ rowId: null, field: null, value: '' })
 const startEdit = (row:UserRow, field:string, value:any) => {
   editing.value = { rowId: row.id, field, value }
@@ -317,7 +342,6 @@ const submitEdit = async (row:UserRow, field:string) => {
   }
 }
 
-// 头像
 const avatarVisible = ref(false)
 const avatarUserId = ref<number|null>(null)
 const avatarSrc = (row:UserRow) => {
@@ -331,35 +355,6 @@ const openAvatar = (row:UserRow) => {
   avatarVisible.value = true
 }
 
-// 全局权限编辑
-const globalPermDialogVisible = ref(false)
-const editingGlobalPermUser = ref<UserRow | null>(null)
-const editingIsOwner = ref(false)
-const editingIsAdmin = ref(false)
-
-const openGlobalPermDialog = (row: UserRow) => {
-  editingGlobalPermUser.value = row
-  editingIsOwner.value = row.is_owner
-  editingIsAdmin.value = row.is_admin
-  globalPermDialogVisible.value = true
-}
-
-const saveGlobalPerm = async () => {
-  if (!editingGlobalPermUser.value) return
-  try {
-    await api.patch(`/api/users/${editingGlobalPermUser.value.id}`, {
-      is_owner: editingIsOwner.value,
-      is_admin: editingIsAdmin.value
-    })
-    ElMessage.success('全局权限已更新')
-    globalPermDialogVisible.value = false
-    await load()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '保存全局权限失败')
-  }
-}
-
-// 操作
 const resetPassword = async (row:UserRow) => {
   try {
     const { data } = await api.post(`/api/users/${row.id}/reset-password`)
@@ -391,25 +386,18 @@ const batchDelete = async () => {
   }
 }
 
-// 组权限编辑
 const groupPermDialogVisible = ref(false)
 const editingGroupPermsUserId = ref<number | null>(null)
 const editingGroupPerms = ref<GroupPermission[]>([])
 
-const getUserGroupRole = (row: UserRow, groupId: number): string => {
-  const perm = row.group_permissions?.find(p => p.group_id === groupId)
-  return perm?.role || '—'
-}
-
 const openGroupPermDialog = (row: UserRow) => {
   editingGroupPermsUserId.value = row.id
-  // 初始化：为每个服务器组设置当前权限（如果有）
   editingGroupPerms.value = serverGroups.value.map(g => {
     const existing = row.group_permissions?.find(p => p.group_id === g.id)
     return {
       group_id: g.id,
       group_name: g.name,
-      role: existing?.role || 'USER'
+      role: existing?.role || null
     } as GroupPermission
   })
   groupPermDialogVisible.value = true
@@ -418,12 +406,13 @@ const openGroupPermDialog = (row: UserRow) => {
 const saveGroupPerms = async () => {
   if (!editingGroupPermsUserId.value) return
   try {
-    // 过滤掉没有设置的（保持默认USER的也发送）
-    const perms = editingGroupPerms.value.map(p => ({
-      group_id: p.group_id,
-      group_name: p.group_name,
-      role: p.role
-    }))
+    const perms = editingGroupPerms.value
+      .filter(p => p.role !== null && p.role !== '' && p.role !== undefined)
+      .map(p => ({
+        group_id: p.group_id,
+        group_name: p.group_name,
+        role: p.role
+      }))
     await api.patch(`/api/users/${editingGroupPermsUserId.value}`, {
       group_permissions: perms
     })
@@ -455,17 +444,49 @@ onMounted(async () => {
 :deep(.el-table--small .el-table__cell) { padding-top: 4px; padding-bottom: 4px; }
 :deep(.el-table .cell) { padding-top: 0; padding-bottom: 0; }
 .clickable { cursor: pointer; }
-.name-cell { display: flex; flex-direction: column; }
+.name-cell { display: flex; flex-direction: column; cursor: pointer; }
 .name-cell .pname { font-weight: 600; color: var(--el-text-color-primary); }
 .name-cell .uuid { color: var(--el-text-color-secondary); font-size: 12px; }
 .avatar { width: 36px; height: 36px; border-radius: 50%; background: #bbb; }
 .avatar.placeholder { background: #e5e7eb; }
-.avatar-wrap { display: inline-flex; align-items:center; justify-content:center; width:36px; height:36px; margin: 2px auto; }
+.avatar-wrap { display: inline-flex; align-items:center; justify-content:center; width:36px; height:36px; margin: 2px auto; cursor: pointer; }
 .um-pagination { display: flex; justify-content: flex-end; margin-top: 8px; }
-.group-perms-cell { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; margin-bottom: 4px; }
+.toolbar { display: flex; gap: 12px; align-items: center; }
+
+.perm-tag {
+  cursor: default;
+  user-select: none;
+}
+
+.clickable-tag {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.clickable-tag:hover:not(.disabled) {
+  transform: scale(1.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.clickable-tag.disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.group-perms-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.group-perms-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+}
+
 .group-perm-tag { margin: 1px; }
 .no-perm { color: var(--el-text-color-secondary); font-size: 12px; }
-.toolbar { display: flex; gap: 12px; align-items: center; }
-.global-perm-cell { margin-bottom: 4px; }
-.perm-desc { margin-left: 12px; color: var(--el-text-color-secondary); font-size: 12px; }
 </style>

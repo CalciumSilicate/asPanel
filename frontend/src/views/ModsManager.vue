@@ -319,7 +319,7 @@
 </template>
 
 <script setup>
-import {ref, computed, onMounted} from 'vue'
+import {ref, computed, onMounted, watch} from 'vue'
 import { ElMessage, ElNotification } from 'element-plus'
 import { Search, Plus, Delete, Download, Upload, UploadFilled, Refresh, CopyDocument } from '@element-plus/icons-vue'
 import apiClient, { isRequestCanceled } from '@/api'
@@ -327,6 +327,7 @@ import { asideCollapsed, asideCollapsing } from '@/store/ui'
 import router from '@/router'
 import { fetchTasks } from '@/store/tasks'
 import { startDownload, startUpload } from '@/store/transfers'
+import { activeGroupIds } from '@/store/user'
 
 // 左侧数据
 const servers = ref([])
@@ -806,6 +807,14 @@ const openModDetail = (row) => {
 }
 
 const goToServers = () => router.push('/servers')
+
+// 监听组切换，重新加载服务器和模组列表
+watch(activeGroupIds, () => {
+  selectedServer.value = null
+  mods.value = []
+  serverModsMap.clear()
+  initialLoad()
+}, { deep: true })
 
 onMounted(initialLoad)
 </script>

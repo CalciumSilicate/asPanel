@@ -667,6 +667,13 @@ def create_server_link_group(db: Session, payload: schemas.ServerLinkGroupCreate
     db.add(rec)
     db.commit()
     db.refresh(rec)
+    
+    # 同步关联表
+    for sid in (payload.server_ids or []):
+        if db.query(models.Server).filter(models.Server.id == sid).first():
+            db.add(models.GroupServer(group_id=rec.id, server_id=sid))
+    db.commit()
+    
     return rec
 
 
@@ -683,6 +690,13 @@ def update_server_link_group(db: Session, group_id: int, payload: schemas.Server
         rec.name = payload.name
     if payload.server_ids is not None:
         rec.server_ids = json.dumps(payload.server_ids)
+        # 同步关联表：先删除旧的，再添加新的
+        db.query(models.GroupServer).filter(
+            models.GroupServer.group_id == group_id
+        ).delete()
+        for sid in payload.server_ids:
+            if db.query(models.Server).filter(models.Server.id == sid).first():
+                db.add(models.GroupServer(group_id=group_id, server_id=sid))
     if payload.data_source_ids is not None:
         rec.data_source_ids = json.dumps(payload.data_source_ids)
     if payload.chat_bindings is not None:

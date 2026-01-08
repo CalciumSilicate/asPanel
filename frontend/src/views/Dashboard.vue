@@ -143,12 +143,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import apiClient, { isRequestCanceled } from '@/api';
 import { UserFilled, Monitor, Tickets, Cpu, DataLine, Folder } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import { user, fullAvatarUrl, hasRole } from '@/store/user';
+import { user, fullAvatarUrl, hasRole, activeGroupIds } from '@/store/user';
 
 const router = useRouter();
 
@@ -236,6 +236,11 @@ onMounted(() => {
   fetchDashboardData();
   refreshInterval = setInterval(fetchDashboardData, 5000);
 });
+
+// 监听组切换，重新获取仪表盘数据
+watch(activeGroupIds, () => {
+  fetchDashboardData();
+}, { deep: true });
 
 onUnmounted(() => {
   if (refreshInterval) {
