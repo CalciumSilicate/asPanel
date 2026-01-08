@@ -24,7 +24,7 @@ router = APIRouter(
 
 
 @router.get("/archives", response_model=List[schemas.Archive])
-async def read_archives(_user=Depends(require_role(Role.HELPER))):
+async def read_archives(_user=Depends(require_role(Role.USER))):
     return await archive_manager.list_archives()
 
 

@@ -62,7 +62,7 @@ def _require_server_access(
 
 
 @router.get("/plugins/mcdr/versions", response_model=schemas.PluginCatalogue)
-async def get_mcdr_catalogue(do_refresh=False, _user=Depends(require_role(Role.HELPER))):
+async def get_mcdr_catalogue(do_refresh=False):
     """获取 MCDR 官方插件市场目录"""
     _r = time.time() if do_refresh else None
     catalogue_data = await get_mcdr_plugins_catalogue(_r)
@@ -226,7 +226,7 @@ async def delete_server_plugin(
 
 
 @router.delete("/plugins/db/{plugin_db_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_db_plugin(plugin_db_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.HELPER))):
+async def delete_db_plugin(plugin_db_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
     """从中央仓库删除一个插件"""
     plugin_record = crud.get_plugin_by_id(db, plugin_db_id)
     if not plugin_record:

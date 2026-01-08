@@ -16,7 +16,7 @@ from backend.core.database import get_db
 from backend.core.constants import BASE_DIR
 from backend.core import crud, models
 from backend.core.logger import logger
-from backend.core.auth import require_role, get_current_user
+from backend.core.auth import get_current_user
 from backend.core.schemas import Role
 from backend.services.permission_service import PermissionService, GroupAction
 

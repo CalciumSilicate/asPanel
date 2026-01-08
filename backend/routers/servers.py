@@ -98,7 +98,7 @@ async def get_servers(
 
 
 @router.get('/servers/sizes', response_model=List[schemas.ServerSize])
-async def get_server_sizes(db: Session = Depends(get_db), _user: models.User = Depends(require_role(Role.GUEST))):
+async def get_server_sizes(db: Session = Depends(get_db)):
     return await server_service.get_servers_sizes(db)
 
 
@@ -223,8 +223,7 @@ async def restart_server_endpoint(server_id: int, db: Session = Depends(get_db),
 
 
 @router.get("/servers/status")
-async def get_server_status(server_id: int, db: Session = Depends(get_db),
-                            _user: models.User = Depends(require_role(Role.USER))):
+async def get_server_status(server_id: int, db: Session = Depends(get_db)):
     # PERMISSION: USER
     server = crud.get_server_by_id(db, server_id)
     st, _ = await mcdr_manager.get_status(server_id, server.path)

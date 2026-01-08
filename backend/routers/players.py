@@ -28,8 +28,7 @@ router = APIRouter(
 
 
 @router.get("", response_model=List[schemas.Player])
-async def list_players(scope: Optional[str] = "all", db: Session = Depends(get_db),
-                       _user: models.User = Depends(require_role(Role.USER))):
+async def list_players(scope: Optional[str] = "all", db: Session = Depends(get_db)):
     scope = scope or "all"
     if scope not in ("all", "official_only", "include_cracked"):
         scope = "all"
@@ -95,8 +94,7 @@ async def refresh_all_names_endpoint(_user: models.User = Depends(require_role(R
 
 
 @router.get("/whitelist-uuids", response_model=List[str])
-async def get_whitelist_uuids(db: Session = Depends(get_db),
-                              _user: models.User = Depends(require_role(Role.USER))):
+async def get_whitelist_uuids(db: Session = Depends(get_db)):
     """聚合所有服务器 `<server_path>/server/whitelist.json` 中的 uuid 并去重返回。
     - 文件不存在或解析失败的服务器将跳过。
     - whitelist.json 典型为数组对象，包含键 `uuid` 与 `name`。
@@ -127,8 +125,7 @@ class DataSourceSelectionUpdate(BaseModel):
 
 
 @router.get("/data-source-selection", response_model=List[str])
-async def get_data_source_selection(db: Session = Depends(get_db),
-                                    _user: models.User = Depends(require_role(Role.USER))):
+async def get_data_source_selection(db: Session = Depends(get_db)):
     """获取玩家管理页面最近一次保存的数据来源（服务器名列表）。"""
     data = crud.get_system_settings_data(db)
     lst = data.get('player_manager_selected_servers') or []
@@ -139,8 +136,7 @@ async def get_data_source_selection(db: Session = Depends(get_db),
 
 @router.patch("/data-source-selection", response_model=List[str])
 async def set_data_source_selection(payload: DataSourceSelectionUpdate,
-                                    db: Session = Depends(get_db),
-                                    _user: models.User = Depends(require_role(Role.USER))):
+                                    db: Session = Depends(get_db)):
     """保存玩家管理页面数据来源（服务器名列表）。"""
     # 存入系统设置 JSON 中
     current = crud.update_system_settings(db, {'player_manager_selected_servers': payload.servers or []})
