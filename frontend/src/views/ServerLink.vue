@@ -1,8 +1,8 @@
 <template>
   <div class="sl-page">
     <div class="left-wrap" :class="{ 'is-collapsed': asideCollapsed, 'is-collapsing': asideCollapsing }">
-      <!-- 左侧：服务器组列表（仿 PrimeBackup 左侧列表） -->
-      <div class="table-card left-panel">
+      <!-- 左侧：服务器组列表（仅平台管理员显示） -->
+      <div class="table-card left-panel" v-if="isPlatformAdmin">
         <el-card shadow="never">
           <template #header>
             <div class="flex items-center justify-between">
@@ -40,7 +40,12 @@
       </div>
 
       <!-- 右侧：组详情与配置（仿 PrimeBackup 右侧卡片 + 表格布局） -->
-      <div class="right-panel">
+      <div class="right-panel" :class="{ 'full-width': !isPlatformAdmin }">
+        <!-- 非平台管理员：显示只读提示 -->
+        <div v-if="!isPlatformAdmin" class="main-placeholder">
+          <el-empty description="此页面仅对平台管理员开放"/>
+        </div>
+        <template v-else>
         <el-card shadow="never" class="mb-3">
           <template #header>
             <div class="flex items-center justify-between">
@@ -104,6 +109,7 @@
         </el-card>
 
         <!-- 右侧下方可扩展区域：比如展示组内服务器详情、拓扑等。先留空。 -->
+        </template>
       </div>
     </div>
   </div>
@@ -115,6 +121,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import apiClient from '@/api'
 import { asideCollapsed, asideCollapsing } from '@/store/ui'
+import { isPlatformAdmin, activeGroupId } from '@/store/user'
 
 // 服务器列表（来自 /api/servers）
 const servers = ref([])
@@ -304,8 +311,10 @@ const loadGroups = async () => {
 .left-panel :deep(.el-table__inner-wrapper) { width: 100%; }
 .left-panel :deep(.el-table) { flex: 1 1 auto; min-height: 0; }
 .right-panel { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.right-panel.full-width { width: 100%; }
 .right-panel :deep(.el-descriptions) { border-radius: 8px; overflow: hidden; }
 .right-panel { scrollbar-gutter: stable; scrollbar-width: thin; }
+.main-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; }
 /* 工具类 */
 .mb-2 { margin-bottom: 8px; }
 .mb-3 { margin-bottom: 12px; }

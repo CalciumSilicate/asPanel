@@ -13,7 +13,7 @@
               <el-button type="primary" :disabled="!canSubmit" @click="handleGenerateDownload">
                 生成并下载 level.dat
               </el-button>
-              <el-button type="success" :disabled="!canSubmit" @click="openApplyDialog">
+              <el-button type="success" :disabled="!canSubmit" @click="openApplyDialog"  v-if="hasRole('ADMIN')">
                 应用到服务器
               </el-button>
             </el-button-group>
@@ -138,6 +138,7 @@ import {ElMessage, ElMessageBox, ElNotification} from 'element-plus'
 import draggable from 'vuedraggable'
 import { Plus, Refresh, Delete, Rank } from '@element-plus/icons-vue'
 import apiClient, { isRequestCanceled } from '@/api'
+import { hasRole, activeGroupIds, activeGroupId, user, isPlatformAdmin } from '@/store/user';
 
 // 表单状态
 const form = ref({

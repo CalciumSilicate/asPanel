@@ -12,14 +12,15 @@ from sqlalchemy.orm import Session
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from backend.core import crud
-from backend.core.auth import require_role
+from backend.core import crud, models
+from backend.core.auth import require_role, get_current_user
 from backend.core.constants import TEMP_PATH
 from backend.core.utils import get_file_md5, get_file_sha256, get_size_bytes, get_file_sha1
 from backend.core.database import get_db, SessionLocal
 from backend.core.logger import logger
 from backend.core.schemas import Role, ServerCoreConfig, ModDBCreate, ServerModsCount, TaskType, TaskStatus
 from backend.core.dependencies import mod_manager, task_manager
+from backend.services.permission_service import PermissionService, GroupAction
 
 router = APIRouter(prefix="/api", tags=["Mods"])
 
@@ -47,6 +48,15 @@ def _mods_dir_for_server(server: Any) -> Path:
         p = Path(server.path) / 'server' / 'mods'
     p.mkdir(exist_ok=True, parents=True)
     return p
+
+
+def _check_server_admin_permission(db: Session, user: models.User, server_id: int) -> None:
+    """检查用户是否有管理该服务器的权限（组 ADMIN 或平台管理员）"""
+    if not PermissionService.can_manage_server(db, user, server_id, GroupAction.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="您没有权限管理此服务器的模组"
+        )
 
 
 async def _try_fill_meta_from_modrinth_by_hash(file_path: Path) -> Dict[str, Any] | None:
@@ -106,12 +116,13 @@ async def list_server_mods(
         server_id: int,
         skip_enrich: bool = Query(False, description='跳过元数据补全与哈希计算以提升速度'),
         db: Session = Depends(get_db),
-        _user=Depends(require_role(Role.ADMIN))
+        current_user: models.User = Depends(get_current_user)
 ):
     """列出服务器 mods 目录下的模组，并尝试从本地数据库或 Modrinth 补全元信息。
 
     返回结构与 plugins 列表相似：{"data": [ ... ]}
     """
+    _check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
@@ -119,8 +130,13 @@ async def list_server_mods(
 
 
 @router.get('/mods/overview/{server_id}')
-async def mods_overview(server_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
+async def mods_overview(
+    server_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
     """提供 mods 目录的概览信息。"""
+    _check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
@@ -134,9 +150,18 @@ async def mods_usage_total(db: Session = Depends(get_db), _user=Depends(require_
 
 
 @router.get('/mods/servers', response_model=List[ServerModsCount])
-async def list_servers_mods_counts(db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
+async def list_servers_mods_counts(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
     """汇总所有服务器的 mods 数量（不含模组列表与大小）。"""
-    servers = crud.get_all_servers(db)
+    # 获取用户可访问的服务器
+    if PermissionService.is_platform_admin(current_user):
+        servers = crud.get_all_servers(db)
+    else:
+        accessible_ids = set(PermissionService.get_accessible_servers(db, current_user))
+        servers = [s for s in crud.get_all_servers(db) if s.id in accessible_ids]
+    
     if not servers:
         return []
 
@@ -152,8 +177,14 @@ async def list_servers_mods_counts(db: Session = Depends(get_db), _user=Depends(
 
 
 @router.post('/mods/server/{server_id}/switch/{file_name}')
-async def switch_mod(server_id: int, file_name: str, enable: Optional[bool] = None, db: Session = Depends(get_db),
-                     _user=Depends(require_role(Role.ADMIN))):
+async def switch_mod(
+    server_id: int,
+    file_name: str,
+    enable: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    _check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
@@ -161,8 +192,13 @@ async def switch_mod(server_id: int, file_name: str, enable: Optional[bool] = No
 
 
 @router.delete('/mods/server/{server_id}/{file_name}', status_code=status.HTTP_204_NO_CONTENT)
-async def delete_mod(server_id: int, file_name: str, db: Session = Depends(get_db),
-                     _user=Depends(require_role(Role.ADMIN))):
+async def delete_mod(
+    server_id: int,
+    file_name: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    _check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
@@ -171,8 +207,13 @@ async def delete_mod(server_id: int, file_name: str, db: Session = Depends(get_d
 
 
 @router.get('/mods/download/{server_id}/{file_name}')
-async def download_mod(server_id: int, file_name: str, db: Session = Depends(get_db),
-                       _user=Depends(require_role(Role.ADMIN))):
+async def download_mod(
+    server_id: int,
+    file_name: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    _check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
@@ -181,9 +222,14 @@ async def download_mod(server_id: int, file_name: str, db: Session = Depends(get
 
 
 @router.post('/mods/upload/{server_id}')
-async def upload_mod(server_id: int, file: UploadFile, db: Session = Depends(get_db),
-                     _user=Depends(require_role(Role.ADMIN))):
+async def upload_mod(
+    server_id: int,
+    file: UploadFile,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
     """上传本地模组到服务器 mods 目录，并写入元信息记录（若可识别）。"""
+    _check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
@@ -200,9 +246,11 @@ class ModsCopyPayload(BaseModel):
 async def copy_mods(
         payload: ModsCopyPayload,
         db: Session = Depends(get_db),
-        _user=Depends(require_role(Role.ADMIN))
+        current_user: models.User = Depends(get_current_user)
 ):
     """从一个服务器复制所有模组到另一个服务器。可选先清空目标。"""
+    # 需要对目标服务器有 ADMIN 权限
+    _check_server_admin_permission(db, current_user, payload.target_server_id)
     src = crud.get_server_by_id(db, payload.source_server_id)
     dst = crud.get_server_by_id(db, payload.target_server_id)
     if not src or not dst:
@@ -267,7 +315,7 @@ async def search_modrinth(
         game_version: Optional[str] = None,
         loader: Optional[str] = None,
         project_type: Optional[str] = None,
-        _user=Depends(require_role(Role.ADMIN))
+        _user=Depends(get_current_user)
 ):
     """代理 Modrinth 搜索接口。简化版，仅支持 query + 可选版本/加载器过滤。"""
     return await mod_manager.search_modrinth(q, limit=limit, offset=offset, game_version=game_version,
@@ -279,7 +327,7 @@ async def modrinth_versions(
         project_id: str,
         game_version: Optional[str] = None,
         loader: Optional[str] = None,
-        _user=Depends(require_role(Role.ADMIN))
+        _user=Depends(get_current_user)
 ):
     """代理 Modrinth 项目的版本列表，并可选过滤。"""
     return await mod_manager.modrinth_versions(project_id, game_version=game_version, loader=loader)
@@ -297,8 +345,9 @@ class ChangeVersionPayload(BaseModel):
 async def change_version(
         payload: ChangeVersionPayload,
         db: Session = Depends(get_db),
-        _user=Depends(require_role(Role.ADMIN))
+        current_user: models.User = Depends(get_current_user)
 ):
+    _check_server_admin_permission(db, current_user, payload.server_id)
     server = crud.get_server_by_id(db, payload.server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
@@ -325,7 +374,7 @@ async def install_from_modrinth(
         project_id: Optional[str] = Query(None),
         version_id: Optional[str] = Query(None),
         db: Session = Depends(get_db),
-        _user=Depends(require_role(Role.ADMIN))
+        current_user: models.User = Depends(get_current_user)
 ):
     """从 Modrinth 安装某个项目的指定版本（或自动选择最新兼容版本）。"""
     # 兼容两种调用方式：JSON body 或 Query 参数
@@ -334,6 +383,7 @@ async def install_from_modrinth(
             raise HTTPException(status_code=422, detail="server_id 和 project_id 不能为空")
         payload = ModrinthInstallPayload(server_id=server_id, project_id=project_id, version_id=version_id)
 
+    _check_server_admin_permission(db, current_user, payload.server_id)
     server = crud.get_server_by_id(db, payload.server_id)
     if not server:
         raise HTTPException(status_code=404, detail='Server not found')
@@ -497,8 +547,13 @@ async def _job_check_updates(server_id: int):
 
 
 @router.get('/mods/check-updates/{server_id}')
-async def check_updates(server_id: int, db: Session = Depends(get_db), _user=Depends(require_role(Role.ADMIN))):
+async def check_updates(
+    server_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
     """启动检查模组更新任务，返回任务 ID 供前端跟踪进度。"""
+    _check_server_admin_permission(db, current_user, server_id)
     from backend.core import crud
     server = crud.get_server_by_id(db, server_id)
     if not server:

@@ -46,9 +46,16 @@ async def generate_level_dat_endpoint(payload: schemas.SuperFlatConfig, _user: m
 async def apply_level_dat_endpoint(
     payload: schemas.ApplyRequest,
     db: Session = Depends(get_db),
-    _user: models.User = Depends(require_role(Role.ADMIN)),
+    current_user: models.User = Depends(get_current_user),
 ):
     """生成并应用 level.dat 到指定服务器。"""
+    # 权限检查：组 ADMIN 或平台管理员
+    if not PermissionService.can_manage_server(db, current_user, payload.server_id, GroupAction.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="您没有权限操作此服务器"
+        )
+    
     server = crud.get_server_by_id(db, payload.server_id)
     if not server:
         raise HTTPException(status_code=404, detail="服务器不存在")

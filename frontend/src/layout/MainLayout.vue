@@ -209,7 +209,7 @@
             @select="handleMenuSelect"
         >
           <!-- 基础功能 -->
-          <el-menu-item index="/dashboard" v-if="hasRole('HELPER')">
+          <el-menu-item index="/dashboard" v-if="hasRole('GUEST')">
             <el-icon>
               <DataAnalysis/>
             </el-icon>
@@ -227,7 +227,7 @@
             </el-icon>
             <span>服务器列表</span>
           </el-menu-item>
-          <el-menu-item index="/server-groups" v-if="hasRole('ADMIN')">
+          <el-menu-item index="/server-groups" v-if="isPlatformAdmin">
             <el-icon>
               <Link/>
             </el-icon>
@@ -257,7 +257,7 @@
               </el-icon>
               <span>联网插件库</span>
             </el-menu-item>
-            <el-menu-item index="/db-plugin-manager" v-if="hasRole('ADMIN')">
+            <el-menu-item index="/db-plugin-manager" v-if="isPlatformAdmin">
               <el-icon>
                 <Coin/>
               </el-icon>
@@ -412,19 +412,19 @@
             </el-icon>
             <span>数据统计</span>
           </el-menu-item>
-          <el-menu-item index="/players" v-if="hasRole('ADMIN')">
+          <el-menu-item index="/players" v-if="isOwner">
             <el-icon>
               <User/>
             </el-icon>
             <span>玩家管理</span>
           </el-menu-item>
-          <el-menu-item index="/users" v-if="hasRole('ADMIN')">
+          <el-menu-item index="/users" v-if="isOwner">
             <el-icon>
               <User/>
             </el-icon>
             <span>用户管理</span>
           </el-menu-item>
-          <el-menu-item index="/settings" v-if="hasRole('ADMIN')">
+          <el-menu-item index="/settings" v-if="isOwner">
             <el-icon>
               <Setting/>
             </el-icon>
@@ -475,7 +475,7 @@ import {
   LocationInformation, Place, List, RefreshRight, Comment, DocumentCopy, Operation, Download, Upload,
   Moon, Sunny
 } from '@element-plus/icons-vue';
-import {user, fullAvatarUrl, fetchUser, clearUser, hasRole, activeGroupIds, isPlatformAdmin, capabilities} from '@/store/user';
+import {user, fullAvatarUrl, fetchUser, clearUser, hasRole, activeGroupIds, isPlatformAdmin, capabilities, isOwner} from '@/store/user';
 import { isDark, toggleTheme } from '@/store/theme'
 import {
   tasks,

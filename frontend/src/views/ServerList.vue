@@ -9,7 +9,7 @@
           <div class="header-right">
             <el-button-group v-if="hasRole('ADMIN')">
               <el-button type="primary" :icon="Plus" @click="openCreateDialog">新建服务器</el-button>
-              <el-button type="success" :icon="FolderChecked" @click="openImportDialog">导入服务器</el-button>
+              <el-button v-if="isPlatformAdmin" type="success" :icon="FolderChecked" @click="openImportDialog">导入服务器</el-button>
               <el-dropdown
                   @command="handleBatchAction"
                   trigger="click"
@@ -100,7 +100,7 @@
 
         <el-table-column prop="port" label="局域网端口" width="120" align="center" sortable/>
 
-        <el-table-column label="操作" width="450" align="center" fixed="right" v-if="hasRole('HELPER')">
+        <el-table-column label="操作" width="450" align="center" fixed="right" v-if="hasRole('USER')">
           <template #default="scope">
             <el-button-group>
               <el-button size="small" type="primary" :icon="VideoPlay" @click="startServer(scope.row)"
@@ -113,11 +113,11 @@
             </el-button-group>
 
             <el-button style="margin-left: 10px;" size="small" type="primary" @click="openConfigDialog(scope.row)"
-                       :icon="Setting" class="config-btn">配置
+                       :icon="Setting" class="config-btn" v-if="hasRole('ADMIN')">配置
             </el-button>
 
-            <el-dropdown trigger="click" style="margin-left: 10px;">
-              <el-button size="small">
+            <el-dropdown trigger="click" style="margin-left: 10px;" v-if="hasRole('HELPER')">
+              <el-button size="small" v-if="hasRole('HELPER')">
                 更多操作
                 <el-icon class="el-icon--right">
                   <arrow-down/>

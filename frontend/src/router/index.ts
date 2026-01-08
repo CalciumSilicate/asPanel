@@ -3,15 +3,17 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import type { RouteRecordRaw } from 'vue-router'
 import MainLayout from '../layout/MainLayout.vue';
-import { hasRole, fetchUser, user, clearUser, type LegacyRole } from '@/store/user';
+import { hasRole, fetchUser, user, clearUser, type LegacyRole, isPlatformAdmin, isOwner } from '@/store/user';
 import { ElMessage } from 'element-plus';
 
 // 扩展 RouteMeta 类型
 declare module 'vue-router' {
-  interface RouteMeta {
-    requiresAuth?: boolean
-    requiredRole?: LegacyRole
-  }
+    interface RouteMeta {
+        requiresAuth?: boolean
+        requiredRole?: LegacyRole
+        requiresPlatformAdmin?: boolean
+        requiresOwner?: boolean
+    }
 }
 
 const routes: RouteRecordRaw[] = [
@@ -35,7 +37,7 @@ const routes: RouteRecordRaw[] = [
                 path: 'dashboard',
                 name: 'Dashboard',
                 component: () => import('../views/Dashboard.vue'),
-                meta: { requiredRole: 'USER' }
+                meta: { requiredRole: 'GUEST' }
             },
             {
                 path: 'servers',
@@ -53,7 +55,7 @@ const routes: RouteRecordRaw[] = [
                 path: 'db-plugin-manager',
                 name: 'DbPluginExplorer',
                 component: () => import('../views/DbPluginExplorer.vue'),
-                meta: { requiredRole: 'ADMIN' }
+                meta: { requiredRole: 'ADMIN', requiresPlatformAdmin: true }
             },
             {
                 path: 'server-plugins',
@@ -77,7 +79,7 @@ const routes: RouteRecordRaw[] = [
                 path: 'tools/prime-backup',
                 name: 'PrimeBackup',
                 component: () => import('../views/PrimeBackup.vue'),
-                meta: { requiredRole: 'USER' }
+                meta: { requiredRole: 'HELPER' }
             },
             {
                 path: 'server-groups',
@@ -99,7 +101,7 @@ const routes: RouteRecordRaw[] = [
                 path: 'players',
                 name: 'PlayerManager',
                 component: () => import('../views/PlayerManager.vue'),
-                meta: { requiredRole: 'ADMIN' }
+                meta: { requiredRole: 'ADMIN', requiresPlatformAdmin: true }
             },
             {
                 path: 'users',
@@ -123,7 +125,7 @@ const routes: RouteRecordRaw[] = [
                 path: 'settings',
                 name: 'Settings',
                 component: () => import('../views/Settings.vue'),
-                meta: { requiredRole: 'ADMIN' }
+                meta: { requiredRole: 'OWNER', requiresOwner: true }
             },
             {
                 // 【新增】存档管理页面的路由
@@ -207,6 +209,24 @@ router.beforeEach(async (to, from, next) => {
         ElMessage.error('无权限访问该页面');
         if (from && from.name) {
             return next(false); // 取消本次导航，停留在上一个页面
+        }
+        return next('/dashboard');
+    }
+
+    // 检查是否需要平台管理员权限
+    if (to.meta.requiresPlatformAdmin && !isPlatformAdmin.value) {
+        ElMessage.error('此页面仅对平台管理员开放');
+        if (from && from.name) {
+            return next(false);
+        }
+        return next('/dashboard');
+    }
+
+    // 检查是否需要 OWNER 权限
+    if (to.meta.requiresOwner && !isOwner.value) {
+        ElMessage.error('此页面仅对系统所有者开放');
+        if (from && from.name) {
+            return next(false);
         }
         return next('/dashboard');
     }
