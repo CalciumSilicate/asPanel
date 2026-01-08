@@ -10,8 +10,6 @@ export interface SettingsState {
   token_expire_minutes: number
   allow_register: boolean
   register_require_qq: boolean
-  register_require_player_name: boolean
-  register_player_name_must_exist: boolean
   default_user_role: string
   copy_limit_mbps: number
 }
@@ -25,8 +23,6 @@ export const settings = reactive<SettingsState>({
   token_expire_minutes: 10080,
   allow_register: true,
   register_require_qq: true,
-  register_require_player_name: true,
-  register_player_name_must_exist: true,
   default_user_role: 'USER',
   copy_limit_mbps: 1024.0,
 })

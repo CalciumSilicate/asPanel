@@ -15,7 +15,6 @@
             </div>
             <div class="user-info">
               <h2 class="username">{{ user.username }}</h2>
-              <el-tag :type="roleTagType" size="small" class="role-tag">{{ roleLabel }}</el-tag>
             </div>
           </div>
         </el-card>

@@ -44,8 +44,6 @@ async def register_user(user: schemas.UserCreate, db: Session = Depends(get_db))
         raise HTTPException(400, "用户名已存在")
 
     register_require_qq = bool(sys_settings.get("register_require_qq", True))
-    register_require_player_name = bool(sys_settings.get("register_require_player_name", True))
-    register_player_name_must_exist = bool(sys_settings.get("register_player_name_must_exist", True))
 
     # QQ：按系统设置决定是否必填
     qq_str = str(getattr(user, 'qq', '') or '').strip()
@@ -59,61 +57,8 @@ async def register_user(user: schemas.UserCreate, db: Session = Depends(get_db))
     except Exception:
         pass
 
-    # 玩家名：按系统设置决定是否必填；可选时允许不填
-    player_name = str(getattr(user, 'player_name', '') or '').strip()
-    if register_require_player_name and not player_name:
-        raise HTTPException(400, "玩家名为必填项")
-
-    bound_player_id = None
-    server_link_group_ids: list[int] = []
-
-    if player_name:
-        if not is_valid_mc_name(player_name):
-            raise HTTPException(400, "玩家名格式不正确")
-
-        player = crud.get_player_by_name(db, player_name)
-        if not player:
-            if register_player_name_must_exist:
-                raise HTTPException(400, "玩家不存在，请确认玩家名是否正确")
-
-            def offline_uuid_for(name: str) -> str:
-                raw = ("OfflinePlayer:" + name).encode("utf-8")
-                md5 = bytearray(hashlib.md5(raw).digest())
-                md5[6] = (md5[6] & 0x0F) | 0x30
-                md5[8] = (md5[8] & 0x3F) | 0x80
-                return str(uuid.UUID(bytes=bytes(md5)))
-
-            uuid_to_use = await get_uuid_by_name(player_name)
-            if uuid_to_use and UUID_HYPHEN_PATTERN.match(uuid_to_use):
-                is_offline = False
-            else:
-                uuid_to_use = offline_uuid_for(player_name)
-                is_offline = True
-
-            existing_by_uuid = crud.get_player_by_uuid(db, uuid_to_use)
-            if existing_by_uuid:
-                player = existing_by_uuid
-                try:
-                    if (player.player_name or None) != player_name:
-                        crud.update_player_name(db, player, name=player_name, is_offline=is_offline)
-                except Exception:
-                    pass
-            else:
-                player = crud.create_player(db, uuid=uuid_to_use, player_name=player_name, play_time={}, is_offline=is_offline)
-
-        # 检查该玩家是否已被其他用户绑定
-        existing_user = db.query(models.User).filter(models.User.bound_player_id == player.id).first()
-        if existing_user:
-            raise HTTPException(400, "该玩家已被其他账号绑定")
-
-        # 根据玩家 UUID 查找加入过的服务器，然后获取对应的服务器组
-        joined_servers = crud.get_servers_player_joined(db, player.uuid)
-        server_ids = [s.id for s in joined_servers]
-        server_link_group_ids = crud.get_server_link_groups_for_servers(db, server_ids)
-        bound_player_id = player.id
-
-    # 新用户默认不是管理员
-    return crud.create_user(db, user, is_owner=False, is_admin=False, bound_player_id=bound_player_id, server_link_group_ids=server_link_group_ids)
+    # 新用户默认不是管理员，不绑定玩家（登录后在个人资料页绑定）
+    return crud.create_user(db, user, is_owner=False, is_admin=False, bound_player_id=None, server_link_group_ids=[])
 
 
 @router.post("/token", response_model=schemas.Token)

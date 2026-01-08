@@ -21,9 +21,6 @@
         <el-form-item label="QQ">
           <el-input v-model="form.qq" placeholder="请输入 QQ 号（纯数字）" size="large"></el-input>
         </el-form-item>
-        <el-form-item label="玩家名">
-          <el-input v-model="form.player_name" placeholder="请输入玩家名" size="large"></el-input>
-        </el-form-item>
         <el-form-item label="邮箱（可选）">
           <el-input v-model="form.email" placeholder="请输入邮箱" size="large" autocomplete="email"></el-input>
         </el-form-item>
@@ -58,14 +55,12 @@ const form = reactive({
   confirmPassword: '',
   qq: '',
   email: '',
-  player_name: '',
 });
 
 const handleRegister = async () => {
   const username = (form.username || '').trim();
   const qq = (form.qq || '').trim();
   const email = (form.email || '').trim();
-  const playerName = (form.player_name || '').trim();
 
   if (!username || !form.password || !form.confirmPassword) {
     ElMessage.error('请填写用户名、密码与确认密码');
@@ -87,7 +82,6 @@ const handleRegister = async () => {
       password: form.password,
       qq: qq || undefined,
       email: email || undefined,
-      player_name: playerName || undefined,
     });
     ElMessage.success('注册成功！将跳转至登录页。');
     router.push('/login');
