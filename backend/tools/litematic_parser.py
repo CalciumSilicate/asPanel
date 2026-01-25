@@ -10,7 +10,7 @@ from litemapy import Schematic
 
 from backend.core.constants import LITEMATIC_COMMAND_LIST_PATH
 
-MAX_FILL_VOLUME = 1024
+MAX_FILL_VOLUME = 32
 MAX_FORCELOAD_CHUNKS_PER_RANGE = 256  # 语法 x1 z1 x2 z2 最大覆盖 256 chunks
 
 

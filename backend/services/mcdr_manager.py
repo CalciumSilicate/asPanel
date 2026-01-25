@@ -48,8 +48,8 @@ class MCDRManager:
         self.LOG_DIRNAME = 'asp_logs'
         self.ARCHIVE_DIRNAME = 'archive'
         self.ACTIVE_LOG_NAME = 'latest.log'
-        # 单文件最大大小（字节），超过即轮转（默认 10MB）
-        self.LOG_MAX_BYTES = 1024 * 1024
+        # 单文件最大大小（字节），超过即轮转（默认 64MB）
+        self.LOG_MAX_BYTES = 64 * 1024 * 1024
         # 归档最大保留数量（超过数量将按时间先后清理）
         self.LOG_RETENTION_COUNT = 20
         # 归档最大保留天数（超过天数将被清理），0 表示不按天数清理
