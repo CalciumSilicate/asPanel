@@ -262,7 +262,13 @@ const toUIMsg = (r) => {
   if (r.source === 'qq') {
     const name = r.sender_username || 'QQ'
     const display = name.includes('@QQ') ? name : `${name}@QQ`
-    const avatar = r.sender_avatar ? resolveAvatar(r.sender_avatar) : mcAvatar(name.replace(/\(.*\)@QQ$/, ''))
+    let avatar = r.sender_avatar ? resolveAvatar(r.sender_avatar) : null
+    if (!avatar && r.sender_qq) {
+      avatar = `https://q1.qlogo.cn/g?b=qq&nk=${r.sender_qq}&s=640`
+    }
+    if (!avatar) {
+      avatar = mcAvatar(name.replace(/\(.*\)@QQ$/, ''))
+    }
     return { id: r.id, content: rawContent, display, avatar, level: r.level, created_at: r.created_at, key: `qq:${display}`, source: 'qq', segments }
   }
   return {
