@@ -137,7 +137,7 @@
                   <el-dropdown-item :icon="Edit" @click="openRenameDialog(scope.row)" v-if="hasRole('ADMIN')">重命名
                   </el-dropdown-item>
                   <el-dropdown-item divided :icon="CircleClose" @click="forceKillServer(scope.row)"
-                                    :disabled="scope.row.status !== 'running' && scope.row.status !== 'pending'" v-if="hasRole('ADMIN')">强制关闭
+                                    v-if="hasRole('ADMIN')">强制关闭
                   </el-dropdown-item>
                   <el-dropdown-item :icon="Delete" @click="handleDeleteServer(scope.row)" v-if="hasRole('ADMIN')">
                     删除

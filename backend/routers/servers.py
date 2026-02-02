@@ -200,7 +200,6 @@ async def force_kill_server(server_id: int, db: Session = Depends(get_db),
     # PERMISSION: 组 ADMIN 或平台管理员
     check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
-    server_status, _ = await mcdr_manager.get_status(server_id, server.path)
     success, message = await mcdr_manager.force_kill(server)
     if not success:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
