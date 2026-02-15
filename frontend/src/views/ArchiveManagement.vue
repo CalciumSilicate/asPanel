@@ -453,7 +453,7 @@ const handleCreateFromServer = async () => {
   if (!createFromServerDialog.serverId) return ElMessage.warning('请选择服务器');
   createFromServerDialog.isCreating = true;
   try {
-    const { data } = await apiClient.post('/api/archives/create/from-server', null, { params: { server_id: createFromServerDialog.serverId } });
+    const { data } = await apiClient.post(`/api/archives/create/from-server/${createFromServerDialog.serverId}`);
     ElMessage.success('创建备份任务已发起！');
     fetchTasks().catch(() => {});
     createFromServerDialog.visible = false;

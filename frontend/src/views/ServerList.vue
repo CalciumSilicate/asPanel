@@ -2182,7 +2182,7 @@ const handleCopyServer = async () => {
 const handleCreateArchive = async (server) => {
   try {
     await ElMessageBox.confirm(`这会打包服务器 "${server.name}" 的主世界文件夹，并创建一个永久备份。`, '确认创建永久备份', {type: 'info'});
-    const {data} = await apiClient.post('/api/archives/create/from-server', null, {params: {server_id: server.id}});
+    const {data} = await apiClient.post(`/api/archives/create/from-server/${server.id}`);
     ElMessage.success('创建备份任务已发起！将跳转至存档管理页面。');
     router.push({path: '/tools/archives', query: {new_task_id: data.task_id}});
   } catch (error) {

@@ -9,7 +9,8 @@ from backend.core.constants import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MI
 
 pwd_context = CryptContext(
     schemes=["argon2"],
-    deprecated="auto"
+    deprecated="auto",
+    argon2__parallelism=1
 )
 
 

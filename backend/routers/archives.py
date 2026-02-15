@@ -34,7 +34,7 @@ async def read_archives(current_user: models.User = Depends(get_current_user)):
     return await archive_manager.list_archives()
 
 
-@router.post("/archives/create/from-server", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/archives/create/from-server/{server_id}", status_code=status.HTTP_202_ACCEPTED)
 async def create_archive_from_server(
         server_id: int,
         db: Session = Depends(get_db),
