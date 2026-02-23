@@ -38,7 +38,8 @@
       </template>
 
       <el-table ref="tableRef" :data="serverList" style="width: 100%" v-loading="loading" row-key="id" height="100%"
-                @selection-change="handleSelectionChange" class="table">
+                @selection-change="handleSelectionChange" class="table"
+                :default-sort="{ prop: 'last_startup', order: 'descending' }">
         <el-table-column type="selection" width="55" align="center" fixed/>
 
         <el-table-column prop="name" label="服务器名称" width="180" sortable fixed>
@@ -99,6 +100,13 @@
         </el-table-column>
 
         <el-table-column prop="port" label="局域网端口" width="120" align="center" sortable/>
+
+        <el-table-column prop="last_startup" label="上次启动" width="140" align="center" sortable :sort-method="sortByLastStartup">
+          <template #default="scope">
+            <span v-if="scope.row.last_startup">{{ formatRelativeTime(scope.row.last_startup) }}</span>
+            <span v-else class="text-muted">从未启动</span>
+          </template>
+        </el-table-column>
 
         <el-table-column label="操作" width="450" align="center" fixed="right" v-if="hasRole('USER')">
           <template #default="scope">
@@ -1148,6 +1156,37 @@ const formatServerSize = (sizeMb) => {
   const fracPart = parts[1]
   const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   return fracPart != null ? `${withCommas}.${fracPart} MB` : `${withCommas} MB`
+}
+
+const formatRelativeTime = (dateStr) => {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diffMs = now - date
+  const diffMinutes = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+
+  if (diffMinutes < 1) return '刚刚'
+  if (diffMinutes < 60) return `${diffMinutes}分钟前`
+  if (diffHours < 24) return `${diffHours}小时前`
+  if (diffDays < 7) return `${diffDays}天前`
+
+  const thisYear = now.getFullYear()
+  const dateYear = date.getFullYear()
+  const month = date.getMonth() + 1
+  const day = date.getDate()
+
+  if (dateYear === thisYear) {
+    return `${month}月${day}日`
+  }
+  return `${dateYear}年${month}月${day}日`
+}
+
+const sortByLastStartup = (a, b) => {
+  const timeA = a.last_startup ? new Date(a.last_startup).getTime() : 0
+  const timeB = b.last_startup ? new Date(b.last_startup).getTime() : 0
+  return timeA - timeB
 }
 
 let pollInterval = null;
@@ -2602,6 +2641,8 @@ onMounted(() => {
 	        const merged = {
 	          ...originalServer,
 	          ...updatedServer,
+	          // 保留原有的 last_startup，除非新数据明确提供了值
+	          last_startup: updatedServer.last_startup ?? originalServer.last_startup,
 	          loading: false
 	        };
 	        if (merged.size_mb != null) {
@@ -3005,5 +3046,9 @@ onUnmounted(() => {
 }
 .text-link:hover {
   color: var(--el-color-primary-light-3);
+}
+
+.text-muted {
+  color: var(--el-text-color-secondary);
 }
 </style>

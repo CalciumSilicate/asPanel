@@ -317,6 +317,16 @@ def create_server(db: Session, server: schemas.ServerCreateInternal, creator_id:
     return db_server
 
 
+def update_server_last_startup(db: Session, server_id: int, last_startup: datetime.datetime) -> Optional[models.Server]:
+    db_server = get_server_by_id(db, server_id)
+    if db_server:
+        db_server.last_startup = last_startup
+        db.add(db_server)
+        db.commit()
+        db.refresh(db_server)
+    return db_server
+
+
 def delete_server(db: Session, server_id: int) -> Optional[models.Server]:
     db_server = get_server_by_id(db, server_id)
     if db_server:

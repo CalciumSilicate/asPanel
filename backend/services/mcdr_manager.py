@@ -14,6 +14,7 @@ from backend.core.database import SessionLocal
 from backend.core.constants import LOG_EMIT_INTERVAL_MS
 from backend.core import crud, models, schemas
 from backend.core.logger import logger
+from backend.core.utils import get_tz_info
 
 if TYPE_CHECKING:
     from backend.services.server_service import ServerService
@@ -324,6 +325,13 @@ class MCDRManager:
         self.processes[server.id] = process
         self.log_tasks[server.id] = asyncio.create_task(self._read_logs(server, process))
         logger.info(f"SERVER {server.id} 的 MCDR 进程已启动，PID={process.pid}")
+
+        # 更新服务器上次启动时间
+        try:
+            with SessionLocal() as db:
+                crud.update_server_last_startup(db, server.id, datetime.now(get_tz_info()))
+        except Exception as e:
+            logger.warning(f"更新 SERVER {server.id} 的 last_startup 失败：{e}")
 
         # [修改] 初始化日志缓冲区并启动定时发送任务
         self.log_buffers[server.id] = []

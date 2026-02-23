@@ -961,3 +961,4 @@ def build_rank_image_from_args_b64(
         pinned_uuid=pinned_uuid,
         pinned_name=pinned_name,
     )
+

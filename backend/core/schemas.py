@@ -239,6 +239,7 @@ class Server(ServerBase):
 
     core_config: Annotated[ServerCoreConfig, BeforeValidator(_validate_core_config)]
     map: Annotated[ServerMapConfig, BeforeValidator(_validate_server_map)] = Field(default_factory=ServerMapConfig)
+    last_startup: Optional[datetime] = None
 
     class Config:
         from_attributes = True

@@ -49,6 +49,7 @@ class Server(Base):
     path = Column(String)
     core_config = Column(String, default=json.dumps(DEFAULT_CORE_CONFIG))
     map = Column(String, default="{}")
+    last_startup = Column(DateTime(timezone=True), nullable=True)
 
 
 class Download(Base):

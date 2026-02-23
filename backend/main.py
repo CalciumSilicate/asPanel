@@ -59,6 +59,15 @@ def _migrate_database():
                 conn.execute(text("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0"))
                 conn.commit()
                 logger.info("数据库迁移：已添加 users.token_version 列")
+    
+    # 检查 servers 表的 last_startup 列
+    if 'servers' in inspector.get_table_names():
+        columns = [c['name'] for c in inspector.get_columns('servers')]
+        if 'last_startup' not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE servers ADD COLUMN last_startup TIMESTAMP"))
+                conn.commit()
+                logger.info("数据库迁移：已添加 servers.last_startup 列")
 
 _migrate_database()
 

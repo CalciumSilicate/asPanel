@@ -88,6 +88,7 @@ class ServerService:
                 creator_id=server.creator_id,
                 core_config=core_configs[i],
                 map=getattr(server, "map", None),
+                last_startup=getattr(server, "last_startup", None),
                 status=status_res[0],
                 return_code=status_res[1],
                 size_mb=None,

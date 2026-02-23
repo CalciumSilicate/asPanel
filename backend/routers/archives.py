@@ -200,8 +200,10 @@ def batch_delete_archives(
 async def restore_archive_to_server(
         archive_id: int,
         server_id: int,
-        current_user: models.User = Depends(require_server_manage(GroupAction.MANAGE))
+        current_user: models.User = Depends(get_current_user)
 ):
     """恢复存档到服务器（需要服务器 MANAGE 权限）"""
+    if not PermissionService.is_platform_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要平台管理员权限")
     task = await archive_manager.start_restore_archive_task(archive_id, server_id)
     return {"task_id": task.id, "message": "已开始恢复存档任务"}

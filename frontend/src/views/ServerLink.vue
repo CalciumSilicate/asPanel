@@ -116,7 +116,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import apiClient from '@/api'
@@ -210,25 +210,27 @@ const onQQBlur = () => {
   }
 }
 
-const saveGroup = async () => {
-  if (!activeGroup.value) return
-  if (!activeGroup.value.name?.trim()) return // 避免每次输入时弹提示，交由失焦/点击保存时提示
-  if (!activeGroup.value.serverIds || activeGroup.value.serverIds.length === 0) return
+const saveGroup = async (groupToSave = activeGroup.value) => {
+  if (!groupToSave) return
+  if (!groupToSave.name?.trim()) return
   
-  const currentVersion = ++saveVersion  // 递增版本号
-  const currentGroupId = activeGroup.value.id
+  const currentVersion = ++saveVersion
+  const currentGroupId = groupToSave.id
   
   try {
     saving.value = true
-    const payload = toAPIPayload(activeGroup.value)
+    const payload = toAPIPayload(groupToSave)
     const { data } = await apiClient.put(`/api/tools/server-link/groups/${currentGroupId}`, payload)
     
-    // 只有当这是最新的保存请求，且用户仍在编辑同一个组时，才更新状态
-    if (currentVersion === saveVersion && activeGroup.value?.id === currentGroupId) {
+    // 只有当这是最新的保存请求时，才更新列表中的数据
+    if (currentVersion === saveVersion) {
       const updated = toUIGroup(data)
       const idx = groups.value.findIndex(g => g.id === updated.id)
       if (idx >= 0) groups.value[idx] = updated
-      // 不再覆盖 activeGroup，避免用户正在编辑的内容被旧请求覆盖
+      // 如果仍在编辑同一个组，同步更新（保留用户正在编辑的字段）
+      if (activeGroup.value?.id === currentGroupId) {
+        // 不覆盖 activeGroup，避免打断用户输入
+      }
     }
   } catch (e) {
     // 静默失败，避免在频繁自动保存期间干扰用户
@@ -239,18 +241,44 @@ const saveGroup = async () => {
 
 // 500ms 防抖自动保存
 let saveTimer = null
+let pendingGroupToSave = null
+
 const scheduleAutoSave = () => {
   if (!activeGroup.value) return
+  pendingGroupToSave = { ...activeGroup.value }
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
-    saveGroup()
+    if (pendingGroupToSave) {
+      saveGroup(pendingGroupToSave)
+      pendingGroupToSave = null
+    }
   }, 500)
 }
 
-watch(() => activeGroup.value && activeGroup.value.name, scheduleAutoSave)
-watch(() => activeGroup.value && JSON.stringify(activeGroup.value.serverIds || []), scheduleAutoSave)
-watch(() => activeGroup.value && JSON.stringify(activeGroup.value.dataSourceIds || []), scheduleAutoSave)
-watch(() => activeGroup.value && activeGroup.value.qqGroup, scheduleAutoSave)
+// 切换组时立即保存当前组
+const flushPendingSave = () => {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  if (pendingGroupToSave) {
+    saveGroup(pendingGroupToSave)
+    pendingGroupToSave = null
+  }
+}
+
+// 监听 activeGroup 切换，先保存旧组
+watch(() => activeGroup.value?.id, (newId, oldId) => {
+  if (oldId && oldId !== newId) {
+    flushPendingSave()
+  }
+})
+
+// 监听具体字段变化触发自动保存
+watch(() => activeGroup.value?.name, scheduleAutoSave)
+watch(() => JSON.stringify(activeGroup.value?.serverIds || []), scheduleAutoSave)
+watch(() => JSON.stringify(activeGroup.value?.dataSourceIds || []), scheduleAutoSave)
+watch(() => activeGroup.value?.qqGroup, scheduleAutoSave)
 
 const loadServers = async () => {
   serversLoading.value = true
@@ -268,6 +296,10 @@ const loadServers = async () => {
 onMounted(() => {
   loadServers()
   loadGroups()
+})
+
+onUnmounted(() => {
+  flushPendingSave()
 })
 
 // 映射工具：API <-> UI
