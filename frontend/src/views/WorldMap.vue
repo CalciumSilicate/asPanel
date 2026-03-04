@@ -43,6 +43,21 @@
 
         <el-divider direction="vertical" />
 
+        <el-date-picker
+          v-model="trajectoryFromTime"
+          type="datetime"
+          placeholder="轨迹起始时间"
+          size="small"
+          style="width: 168px"
+          clearable
+          format="MM-DD HH:mm"
+          value-format="YYYY-MM-DDTHH:mm:ss"
+          :disabled="!selectedServerId"
+          @change="onTrajectoryFromTimeChange"
+        />
+
+        <el-divider direction="vertical" />
+
         <el-switch
           v-model="editMode"
           active-text="编辑"
@@ -203,10 +218,10 @@
               <el-button text size="small" @click="playbackRewind" title="跳到起点">⏮</el-button>
               <el-button
                 text
-                :type="playbackPlaying ? 'warning' : 'primary'"
                 size="small"
+                class="wm-playback-play-btn"
+                :class="{ 'is-pausing': playbackPlaying }"
                 @click="playbackToggle"
-                style="font-size:16px; min-width:28px"
               >{{ playbackPlaying ? '⏸' : '▶' }}</el-button>
               <el-button text size="small" @click="playbackForward" title="跳到终点">⏭</el-button>
               <el-select v-model="playbackSpeed" size="small" style="width:68px" title="速度">
@@ -229,9 +244,18 @@
           <el-icon class="is-loading"><Loading /></el-icon>
         </div>
 
-        <!-- Empty state -->
+        <!-- Empty state: no server selected -->
         <div class="wm-canvas-empty" v-if="!selectedServerId && !mapLoading">
           <el-empty description="请选择一个服务器" />
+        </div>
+
+        <!-- Empty state: server selected but no map data -->
+        <div class="wm-canvas-empty" v-if="selectedServerId && !mapLoading && !mapJsonRaw">
+          <el-empty description="此服务器暂无地图">
+            <template #extra>
+              <el-button type="primary" size="small" @click="createBlankMap">新建空白地图</el-button>
+            </template>
+          </el-empty>
         </div>
       </div>
 
@@ -268,7 +292,7 @@ const servers = ref([])
 const serversLoading = ref(false)
 const selectedServerId = ref(null)
 const activeDim = ref('nether')
-const layout = ref('split')      // 'left' | 'split' | 'right'
+const layout = ref('left')       // 'left' | 'split' | 'right'
 const editMode = ref(false)
 const connectMode = ref(false)
 const connectSourceKey = ref(null)
@@ -303,6 +327,7 @@ const hoverCoord = reactive({ x: 0, z: 0 })
 const players = ref([])
 const selectedPlayerName = ref(null)
 const trajectory = ref([])
+const trajectoryFromTime = ref(null)   // ISO string for 'since' query param
 const playerRefreshTimer = ref(null)
 
 // Avatars (uuid -> HTMLImageElement)
@@ -455,19 +480,26 @@ const playbackProgressModel = computed({
   },
 })
 
-function fmtDur(ms) {
-  const s = Math.floor(ms / 1000)
-  const m = Math.floor(s / 60)
-  const h = Math.floor(m / 60)
-  if (h > 0) return `${h}:${String(m % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
-  return `${m}:${String(s % 60).padStart(2, '0')}`
+function fmtTs(ts) {
+  if (!ts) return '--:--:--'
+  const d = new Date(ts)
+  const H = String(d.getHours()).padStart(2, '0')
+  const M = String(d.getMinutes()).padStart(2, '0')
+  const S = String(d.getSeconds()).padStart(2, '0')
+  const startDay = playbackStartTs.value ? new Date(playbackStartTs.value).toDateString() : null
+  const endDay   = playbackEndTs.value   ? new Date(playbackEndTs.value).toDateString()   : null
+  if (startDay && endDay && startDay !== endDay) {
+    // span multiple days: prefix with MM-DD
+    const mon = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${mon}-${day} ${H}:${M}:${S}`
+  }
+  return `${H}:${M}:${S}`
 }
 
 const playbackTimeDisplay = computed(() => {
-  const dur = playbackEndTs.value - playbackStartTs.value
-  if (!dur) return ''
-  const elapsed = Math.max(0, playbackCurrentTs.value - playbackStartTs.value)
-  return `${fmtDur(elapsed)} / ${fmtDur(dur)}`
+  if (!playbackStartTs.value || !playbackEndTs.value) return ''
+  return `${fmtTs(playbackCurrentTs.value)} / ${fmtTs(playbackEndTs.value)}`
 })
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -676,36 +708,63 @@ function drawNodes(ctx) {
 function drawTrajectory(ctx) {
   if (!trajectory.value.length) return
   const currentMapDim = activeDim.value === 'end' ? 'end' : 'nether'
-  ctx.lineWidth = 2
-  ctx.setLineDash([5, 4])
+  const hasPlayback = playbackEndTs.value > playbackStartTs.value
 
-  let lastDim = null
-  let started = false
+  // Full path (faint background when playback is available)
+  ctx.lineWidth = 1.5
+  ctx.setLineDash([5, 4])
+  let lastDim = null, started = false
   ctx.beginPath()
   for (let i = 0; i < trajectory.value.length; i++) {
     const pt = trajectory.value[i]
     const { mx, mz, mapDim } = playerToMap(pt.x, pt.z, pt.dim)
     if (mapDim !== currentMapDim) { started = false; continue }
     const [sx, sy] = w2c(mx, mz)
-    if (!started || mapDim !== lastDim) {
-      ctx.moveTo(sx, sy)
-      started = true
-    } else {
-      ctx.lineTo(sx, sy)
-    }
+    if (!started || mapDim !== lastDim) { ctx.moveTo(sx, sy); started = true }
+    else ctx.lineTo(sx, sy)
     lastDim = mapDim
   }
-  ctx.strokeStyle = '#6366f1'; ctx.stroke()
+  ctx.strokeStyle = hasPlayback ? 'rgba(99,102,241,0.25)' : '#6366f1'
+  ctx.stroke()
   ctx.setLineDash([])
 
-  // mark last point
-  if (trajectory.value.length) {
+  if (!hasPlayback) {
+    // Static: dot at last point
     const last = trajectory.value[trajectory.value.length - 1]
     const { mx, mz, mapDim } = playerToMap(last.x, last.z, last.dim)
     if (mapDim === currentMapDim) {
       const [sx, sy] = w2c(mx, mz)
       ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI * 2)
       ctx.fillStyle = '#6366f1'; ctx.fill()
+    }
+    return
+  }
+
+  // Played portion (solid, up to current playback index)
+  const upTo = playbackIdx.value
+  ctx.lineWidth = 2
+  started = false; lastDim = null
+  ctx.beginPath()
+  for (let i = 0; i <= upTo; i++) {
+    const pt = trajectory.value[i]
+    const { mx, mz, mapDim } = playerToMap(pt.x, pt.z, pt.dim)
+    if (mapDim !== currentMapDim) { started = false; continue }
+    const [sx, sy] = w2c(mx, mz)
+    if (!started || mapDim !== lastDim) { ctx.moveTo(sx, sy); started = true }
+    else ctx.lineTo(sx, sy)
+    lastDim = mapDim
+  }
+  ctx.strokeStyle = '#6366f1'; ctx.stroke()
+
+  // Playback head marker at interpolated position
+  const pos = playbackPosition.value
+  if (pos) {
+    const { mx, mz, mapDim } = playerToMap(pos.x, pos.z, pos.dim)
+    if (mapDim === currentMapDim) {
+      const [sx, sy] = w2c(mx, mz)
+      ctx.beginPath(); ctx.arc(sx, sy, 7, 0, Math.PI * 2)
+      ctx.fillStyle = '#6366f1'; ctx.fill()
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke()
     }
   }
 }
@@ -1145,7 +1204,7 @@ function onEditModeChange(val) {
 async function loadServers() {
   serversLoading.value = true
   try {
-    const { data } = await apiClient.get('/api/tools/world-map/servers')
+    const { data } = await apiClient.get('/api/servers')
     servers.value = data
   } catch (e) {
     ElMessage.error('加载服务器列表失败')
@@ -1166,11 +1225,19 @@ async function loadMapData() {
     dirty.value = false
     fitView()
   } catch (e) {
-    ElMessage.error('加载地图数据失败')
+    if (e.response?.status !== 404) ElMessage.error('加载地图数据失败')
+    mapJsonRaw.value = null
   } finally {
     mapLoading.value = false
     scheduleRender()
   }
+}
+
+function createBlankMap() {
+  mapJsonRaw.value = { graph: { nodes: [], edges: [] } }
+  dirty.value = true
+  editMode.value = true
+  scheduleRender()
 }
 
 async function loadPlayers() {
@@ -1198,13 +1265,26 @@ async function loadConfig() {
 
 async function loadTrajectory(playerName) {
   try {
+    const params = {}
+    if (trajectoryFromTime.value) params.since = trajectoryFromTime.value
     const { data } = await apiClient.get(
-      `/api/tools/world-map/${selectedServerId.value}/trajectory/${encodeURIComponent(playerName)}`
+      `/api/tools/world-map/${selectedServerId.value}/trajectory/${encodeURIComponent(playerName)}`,
+      { params }
     )
     trajectory.value = data
+    if (data.length > 0 && data[0].ts) {
+      playbackCurrentTs.value = new Date(data[0].ts).getTime()
+    }
     scheduleRender()
   } catch {
     trajectory.value = []
+  }
+}
+
+function onTrajectoryFromTimeChange() {
+  if (selectedPlayerName.value) {
+    trajectory.value = []
+    loadTrajectory(selectedPlayerName.value)
   }
 }
 
@@ -1283,6 +1363,8 @@ function onPlayerClick(player) {
   if (selectedPlayerName.value === player.player_name) {
     clearTrajectory(); return
   }
+  playbackStop()
+  playbackCurrentTs.value = 0
   selectedPlayerName.value = player.player_name
   trajectory.value = []
   loadTrajectory(player.player_name)
@@ -1290,8 +1372,65 @@ function onPlayerClick(player) {
 }
 
 function clearTrajectory() {
+  playbackStop()
   selectedPlayerName.value = null
   trajectory.value = []
+  scheduleRender()
+}
+
+// ─── Playback Controls ────────────────────────────────────────────────────────
+
+function playbackToggle() {
+  if (!trajectory.value.length || playbackEndTs.value <= playbackStartTs.value) return
+  if (playbackPlaying.value) {
+    playbackStop()
+  } else {
+    if (playbackCurrentTs.value >= playbackEndTs.value) {
+      playbackCurrentTs.value = playbackStartTs.value
+    }
+    playbackStart()
+  }
+}
+
+function playbackStart() {
+  playbackPlaying.value = true
+  playbackLastRealTs = performance.now()
+  playbackRafHandle = requestAnimationFrame(playbackTick)
+}
+
+function playbackStop() {
+  playbackPlaying.value = false
+  if (playbackRafHandle) { cancelAnimationFrame(playbackRafHandle); playbackRafHandle = null }
+}
+
+function playbackTick(now) {
+  if (!playbackPlaying.value) return
+  const dt = now - playbackLastRealTs
+  playbackLastRealTs = now
+  playbackCurrentTs.value += dt * playbackSpeed.value
+  if (playbackCurrentTs.value >= playbackEndTs.value) {
+    playbackCurrentTs.value = playbackEndTs.value
+    playbackStop()
+    scheduleRender()
+    return
+  }
+  if (playbackLockCamera.value && playbackPosition.value) {
+    const { mx, mz } = playerToMap(playbackPosition.value.x, playbackPosition.value.z, playbackPosition.value.dim)
+    view.cx = mx; view.cz = mz
+  }
+  scheduleRender()
+  playbackRafHandle = requestAnimationFrame(playbackTick)
+}
+
+function playbackRewind() {
+  playbackStop()
+  playbackCurrentTs.value = playbackStartTs.value
+  scheduleRender()
+}
+
+function playbackForward() {
+  playbackStop()
+  playbackCurrentTs.value = playbackEndTs.value
   scheduleRender()
 }
 
@@ -1349,6 +1488,7 @@ onUnmounted(() => {
   if (resizeObserver) resizeObserver.disconnect()
   if (playerRefreshTimer.value) clearInterval(playerRefreshTimer.value)
   if (rafId) cancelAnimationFrame(rafId)
+  if (playbackRafHandle) cancelAnimationFrame(playbackRafHandle)
   window.removeEventListener('keydown', onKeyDown)
 })
 
@@ -1459,6 +1599,63 @@ watch([parsedNodes, parsedEdges, players, trajectory, selectedNodeKey, selectedE
 .wm-connect-hint { background: rgba(245,158,11,0.15); border-color: #f59e0b; color: #92400e; }
 .wm-traj-info { top: 8px; left: 50%; transform: translateX(-50%); pointer-events: auto;
   display: flex; align-items: center; gap: 4px; }
+
+/* Playback bar */
+.wm-playback-bar {
+  position: absolute;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(480px, calc(100% - 24px));
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  padding: 8px 10px 6px;
+  pointer-events: auto;
+  z-index: 10;
+}
+.wm-playback-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.wm-playback-time {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.wm-playback-close {
+  margin-left: 4px;
+  font-size: 15px;
+  line-height: 1;
+}
+.wm-playback-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+.wm-playback-nodata {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  text-align: center;
+  padding: 4px 0;
+}
+.wm-playback-play-btn {
+  font-size: 15px !important;
+  min-width: 30px !important;
+  line-height: 1 !important;
+  padding: 4px 6px !important;
+  color: var(--el-color-primary) !important;
+}
+.wm-playback-play-btn.is-pausing {
+  color: var(--el-color-warning) !important;
+}
 
 /* Loading & empty */
 .wm-canvas-loading,

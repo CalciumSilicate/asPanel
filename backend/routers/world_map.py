@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy import func as sqlfunc
@@ -240,10 +240,12 @@ def get_map_players(
 def get_player_trajectory(
     server_id: int,
     player_name: str,
+    since: Optional[str] = None,
     db: Session = Depends(get_db),
     _user=Depends(require_role(Role.USER)),
 ):
-    """Return the player's trajectory since their most recent login session on this server."""
+    """Return the player's trajectory. If `since` is provided (ISO datetime), load from that time;
+    otherwise load the most recent login session."""
     if not crud.get_server_by_id(db, server_id):
         raise HTTPException(404, "服务器不存在")
 
@@ -251,28 +253,37 @@ def get_player_trajectory(
     if not player:
         raise HTTPException(404, "玩家不存在")
 
-    # find most recent login session (open or closed)
-    session = (
-        db.query(models.PlayerSession)
-        .filter(
-            models.PlayerSession.player_uuid == player.uuid,
-            models.PlayerSession.server_id == server_id,
-        )
-        .order_by(models.PlayerSession.login_time.desc())
-        .first()
-    )
-
-    if session:
-        start = session.login_time
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=timezone.utc)
-        end = session.logout_time or datetime.now(tz=timezone.utc)
-        if end.tzinfo is None:
-            end = end.replace(tzinfo=timezone.utc)
-    else:
-        # No session record (e.g. panel restarted): fall back to last 6 hours
+    if since:
+        try:
+            start = datetime.fromisoformat(since)
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(400, "无效的时间格式")
         end = datetime.now(tz=timezone.utc)
-        start = end - timedelta(hours=6)
+    else:
+        # find most recent login session (open or closed)
+        session = (
+            db.query(models.PlayerSession)
+            .filter(
+                models.PlayerSession.player_uuid == player.uuid,
+                models.PlayerSession.server_id == server_id,
+            )
+            .order_by(models.PlayerSession.login_time.desc())
+            .first()
+        )
+
+        if session:
+            start = session.login_time
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            end = session.logout_time or datetime.now(tz=timezone.utc)
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+        else:
+            # No session record (e.g. panel restarted): fall back to last 6 hours
+            end = datetime.now(tz=timezone.utc)
+            start = end - timedelta(hours=6)
 
     positions = crud.get_player_positions(db, player.id, start, end, server_ids=[server_id])
     return [
