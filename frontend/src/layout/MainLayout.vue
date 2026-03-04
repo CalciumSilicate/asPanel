@@ -385,7 +385,7 @@
               </el-icon>
               <span>QQ机器人</span>
             </el-menu-item>
-            <el-menu-item index="/tools/world-map" disabled v-if="hasRole('USER')">
+            <el-menu-item index="/tools/world-map" v-if="hasRole('USER')">
               <el-icon>
                 <MapLocation/>
               </el-icon>
@@ -668,6 +668,7 @@ const preloadRouteComponents = () => {
     () => import('../views/ServerLink.vue'),
     () => import('../views/PlayerManager.vue'),
     () => import('../views/UserManager.vue'),
+    () => import('../views/WorldMap.vue'),
     () => import('../views/Litematica.vue'),
     () => import('../views/ChatRoom.vue'),
     () => import('../views/Settings.vue'),

@@ -110,6 +110,12 @@ const routes: RouteRecordRaw[] = [
                 meta: { requiredRole: 'OWNER' }
             },
             {
+                path: 'tools/world-map',
+                name: 'WorldMap',
+                component: () => import('../views/WorldMap.vue'),
+                meta: { requiredRole: 'USER' }
+            },
+            {
                 path: 'tools/litematica',
                 name: 'Litematica',
                 component: () => import('../views/Litematica.vue'),

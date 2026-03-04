@@ -28,6 +28,7 @@ from backend.core.constants import (
 from backend.core.security import get_password_hash
 from backend.routers import users, system, archives, servers, versions, plugins, tools
 from backend.routers import players as players_router
+from backend.routers import world_map as world_map_router
 from backend.routers import stats as stats_router
 from backend.routers import settings as settings_router
 from backend.routers import mods as mods_router
@@ -224,6 +225,7 @@ app.include_router(ws_router)
 app.include_router(onebot.router)
 app.include_router(settings_router.router)
 app.include_router(players_router.router)
+app.include_router(world_map_router.router)
 app.include_router(stats_router.router)
 
 
