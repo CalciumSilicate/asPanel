@@ -8,6 +8,7 @@ import httpx
 import base64
 import hashlib
 import mimetypes
+import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import FileResponse
@@ -514,7 +515,10 @@ def _get_rank_render_pool() -> ProcessPoolExecutor:
     except Exception:
         max_workers = _rank_concurrency
     max_workers = max(1, min(max_workers, 4))
-    _RANK_RENDER_POOL = ProcessPoolExecutor(max_workers=max_workers)
+    _RANK_RENDER_POOL = ProcessPoolExecutor(
+        max_workers=max_workers,
+        mp_context=multiprocessing.get_context("spawn"),
+    )
     return _RANK_RENDER_POOL
 
 
@@ -971,6 +975,21 @@ async def _maybe_handle_command(group_id: int, qq_group: str, nickname: str, tex
 
 async def _cmd_rank(group_id: int, qq_group: str, args: List[str], *, sender_qq: Optional[str] = None) -> None:
     settings = _get_rank_settings(group_id)
+
+    # 从 DB 读取 ServerLinkGroup 配置的 server_ids（若用户未手动设置过）
+    if settings.server_ids == [1]:  # 仅当是默认值时才从 DB 读取
+        with get_db_context() as db:
+            group = crud.get_server_link_group_by_id(db, group_id)
+            if group:
+                try:
+                    import json
+                    ds_ids = json.loads(group.data_source_ids or "[]")
+                    srv_ids = json.loads(group.server_ids or "[]")
+                    target_ids = ds_ids if ds_ids else srv_ids
+                    if target_ids:
+                        settings.server_ids = [int(i) for i in target_ids]
+                except Exception:
+                    pass
 
     if not args:
         args = ["挖掘榜"]

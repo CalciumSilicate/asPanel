@@ -45,6 +45,8 @@ _POS_PATTERN = re.compile(
     r"\[([\-0-9\.eE]+)d?,\s*([\-0-9\.eE]+)d?,\s*([\-0-9\.eE]+)d?\]"
 )
 _DIM_PATTERN = re.compile(r"data:\s*\"?([A-Za-z0-9_:]+)\"?")
+# UUID 解析：data get entity <player> UUID 返回格式如 [I; 123, 456, 789, 012]
+_UUID_PATTERN = re.compile(r"\[I;\s*([-\d]+),\s*([-\d]+),\s*([-\d]+),\s*([-\d]+)\]")
 
 # ----------------------------- 工具函数与配置 -----------------------------
 
@@ -119,6 +121,28 @@ def _query_pos_by_command(
     except Exception:
         dim = None
     return pos, dim
+
+
+def _query_player_uuid(server: ServerInterface, player: str) -> Optional[str]:
+    """通过 vanilla data 命令获取玩家 UUID。返回带连字符的标准格式 UUID 或 None。"""
+    try:
+        out = server.rcon_query(f"data get entity {player} UUID")
+        m = _UUID_PATTERN.search(str(out))
+        if m:
+            # 将4个32位有符号整数转换为UUID
+            def to_unsigned(val: int) -> int:
+                return val & 0xFFFFFFFF
+            
+            a, b, c, d = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+            a, b, c, d = to_unsigned(a), to_unsigned(b), to_unsigned(c), to_unsigned(d)
+            # 组合为128位整数
+            uuid_int = (a << 96) | (b << 64) | (c << 32) | d
+            # 格式化为标准UUID字符串
+            hex_str = f"{uuid_int:032x}"
+            return f"{hex_str[0:8]}-{hex_str[8:12]}-{hex_str[12:16]}-{hex_str[16:20]}-{hex_str[20:32]}"
+    except Exception:
+        server.logger.debug(f"[asPanel] 获取玩家UUID失败 | player={player}")
+    return None
 
 
 def _query_save_all(server: ServerInterface) -> bool:
@@ -1510,10 +1534,18 @@ def on_player_joined(server: ServerInterface, player: str, info: Info):
         return
     if _IS_PROXY_SERVER:
         return
+    # 尝试获取玩家 UUID
+    player_uuid = None
+    try:
+        player_uuid = _query_player_uuid(server, player)
+        if player_uuid:
+            server.logger.debug(f"[asPanel] 获取玩家UUID成功 | player={player} uuid={player_uuid}")
+    except Exception:
+        pass
     _send_event(
         server,
         "mcdr.player_joined",
-        {"player": str(player), "info": _info_to_dict(info)},
+        {"player": str(player), "uuid": player_uuid, "info": _info_to_dict(info)},
     )
     try:
         _LOCAL_PLAYERS.add(str(player))

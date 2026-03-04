@@ -840,8 +840,8 @@ def build_stats_picture(
         "data_source_text": data_source_text,
         "generated_at": get_now_tz().strftime("%Y-%m-%d %H:%M:%S")
     }
-    # 默认使用 [3] 如果未提供 server_ids，防止报错
-    effective_server_ids = server_ids if server_ids else [3]
+    # 默认使用 [1] 如果未提供 server_ids，防止报错
+    effective_server_ids = server_ids if server_ids else [1]
 
     data["totals"] = _build_totals(player.uuid, tr, effective_server_ids)
     data["charts"] = _build_charts(player.uuid, tr, effective_server_ids)
@@ -927,7 +927,7 @@ def build_stats_picture_all(
         "generated_at": get_now_tz().strftime("%Y-%m-%d %H:%M:%S"),
     }
     logger.debug(f"使用头像链接 | qq_avatar={data['qq_avatar']} mc_avatar={data['mc_avatar']}")
-    effective_server_ids = server_ids if server_ids else [3]
+    effective_server_ids = server_ids if server_ids else [1]
 
     data["totals"] = _build_totals_for_players(player_uuids, tr, effective_server_ids)
     data["charts"] = _build_charts_for_players(player_uuids, tr, effective_server_ids)

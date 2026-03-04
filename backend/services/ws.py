@@ -62,6 +62,84 @@ def _is_proxy_server(server_name: str) -> bool:
     return False
 
 
+async def _handle_player_joined_with_uuid(player_name: str, reported_uuid: Optional[str]) -> None:
+    """
+    处理玩家加入时的 UUID 逻辑：
+    1. 若上报了 UUID，检查数据库中是否存在对应记录
+    2. 若不存在则创建
+    3. 若存在但 is_offline/is_bot 不正确则修正
+    4. 通过 Mojang API 验证 UUID 与玩家名是否匹配
+    """
+    from backend.services import player_manager as _pm
+
+    # 若没有上报 UUID，回退到旧逻辑（扫描 playerdata）
+    if not reported_uuid:
+        async with _PLAYER_SYNC_LOCK:
+            stats = _pm.ensure_players_from_worlds()
+            try:
+                await _pm.refresh_missing_official_names()
+            except Exception:
+                pass
+            if (stats or {}).get('added'):
+                logger.info(f"[MCDR-WS] 新增玩家UUID记录 | 新增={stats.get('added')} 总计扫描={stats.get('found')}")
+                try:
+                    _pm.ensure_play_time_if_empty()
+                except Exception:
+                    pass
+        return
+
+    # 有上报 UUID 的情况
+    with get_db_context() as db:
+        existing_by_uuid = crud.get_player_by_uuid(db, reported_uuid)
+        existing_by_name = crud.get_player_by_name(db, player_name)
+
+        if existing_by_uuid:
+            # UUID 已存在，检查并修正数据
+            need_update = False
+            if existing_by_uuid.player_name != player_name:
+                existing_by_uuid.player_name = player_name
+                need_update = True
+            if existing_by_uuid.is_bot:
+                existing_by_uuid.is_bot = False
+                need_update = True
+            if need_update:
+                db.commit()
+                logger.info(f"[MCDR-WS] 修正玩家记录 | uuid={reported_uuid} name={player_name}")
+        elif existing_by_name and existing_by_name.uuid != reported_uuid:
+            # 名字存在但 UUID 不同（可能是改名或冲突）
+            # 更新为新的 UUID
+            existing_by_name.uuid = reported_uuid
+            if existing_by_name.is_bot:
+                existing_by_name.is_bot = False
+            db.commit()
+            logger.info(f"[MCDR-WS] 更新玩家UUID | name={player_name} old_uuid={existing_by_name.uuid} new_uuid={reported_uuid}")
+        elif not existing_by_uuid and not existing_by_name:
+            # 全新玩家，创建记录
+            crud.create_player(db, uuid=reported_uuid, player_name=player_name, play_time={}, is_offline=False)
+            logger.info(f"[MCDR-WS] 新建玩家记录 | uuid={reported_uuid} name={player_name}")
+
+    # 通过 Mojang API 验证（若 API 返回的名字与上报名字不匹配或失败则标记 is_offline）
+    try:
+        official_uuid = await get_uuid_by_name(player_name)
+        with get_db_context() as db:
+            rec = crud.get_player_by_uuid(db, reported_uuid)
+            if rec:
+                if official_uuid and official_uuid == reported_uuid:
+                    # 验证通过，确保 is_offline=False
+                    if rec.is_offline:
+                        rec.is_offline = False
+                        db.commit()
+                        logger.debug(f"[MCDR-WS] 玩家验证通过，标记为正版 | uuid={reported_uuid} name={player_name}")
+                else:
+                    # 验证失败或不匹配，标记 is_offline=True
+                    if not rec.is_offline:
+                        rec.is_offline = True
+                        db.commit()
+                        logger.debug(f"[MCDR-WS] 玩家验证失败，标记为离线 | uuid={reported_uuid} name={player_name} official_uuid={official_uuid}")
+    except Exception:
+        logger.opt(exception=True).debug(f"[MCDR-WS] Mojang API 验证失败 | player={player_name}")
+
+
 async def _playtime_tick_loop():
     """
     每分钟遍历在线表，将在线满 60s 的玩家对应服务器的 play_time += 1200（gt）。
@@ -510,12 +588,17 @@ async def _handle_single(payload: Dict[str, Any]):
         from backend.services import player_manager as _pm
         _ensure_playtime_task()
         if event == "mcdr.bot_joined" and isinstance(data, dict):
-            # 为机器人玩家标记is_bot
+            # 为机器人玩家标记is_bot（但跳过已存在的真人玩家）
             server_name = str(data.get("server") or "")
             player = str(data.get("player") or "")
             if server_name and player:
                 with get_db_context() as db:
-                    crud.set_player_is_bot(db, player, True)
+                    existing = crud.get_player_by_name(db, player)
+                    # 若该名字对应的玩家已存在且不是离线账号，说明是真人，跳过标记
+                    if existing and not getattr(existing, "is_offline", True):
+                        logger.debug(f"[MCDR-WS] 跳过标记bot | player={player} 已存在正版玩家记录")
+                    else:
+                        crud.set_player_is_bot(db, player, True)
         if event in {"mcdr.player_joined", "mcdr.player_left", "mcdr.player_position"} and isinstance(data, dict):
             server_name = str(data.get("server") or "")
             if server_name and _is_proxy_server(server_name):
@@ -601,12 +684,13 @@ async def _handle_single(payload: Dict[str, Any]):
         if event == "mcdr.player_joined" and isinstance(data, dict):
             server_name = str(data.get("server") or "")
             player = str(data.get("player") or "")
+            reported_uuid = data.get("uuid")  # 插件上报的 UUID（可能为 None）
             if server_name and player:
                 PLAYERS_BY_SERVER.setdefault(server_name, set()).add(player)
                 await _emit_presence_for_server(server_name)
                 try:
                     online_cnt = len(PLAYERS_BY_SERVER.get(server_name, set()))
-                    logger.info(f"[MCDR-WS] 玩家加入 | server={server_name} player={player} 在线={online_cnt}")
+                    logger.info(f"[MCDR-WS] 玩家加入 | server={server_name} player={player} uuid={reported_uuid} 在线={online_cnt}")
                 except Exception:
                     pass
                 # 记录玩家加入的时间，用于满60秒判断
@@ -614,40 +698,15 @@ async def _handle_single(payload: Dict[str, Any]):
                     JOINED_TIME.setdefault(server_name, {})[player] = time.time()
                 except Exception:
                     pass
-                # 若数据库不存在该玩家记录，则补齐 UUID 并刷新玩家名（避免每次加入都全量扫描）
+                # 基于上报的 UUID 处理玩家记录
                 try:
-                    need_sync = False
-                    with get_db_context() as db:
-                        need_sync = crud.get_player_by_name(db, player) is None
-                        need_identify_online = crud.get_player_by_name(db, player) is not None and crud.get_player_by_name(db, player).is_offline is False
-                    if need_sync:
-                        async with _PLAYER_SYNC_LOCK:
-                            stats = _pm.ensure_players_from_worlds()
-                            try:
-                                await _pm.refresh_missing_official_names()
-                            except Exception:
-                                pass
-                            if (stats or {}).get('added'):
-                                logger.info(
-                                    f"[MCDR-WS] 新增玩家UUID记录 | 新增={stats.get('added')} 总计扫描={stats.get('found')}"
-                                )
-                                try:
-                                    _pm.ensure_play_time_if_empty()
-                                except Exception:
-                                    pass
-                    elif need_identify_online:
-                        async with _PLAYER_SYNC_LOCK:
-                            try:
-                                uuid = await get_uuid_by_name(player)
-                                await _pm.refresh_offline_names([uuid] if uuid is not None else None)
-                            except Exception:
-                                pass
+                    await _handle_player_joined_with_uuid(player, reported_uuid)
                 except Exception:
-                    pass
+                    logger.opt(exception=True).debug(f"[MCDR-WS] 处理玩家加入UUID逻辑失败 | player={player}")
                 # 记录会话开始 (Session)
                 try:
                     with get_db_context() as db:
-                        rec = crud.get_player_by_name(db, player)
+                        rec = crud.get_player_by_name(db, player) or (crud.get_player_by_uuid(db, reported_uuid) if reported_uuid else None)
                         if rec and rec.uuid:
                             server_path = _get_server_path_by_name(server_name)
                             if server_path:
