@@ -5,7 +5,7 @@
       <div class="header-icon-ring">
         <el-icon :size="30"><Link /></el-icon>
       </div>
-      <h2 class="picker-title">服务器链接管理</h2>
+      <h2 class="picker-title">服务器组管理</h2>
       <p class="picker-subtitle">
         共 <strong>{{ groups.length }}</strong> 个服务器组，点击编辑配置
       </p>

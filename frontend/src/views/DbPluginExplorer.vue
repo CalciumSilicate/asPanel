@@ -1,114 +1,87 @@
 <template>
-  <div class="db-plugin-manager">
-    <!-- Toolbar -->
-    <el-card shadow="never" class="mb-3">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <span class="text-base font-medium">数据库插件库</span>
-            <el-tag type="info" v-if="items.length">共 {{ items.length }} 个插件</el-tag>
-          </div>
-          <div class="flex items-center gap-2">
-            <el-button-group>
-              <el-button :loading="loading" type="primary" @click="load">
-                <el-icon class="mr-1">
-                  <Refresh/>
-                </el-icon>
-                刷新
-              </el-button>
-              <el-button type="success" @click="uploadDialogVisible = true">
-                <el-icon class="mr-1">
-                  <UploadFilled/>
-                </el-icon>
-                上传插件
-              </el-button>
-            </el-button-group>
-          </div>
+  <div class="db-page">
+
+    <!-- Glass toolbar -->
+    <div class="db-toolbar">
+      <div class="db-toolbar-left">
+        <span class="db-title">数据库插件库</span>
+        <el-tag type="info" v-if="items.length" size="small">共 {{ items.length }} 个</el-tag>
+        <div class="toolbar-divider" />
+        <div class="search-wrap">
+          <el-input v-model="query" placeholder="搜索：名称 / 文件名" clearable class="search-input" @input="handleSearch">
+            <template #prefix><el-icon style="color:var(--brand-primary)"><Search /></el-icon></template>
+          </el-input>
         </div>
-      </template>
-
-      <div class="flex">
-        <el-input
-            v-model="query"
-            placeholder="搜索：名称 / 文件名"
-            clearable
-            style="max-width: 400px;"
-            @input="handleSearch"
-        >
-          <template #prefix>
-            <el-icon>
-              <Search/>
-            </el-icon>
-          </template>
-        </el-input>
       </div>
-    </el-card>
-
-    <!-- List -->
-    <div class="table-card">
-      <el-table :data="paged" v-loading="loading" stripe size="small" height="60vh">
-      <el-table-column label="插件" min-width="260">
-        <template #default="{ row }">
-          <div class="flex items-start gap-2">
-            <el-tag type="primary" effect="plain" size="small" v-if="row.meta.id">{{ row.meta.id }}</el-tag>
-            <div>
-              <div class="font-medium leading-5">{{ row.meta.name || '未知名称' }}</div>
-              <div class="text-xs text-gray-500 leading-4">{{ row.file_name }}</div>
-            </div>
-          </div>
-        </template>
-      </el-table-column>
-
-      <el-table-column prop="meta.version" label="版本" width="130">
-        <template #default="{ row }">
-          <el-tag v-if="row.meta.version" size="small" type="success">{{ row.meta.version }}</el-tag>
-          <el-tag v-else size="small" type="info">未知</el-tag>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="作者" min-width="160">
-        <template #default="{ row }">
-          <el-space wrap>
-            <el-tag v-for="a in getAuthorsArray(row.meta)" :key="a" size="small">{{ a }}</el-tag>
-            <span v-if="getAuthorsArray(row.meta).length === 0"><el-tag size="small" type="info">未知</el-tag></span>
-          </el-space>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="文件大小" width="120" align="center">
-        <template #default="{ row }">
-          <span>{{ (row.size / 1024).toFixed(1) }} KB</span>
-        </template>
-      </el-table-column>
-
-      <!-- [MODIFIED] 操作列 -->
-      <el-table-column label="操作" width="280" align="center">
-        <template #default="{ row }">
-          <el-button-group>
-            <el-button size="small" type="primary" :icon="Download" @click="handleInstallClick(row)">
-              安装
-            </el-button>
-            <el-button size="small" type="warning" :icon="Remove" @click="handleUninstallClick(row)">
-              卸载
-            </el-button>
-            <el-popconfirm
-                title="确定要从数据库中永久删除这个插件吗？"
-                width="250"
-                @confirm="handleDelete(row)"
-            >
-              <template #reference>
-                <el-button size="small" type="danger" :icon="Delete">删除</el-button>
-              </template>
-            </el-popconfirm>
-          </el-button-group>
-        </template>
-      </el-table-column>
-      </el-table>
+      <div class="db-toolbar-right">
+        <button class="btn-ghost" @click="load">
+          <el-icon :size="13"><Refresh /></el-icon><span>刷新</span>
+        </button>
+        <button class="btn-upload" @click="uploadDialogVisible = true">
+          <el-icon :size="13"><UploadFilled /></el-icon><span>上传插件</span>
+        </button>
+      </div>
     </div>
 
-    <!-- Pagination -->
-    <div class="mt-3 flex items-center justify-end">
-      <el-pagination
+    <!-- Glass card -->
+    <div class="db-glass-card">
+      <div class="shimmer-line" aria-hidden="true" />
+
+      <!-- Table -->
+      <div class="db-table-wrap" v-loading="loading" element-loading-background="transparent">
+        <el-table :data="paged" stripe size="small" style="width:100%">
+          <el-table-column label="插件" min-width="280">
+            <template #default="{ row }">
+              <PluginNameCell
+                :id="row.meta.id"
+                :name="row.meta.name"
+                :filename="row.file_name"
+              />
+            </template>
+          </el-table-column>
+
+          <el-table-column label="版本" width="130">
+            <template #default="{ row }">
+              <el-tag v-if="row.meta.version" size="small" type="success">{{ row.meta.version }}</el-tag>
+              <el-tag v-else size="small" type="info">未知</el-tag>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="作者" min-width="160">
+            <template #default="{ row }">
+              <AuthorTagsCell :authors="getAuthorsArray(row.meta)" />
+            </template>
+          </el-table-column>
+
+          <el-table-column label="文件大小" width="110" align="center">
+            <template #default="{ row }">
+              <span class="size-cell">{{ (row.size / 1024).toFixed(1) }} KB</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="操作" width="260" align="center">
+            <template #default="{ row }">
+              <div class="row-actions">
+                <button class="act-btn act-install" @click="handleInstallClick(row)">
+                  <el-icon :size="11"><Download /></el-icon>安装
+                </button>
+                <button class="act-btn act-uninstall" @click="handleUninstallClick(row)">
+                  <el-icon :size="11"><Remove /></el-icon>卸载
+                </button>
+                <el-popconfirm title="确定要从数据库中永久删除这个插件吗？" width="250" @confirm="handleDelete(row)">
+                  <template #reference>
+                    <button class="act-btn act-delete"><el-icon :size="11"><Delete /></el-icon>删除</button>
+                  </template>
+                </el-popconfirm>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+
+      <!-- Footer pagination -->
+      <div class="db-footer">
+        <el-pagination
           background
           layout="prev, pager, next, sizes, total"
           :page-sizes="[10, 20, 50, 100]"
@@ -117,7 +90,8 @@
           :total="filtered.length"
           @current-change="(p) => page = p"
           @size-change="(s) => { pageSize = s; page = 1; }"
-      />
+        />
+      </div>
     </div>
 
     <!-- Upload Dialog -->
@@ -274,8 +248,9 @@
 <script setup>
 import {ref, computed, onMounted} from 'vue';
 import {ElMessage, ElNotification} from 'element-plus';
-// [MODIFIED] Import Remove icon
 import {Search, Refresh, UploadFilled, Download, Delete, Remove} from '@element-plus/icons-vue';
+import PluginNameCell from '@/components/PluginNameCell.vue';
+import AuthorTagsCell from '@/components/AuthorTagsCell.vue';
 import apiClient, { isRequestCanceled } from '@/api';
 import { useTasksStore } from '@/store/tasks'
 import { useTransfersStore } from '@/store/transfers'
@@ -570,102 +545,214 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* Scoped styles from MCDRPluginExplorer.vue for consistency */
-.db-plugin-manager :deep(.el-card__header) {
-  padding: 10px 16px;
-}
-
-.mb-3 {
-  margin-bottom: 12px;
-}
-
-.text-gray-500 {
-  color: #909399;
-}
-
-.flex {
+/* ── Page layout ──────────────────────────────────────────── */
+.db-page {
   display: flex;
-}
-
-.items-center {
-  align-items: center;
-}
-
-.items-start {
-  align-items: flex-start;
-}
-
-.justify-between {
-  justify-content: space-between;
-}
-
-.justify-end {
-  justify-content: flex-end;
-}
-
-.gap-2 {
-  gap: 8px;
-}
-
-.gap-3 {
-  gap: 12px;
-}
-
-.mt-3 {
-  margin-top: 12px;
-}
-
-.mt-4 {
-  margin-top: 16px;
-}
-
-.mb-2 {
-  margin-bottom: 8px;
-}
-
-.mr-1 {
-  margin-right: 4px;
-}
-
-.font-medium {
-  font-weight: 500;
-}
-
-.text-base {
-  font-size: 14px;
-}
-
-.text-xs {
-  font-size: 12px;
-}
-
-.leading-5 {
-  line-height: 20px;
-}
-
-.leading-4 {
-  line-height: 16px;
-}
-
-.w-full {
-  width: 100%;
-}
-
-/* 表格圆角统一样式 */
-.rounded-table {
-  border-radius: 8px;
+  flex-direction: column;
+  gap: 14px;
+  height: calc(100vh - var(--el-header-height) - 48px);
   overflow: hidden;
+  min-height: 0;
 }
-/* 让本页占满可用高度，内部滚动不外溢到整个页面 */
-.db-plugin-manager {
-  /* 占满可视区域（减去头部高度），避免出现页面级滚动条 */
-  height: calc(100vh - var(--el-header-height));
-  overflow: auto; /* 允许内部滚动 */
-  box-sizing: border-box;
-  scrollbar-gutter: stable;
+
+/* ── Glass toolbar ───────────────────────────────────────── */
+.db-toolbar {
+  font-family: 'Lexend', -apple-system, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  background: rgba(255, 255, 255, 0.62);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119, 181, 254, 0.18);
+  border-radius: 20px;
+  box-shadow: 0 4px 24px rgba(119, 181, 254, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  flex-shrink: 0;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.db-toolbar:hover {
+  border-color: rgba(119, 181, 254, 0.28);
+  box-shadow: 0 6px 32px rgba(119, 181, 254, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+:global(.dark) .db-toolbar {
+  background: rgba(15, 23, 42, 0.68);
+  border-color: rgba(119, 181, 254, 0.12);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.db-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.db-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.db-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.toolbar-divider {
+  width: 1px; height: 20px;
+  background: linear-gradient(180deg, transparent, rgba(119,181,254,0.35), transparent);
+  flex-shrink: 0;
+}
+.search-wrap { flex: 1 1 auto; min-width: 180px; max-width: 300px; }
+.search-input :deep(.el-input__wrapper) {
+  border-radius: 22px !important;
+  background: rgba(255,255,255,0.60) !important;
+  border: 1px solid rgba(119,181,254,0.22) !important;
+  box-shadow: none !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+.search-input :deep(.el-input__wrapper:hover) { border-color: rgba(119,181,254,0.42) !important; }
+.search-input :deep(.el-input__wrapper.is-focus) {
+  border-color: rgba(119,181,254,0.60) !important;
+  box-shadow: 0 0 0 3px rgba(119,181,254,0.12) !important;
+}
+:global(.dark) .search-input :deep(.el-input__wrapper) {
+  background: rgba(15,23,42,0.60) !important;
+  border-color: rgba(119,181,254,0.18) !important;
+}
+
+.btn-ghost {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 14px; border-radius: 22px;
+  border: 1px solid rgba(119,181,254,0.28);
+  background: rgba(119,181,254,0.08);
+  color: var(--brand-primary); font-size: 12px; font-weight: 600;
+  font-family: inherit; cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.18s ease;
+}
+.btn-ghost:hover { background: rgba(119,181,254,0.16); border-color: rgba(119,181,254,0.50); transform: translateY(-1px); }
+
+.btn-upload {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 34px; padding: 0 16px; border-radius: 22px; border: none;
+  cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit; color: #fff;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  box-shadow: 0 4px 14px rgba(16,185,129,0.35);
+  transition: box-shadow 0.25s ease, transform 0.25s cubic-bezier(.34,1.56,.64,1);
+}
+.btn-upload:hover { box-shadow: 0 6px 22px rgba(16,185,129,0.55); transform: translateY(-1px) scale(1.04); }
+
+/* ── Glass card ──────────────────────────────────────────── */
+.db-glass-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.58);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119, 181, 254, 0.18);
+  box-shadow: 0 4px 32px rgba(119, 181, 254, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.80);
+  overflow: hidden;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.db-glass-card:hover {
+  border-color: rgba(119, 181, 254, 0.28);
+  box-shadow: 0 8px 40px rgba(119, 181, 254, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.80);
+}
+:global(.dark) .db-glass-card {
+  background: rgba(15, 23, 42, 0.65);
+  border-color: rgba(119, 181, 254, 0.12);
+  box-shadow: 0 4px 32px rgba(0, 0, 0, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.shimmer-line {
+  height: 3px;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, transparent, rgba(119,181,254,0.7), rgba(16,185,129,0.5), rgba(119,181,254,0.7), transparent);
+  background-size: 200% 100%;
+  animation: shimmer-slide 4s linear infinite;
+  border-radius: 3px 3px 0 0;
+  pointer-events: none;
+}
+@keyframes shimmer-slide {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.db-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-width: thin;
 }
-.db-plugin-manager :deep(.el-scrollbar__bar) { opacity: 0.9; }
-.db-plugin-manager :deep(.el-dialog__body) { max-height: 70vh; overflow: auto; }
+.db-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 10px 20px;
+  border-top: 1px solid rgba(119, 181, 254, 0.12);
+}
 
+/* ── Table deep overrides ────────────────────────────────── */
+:deep(.el-table) { background: transparent !important; }
+:deep(.el-table tr) { background: transparent !important; }
+:deep(.el-table th.el-table__cell) {
+  background: rgba(119, 181, 254, 0.04) !important;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--el-text-color-secondary);
+}
+:deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
+  background: rgba(119, 181, 254, 0.025) !important;
+}
+:deep(.el-table__body tr.hover-row > td.el-table__cell) {
+  background: rgba(119, 181, 254, 0.06) !important;
+}
+:deep(.el-table__inner-wrapper::before) { display: none; }
+:deep(.el-table__body-wrapper) { background: transparent !important; }
+
+/* ── Cell styles ─────────────────────────────────────────── */
+.size-cell {
+  font-family: 'Maple Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+/* ── Row action buttons ──────────────────────────────────── */
+.row-actions { display: inline-flex; align-items: center; gap: 4px; }
+.act-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 26px; padding: 0 10px; border-radius: 8px;
+  border: 1px solid rgba(119,181,254,0.20);
+  background: transparent;
+  color: var(--el-text-color-regular);
+  font-size: 12px; font-weight: 500; font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.act-btn:not(:disabled):hover { transform: translateY(-1px); }
+.act-install { background: linear-gradient(135deg, var(--brand-primary), #a78bfa); color: #fff; border-color: transparent; }
+.act-install:hover { box-shadow: 0 4px 12px rgba(119,181,254,0.40); transform: translateY(-1px); }
+.act-uninstall:hover { background: rgba(245,158,11,0.10); color: #f59e0b; border-color: rgba(245,158,11,0.30); }
+.act-delete:hover { background: rgba(248,113,113,0.10); color: #ef4444; border-color: rgba(248,113,113,0.30); }
+
+/* ── Utility classes used in dialogs ─────────────────────── */
+.flex { display: flex; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.items-start { align-items: flex-start; }
+.w-full { width: 100%; }
+.mt-4 { margin-top: 16px; }
+.mb-2 { margin-bottom: 8px; }
+.font-medium { font-weight: 500; }
 </style>

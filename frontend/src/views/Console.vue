@@ -1,64 +1,110 @@
 <template>
-  <div class="console-page-container">
-    <el-card shadow="never" class="console-card">
-      <template #header>
-        <div class="console-header">
-          <span>服务器: <strong>{{ serverName }}</strong></span>
-          <div class="status-indicator">
-            <span>状态:</span>
-            <el-tag :type="statusTagType" effect="dark" size="small" :class="serverStatus === 'pending' ? 'pending-tag' : ''">{{ statusText }}</el-tag>
+  <div class="console-page">
+
+    <!-- ── Main log card ─────────────────────────────────── -->
+    <div class="console-glass-card">
+
+      <!-- Header -->
+      <div class="console-header">
+        <div class="header-left">
+          <div class="srv-icon">
+            <el-icon :size="15"><Monitor /></el-icon>
+          </div>
+          <div class="srv-info">
+            <span class="srv-name">{{ serverName }}</span>
+            <span class="conn-badge" :class="{ 'conn-on': isConnected }">
+              <span class="conn-dot" />
+              {{ isConnected ? 'WebSocket 已连接' : '未连接' }}
+            </span>
           </div>
         </div>
-      </template>
+        <div class="header-right">
+          <span :class="['status-pill', 'sp-' + serverStatus]">
+            <span v-if="serverStatus === 'running' || serverStatus === 'pending'" class="pulse-dot" />
+            <span v-else class="static-dot" />
+            {{ statusText }}
+          </span>
+        </div>
+      </div>
+
+      <!-- Log output -->
       <div class="log-output-wrapper" ref="logOutputWrapperRef">
         <pre class="log-output">{{ logs.join('\n') }}</pre>
       </div>
-    </el-card>
 
-    <div class="command-input-area">
-      <el-input
+    </div>
+
+    <!-- ── Command bar ────────────────────────────────────── -->
+    <div class="command-bar">
+
+      <!-- Action buttons -->
+      <div class="action-group">
+        <el-tooltip content="启动" placement="top" :show-after="400">
+          <button
+            class="act-btn act-start"
+            :disabled="serverStatus === 'running' || serverStatus === 'pending'"
+            @click="startServer"
+          >
+            <el-icon :size="13"><VideoPlay /></el-icon>
+            <span>启动</span>
+          </button>
+        </el-tooltip>
+        <el-tooltip content="停止" placement="top" :show-after="400">
+          <button
+            class="act-btn act-stop"
+            :disabled="serverStatus !== 'running'"
+            @click="stopServer"
+          >
+            <el-icon :size="13"><SwitchButton /></el-icon>
+            <span>停止</span>
+          </button>
+        </el-tooltip>
+        <el-tooltip content="重启" placement="top" :show-after="400">
+          <button
+            class="act-btn act-restart"
+            :disabled="serverStatus !== 'running'"
+            @click="restartServer"
+          >
+            <el-icon :size="13"><Refresh /></el-icon>
+            <span>重启</span>
+          </button>
+        </el-tooltip>
+      </div>
+
+      <div class="cmd-sep" />
+
+      <!-- Command input -->
+      <div class="cmd-input-wrap">
+        <span class="cmd-prompt">›</span>
+        <el-input
           v-model="command"
           type="textarea"
-          :autosize="{ minRows: 1, maxRows: 60 }"
-          placeholder="在此输入 MCDR 命令 (多行将逐行发送)"
+          :autosize="{ minRows: 1, maxRows: 6 }"
+          placeholder="输入 MCDR 命令，回车发送（多行逐行发送）"
+          class="cmd-textarea"
           @keydown.enter.exact.prevent="sendCommand"
-          clearable
+        />
+      </div>
+
+      <!-- Send button -->
+      <button
+        class="send-btn"
+        :disabled="!isConnected || serverStatus !== 'running'"
+        @click="sendCommand"
       >
-        <template #prepend>
-          <el-dropdown trigger="click" @command="handleActionCommand">
-            <el-button>
-              操作
-              <el-icon class="el-icon--right">
-                <arrow-down/>
-              </el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="start" :disabled="serverStatus === 'running' || serverStatus === 'pending'" :icon="VideoPlay">启动
-                </el-dropdown-item>
-                <el-dropdown-item command="stop" :disabled="serverStatus !== 'running'" :icon="SwitchButton">停止
-                </el-dropdown-item>
-                <el-dropdown-item command="restart" :disabled="serverStatus !== 'running'" :icon="Refresh">重启
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </template>
-        <template #append>
-          <el-button @click="sendCommand" :disabled="!isConnected || serverStatus !== 'running'" :icon="Promotion">
-            发送
-          </el-button>
-        </template>
-      </el-input>
+        <el-icon :size="14"><Promotion /></el-icon>
+        <span>发送</span>
+      </button>
+
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import {VideoPlay, SwitchButton, Refresh, Promotion, ArrowDown} from '@element-plus/icons-vue';
-import {ref, onMounted, onUnmounted, nextTick, watch, computed} from 'vue';
-import {useRoute} from 'vue-router';
-import {ElMessage} from 'element-plus';
+import { VideoPlay, SwitchButton, Refresh, Promotion, Monitor } from '@element-plus/icons-vue';
+import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue';
+import { useRoute } from 'vue-router';
+import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/store/user';
 import { serversApi } from '@/api/servers';
 import { useConsoleSocket } from '@/composables/useConsoleSocket';
@@ -192,63 +238,302 @@ watch(() => logs.value.length, scrollToBottom);
 </script>
 
 <style scoped>
-/* 您的样式无需改动 */
-.console-page-container {
-  display: flex;
-  flex-direction: column;
+/* ── Page layout ─────────────────────────────────────────── */
+.console-page {
   height: 100%;
-  gap: 15px;
-}
-.console-card {
-  flex-grow: 1;
   display: flex;
   flex-direction: column;
+  gap: 12px;
   overflow: hidden;
+  min-height: 0;
 }
-:deep(.el-card__header) {
-  padding: 10px 20px;
-  flex-shrink: 0;
+
+/* ── Main glass card ──────────────────────────────────────── */
+.console-glass-card {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.62);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119, 181, 254, 0.18);
+  border-radius: 20px;
+  box-shadow: 0 4px 24px rgba(119, 181, 254, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
 }
+.console-glass-card:hover {
+  border-color: rgba(119, 181, 254, 0.28);
+  box-shadow: 0 8px 40px rgba(119, 181, 254, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+:global(.dark) .console-glass-card {
+  background: rgba(15, 23, 42, 0.68);
+  border-color: rgba(119, 181, 254, 0.12);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* ── Header ───────────────────────────────────────────────── */
 .console-header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid rgba(119, 181, 254, 0.10);
+  flex-shrink: 0;
+}
+.header-left {
+  display: flex;
   align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.srv-icon {
+  width: 32px; height: 32px;
+  border-radius: 9px;
+  background: var(--brand-primary);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+}
+.srv-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.srv-name {
   font-size: 14px;
-}
-.status-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-:deep(.el-card__body) {
-  padding: 0;
-  flex-grow: 1;
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1.2;
+  white-space: nowrap;
   overflow: hidden;
-  display: flex;
+  text-overflow: ellipsis;
 }
+.conn-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+}
+.conn-dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--el-text-color-placeholder);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+  flex-shrink: 0;
+}
+.conn-on .conn-dot {
+  background: #10b981;
+  box-shadow: 0 0 5px rgba(16, 185, 129, 0.65);
+  animation: pulse 2.2s ease-in-out infinite;
+}
+.conn-on { color: #10b981; }
+
+/* ── Status pill ──────────────────────────────────────────── */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  background: rgba(148, 163, 184, 0.10);
+  border: 1px solid rgba(148, 163, 184, 0.20);
+  color: var(--el-text-color-secondary);
+}
+.sp-running  { background: rgba(52,211,153,0.12); border-color: rgba(52,211,153,0.28); color: #10b981; }
+.sp-pending  { background: rgba(119,181,254,0.12); border-color: rgba(119,181,254,0.28); color: var(--brand-primary); }
+.sp-new_setup{ background: rgba(119,181,254,0.08); border-color: rgba(119,181,254,0.18); color: var(--brand-primary); }
+:global(.dark) .sp-running  { color: #34d399; }
+:global(.dark) .sp-pending,
+:global(.dark) .sp-new_setup { color: var(--brand-primary); }
+
+.pulse-dot {
+  display: inline-block;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 4px currentColor;
+  animation: pulse 2.2s ease-in-out infinite;
+}
+.static-dot {
+  display: inline-block;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 3px currentColor; }
+  50%       { opacity: 0.6; box-shadow: 0 0 7px currentColor, 0 0 14px currentColor; }
+}
+
+/* ── Log output (always dark terminal) ────────────────────── */
 .log-output-wrapper {
-  flex-grow: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding: 15px;
-  background-color: #1e1e1e;
-  color: #d4d4d4;
-  font-family: 'Courier New', Courier, monospace;
+  padding: 14px 18px;
+  background: #0d1117;
+  color: #c9d1d9;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+}
+.log-output-wrapper::-webkit-scrollbar { width: 6px; }
+.log-output-wrapper::-webkit-scrollbar-track { background: transparent; }
+.log-output-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(119, 181, 254, 0.25);
+  border-radius: 3px;
+}
+.log-output-wrapper::-webkit-scrollbar-thumb:hover {
+  background: rgba(119, 181, 254, 0.45);
 }
 .log-output {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 12.5px;
+  line-height: 1.65;
 }
-.command-input-area {
+
+/* ── Command bar ──────────────────────────────────────────── */
+.command-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.62);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119, 181, 254, 0.18);
+  border-radius: 20px;
+  box-shadow: 0 4px 24px rgba(119, 181, 254, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  flex-shrink: 0;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.command-bar:focus-within {
+  border-color: rgba(119, 181, 254, 0.32);
+  box-shadow: 0 6px 32px rgba(119, 181, 254, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+:global(.dark) .command-bar {
+  background: rgba(15, 23, 42, 0.68);
+  border-color: rgba(119, 181, 254, 0.12);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Action button group */
+.action-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(119, 181, 254, 0.05);
+  border: 1px solid rgba(119, 181, 254, 0.12);
+  border-radius: 12px;
+  padding: 3px;
+  flex-shrink: 0;
+}
+.act-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+  flex-shrink: 0;
+}
+.act-btn:disabled { opacity: 0.28; cursor: not-allowed; }
+.act-start:not(:disabled):hover   { background: rgba(52,211,153,0.14);  color: #10b981; border-color: rgba(52,211,153,0.28); }
+.act-stop:not(:disabled):hover    { background: rgba(248,113,113,0.14); color: #ef4444; border-color: rgba(248,113,113,0.28); }
+.act-restart:not(:disabled):hover { background: rgba(245,158,11,0.14);  color: #f59e0b; border-color: rgba(245,158,11,0.28); }
+
+.cmd-sep {
+  width: 1px; height: 22px;
+  background: rgba(119, 181, 254, 0.18);
   flex-shrink: 0;
 }
 
-/* 启动中使用品牌蓝色以提升可读性 */
-.pending-tag {
-  background-color: var(--el-color-primary) !important;
-  border-color: var(--el-color-primary) !important;
-  color: #fff !important;
+/* Input area */
+.cmd-input-wrap {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
+.cmd-prompt {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--brand-primary);
+  opacity: 0.6;
+  flex-shrink: 0;
+  line-height: 1;
+  user-select: none;
+}
+.cmd-textarea :deep(.el-textarea__inner) {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace !important;
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+  border-radius: 12px !important;
+  background: rgba(255, 255, 255, 0.55) !important;
+  border: 1px solid rgba(119, 181, 254, 0.18) !important;
+  box-shadow: none !important;
+  resize: none !important;
+  padding: 7px 12px !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease !important;
+}
+.cmd-textarea :deep(.el-textarea__inner:hover) {
+  border-color: rgba(119, 181, 254, 0.38) !important;
+}
+.cmd-textarea :deep(.el-textarea__inner:focus) {
+  border-color: rgba(119, 181, 254, 0.55) !important;
+  box-shadow: 0 0 0 3px rgba(119, 181, 254, 0.10) !important;
+  background: rgba(255, 255, 255, 0.88) !important;
+}
+:global(.dark) .cmd-textarea :deep(.el-textarea__inner) {
+  background: rgba(15, 23, 42, 0.55) !important;
+  border-color: rgba(119, 181, 254, 0.15) !important;
+  color: var(--el-text-color-regular) !important;
+}
+:global(.dark) .cmd-textarea :deep(.el-textarea__inner:focus) {
+  background: rgba(15, 23, 42, 0.85) !important;
+}
+
+/* Send button */
+.send-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 18px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, var(--brand-primary) 0%, #a78bfa 100%);
+  box-shadow: 0 4px 14px rgba(119, 181, 254, 0.35);
+  transition: box-shadow 0.2s ease, transform 0.2s cubic-bezier(.34,1.56,.64,1);
+  flex-shrink: 0;
+}
+.send-btn:hover:not(:disabled) {
+  box-shadow: 0 6px 22px rgba(119, 181, 254, 0.55);
+  transform: translateY(-1px);
+}
+.send-btn:active:not(:disabled) { transform: scale(0.97); }
+.send-btn:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
 </style>

@@ -1,182 +1,141 @@
 <template>
-  <div class="mods-manager-layout" :class="{ 'is-collapsed': asideCollapsed, 'is-collapsing': asideCollapsing }">
-    <!-- 左侧服务器列表 -->
-    <div class="table-card left-panel">
-      <el-card shadow="never" v-loading="serversLoading">
-        <template #header>
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <span class="text-base font-medium">Mods管理</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <el-tag type="success">模组总数：{{ totalModsCount }}</el-tag>
-            </div>
-          </div>
-        </template>
+  <div class="mm-page">
 
-        <el-input v-model="serverQuery" placeholder="搜索服务器" clearable class="mb-2">
-          <template #prefix>
-            <el-icon><Search/></el-icon>
-          </template>
-        </el-input>
+    <!-- Toolbar -->
+    <ModsToolbar
+      :selected-server="selectedServer"
+      :mods-count="mods.length"
+      :total-mods-count="totalModsCount"
+      :is-server-running="isServerRunning"
+      @select-server="selectServerById"
+      @modrinth="openModrinthDialog"
+      @curseforge="openCurseforgeDialog"
+      @upload="openUploadDialog"
+      @copy="openCopyDialog"
+      @check-updates="checkUpdates"
+    />
 
-        <el-table :data="filteredServers" size="small" stripe height="100%" @row-click="handleSelectServer" row-key="id">
-          <el-table-column label="服务器" min-width="160">
-            <template #default="{ row }">
-              <div class="flex items-center justify-between w-full">
-                <div class="server-cell">
-                  <div class="server-name ellipsis">{{ row.name }}</div>
-                  <div class="muted ellipsis">ID: {{ row.id }}</div>
-                </div>
-
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="mods数" width="80" align="center">
-            <template #default="{ row }">
-              <span v-if="row.mods_count_state === 'ok'">{{ Number(row.mods_count) || 0 }}</span>
-              <span v-else-if="row.mods_count_state === 'failed'">计算失败</span>
-              <span v-else>计算中</span>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-card>
+    <!-- No server selected: Picker -->
+    <div v-if="!selectedServer" class="mm-placeholder">
+      <ModsServerPicker
+        :servers="servers"
+        :loading="serversLoading"
+        :total-mods-count="totalModsCount"
+        @select="selectServer"
+      />
     </div>
 
-    <!-- 右侧主视图 -->
-    <el-main class="mods-content-area">
-      <div v-if="!selectedServer" class="main-placeholder">
-        <el-empty description="请从左侧选择一个服务器以管理模组"/>
+    <!-- Server selected: Glass card -->
+    <div v-else class="mm-glass-card">
+      <div class="shimmer-line" aria-hidden="true" />
+
+      <!-- Overview info strip -->
+      <div v-if="overview" class="mm-overview">
+        <el-descriptions :column="4" border size="small">
+          <el-descriptions-item label="存储根">{{ overview.storage_root }}</el-descriptions-item>
+          <el-descriptions-item label="核心版本">{{ overview.mc_version || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="加载器">
+            <span v-if="overview.loader==='未安装'">
+              未安装
+              <el-button size="small" type="primary" @click="goToServers">去安装</el-button>
+            </span>
+            <span v-else>{{ overview.loader }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="加载器版本">{{ overview.loader_version || '-' }}</el-descriptions-item>
+        </el-descriptions>
       </div>
 
-      <div v-else>
-        <!-- 工具栏与概览 -->
-        <el-card shadow="never" class="mb-3">
-          <template #header>
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <span class="text-base font-medium">{{ selectedServer.name }}</span>
-                <el-tag type="info">共 {{ mods.length }} 个模组</el-tag>
+      <!-- Mods table -->
+      <div class="mm-table-wrap" v-loading="modsLoading" element-loading-background="transparent">
+        <el-table :data="pagedMods" stripe size="small" style="width: 100%;">
+          <el-table-column label="模组" min-width="240">
+            <template #default="{ row }">
+              <PluginNameCell
+                :id="row.meta.slug || row.meta.id"
+                :name="row.meta.name"
+                :description="row.meta.description"
+                :filename="row.file_name"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column label="来源" width="120" align="center">
+            <template #default="{ row }">
+              <el-tag v-if="row.meta.source" size="small">{{ row.meta.source }}</el-tag>
+              <el-tag v-else size="small" type="info">未知</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="模组版本" width="160" align="center">
+            <template #default="{ row }">
+              <div class="version-cell">
+                <el-tag size="small" type="success">{{ row.meta.version || '-' }}</el-tag>
+                <el-tooltip v-if="updatesMap.get(row.file_name)" :content="`有新版：${updatesMap.get(row.file_name)?.version || ''}`" placement="top-start" effect="light">
+                  <el-button size="small" type="warning" circle plain :icon="Refresh" @click="installUpdateForMod(row)" />
+                </el-tooltip>
               </div>
-              <div class="flex items-center gap-2">
-                <el-button-group>
-                  <el-button type="primary" :icon="Plus" @click="openModrinthDialog" :disabled="isServerRunning">从Modrinth添加</el-button>
-                  <el-button type="primary" :icon="Plus" @click="openCurseforgeDialog" :disabled="isServerRunning">从Curseforge添加</el-button>
-                  <el-button type="success" :icon="Upload" @click="openUploadDialog" :disabled="isServerRunning && !isVelocity(selectedServer.value)">从本地上传</el-button>
-                  <el-button type="warning" :icon="CopyDocument" @click="openCopyDialog" :disabled="isServerRunning && !isVelocity(selectedServer.value)">从其他服务器复制</el-button>
-                  <el-button type="info" :icon="Refresh" @click="checkUpdates" :disabled="mods.length===0">检查更新</el-button>
-                </el-button-group>
-              </div>
-            </div>
-          </template>
-
-          <el-descriptions :column="3" border size="small" v-if="overview">
-            <el-descriptions-item label="存储根">{{ overview.storage_root }}</el-descriptions-item>
-            <el-descriptions-item label="核心版本">{{ overview.mc_version || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="加载器">
-              <span v-if="overview.loader==='未安装'">
-                未安装
-                <el-button size="small" type="primary" @click="goToServers">去安装</el-button>
-              </span>
-              <span v-else>{{ overview.loader }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="模组加载器版本">{{ overview.loader_version || '-' }}</el-descriptions-item>
-          </el-descriptions>
-        </el-card>
-
-        <!-- 模组列表 -->
-        <div class="table-card">
-          <el-table :data="pagedMods" v-loading="modsLoading" stripe size="small" :max-height="tableMaxHeight" style="width: 100%;">
-            <el-table-column label="模组" min-width="240">
-              <template #default="{ row }">
-                <div class="plugin-cell-layout">
-                  <el-tag v-if="(row.meta.slug || row.meta.id)" type="primary" effect="plain" size="small">{{ row.meta.slug || row.meta.id }}</el-tag>
-                  <div>
-                    <div class="plugin-name">{{ row.meta.name || row.file_name }}</div>
-                    <el-tooltip :content="(row.meta.description || row.file_name)" placement="top-start" effect="light">
-                      <div class="plugin-description ellipsis">{{ row.meta.description || row.file_name }}</div>
-                    </el-tooltip>
-                  </div>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="来源" width="120" align="center">
-              <template #default="{ row }">
-                <el-tag v-if="row.meta.source" size="small">{{ row.meta.source }}</el-tag>
-                <el-tag v-else size="small" type="info">未知</el-tag>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="模组版本" width="160" align="center">
-              <template #default="{ row }">
-                <div class="version-cell">
-                  <el-tag size="small" type="success">{{ row.meta.version || '-' }}</el-tag>
-                  <el-tooltip v-if="updatesMap.get(row.file_name)" :content="`有新版：${updatesMap.get(row.file_name)?.version || ''}`" placement="top-start" effect="light">
-                    <el-button size="small" type="warning" circle plain :icon="Refresh" @click="installUpdateForMod(row)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="支持的MC版本" min-width="140">
+            <template #default="{ row }">
+              <template v-if="(row.meta.game_versions || []).length >= 3">
+                <div class="ellipsis-tags">
+                  <el-tag v-for="v in (row.meta.game_versions || []).slice(0,2)" :key="v" size="small" style="margin-right:4px;">{{ v }}</el-tag>
+                  <el-tooltip placement="top-start" effect="light">
+                    <template #content>
+                      <div>
+                        <el-tag v-for="v in (row.meta.game_versions || [])" :key="v" size="small" style="margin:2px;">{{ v }}</el-tag>
+                      </div>
+                    </template>
+                    <el-tag size="small" type="info">+{{ (row.meta.game_versions || []).length - 2 }}</el-tag>
                   </el-tooltip>
                 </div>
               </template>
-            </el-table-column>
-            <el-table-column label="支持的MC版本" min-width="140">
-              <template #default="{ row }">
-                <template v-if="(row.meta.game_versions || []).length >= 3">
-                  <div class="ellipsis-tags">
-                    <el-tag v-for="v in (row.meta.game_versions || []).slice(0,2)" :key="v" size="small" style="margin-right:4px;">{{ v }}</el-tag>
-                    <el-tooltip placement="top-start" effect="light">
-                      <template #content>
-                        <div>
-                          <el-tag v-for="v in (row.meta.game_versions || [])" :key="v" size="small" style="margin:2px;">{{ v }}</el-tag>
-                        </div>
-                      </template>
-                      <el-tag size="small" type="info">+{{ (row.meta.game_versions || []).length - 2 }}</el-tag>
-                    </el-tooltip>
-                  </div>
-                </template>
-                <template v-else>
-                  <el-space wrap>
-                    <el-tag v-for="v in (row.meta.game_versions || [])" :key="v" size="small">{{ v }}</el-tag>
-                    <span v-if="!(row.meta.game_versions || []).length"><el-tag size="small" type="info">未知</el-tag></span>
-                  </el-space>
-                </template>
+              <template v-else>
+                <el-space wrap>
+                  <el-tag v-for="v in (row.meta.game_versions || [])" :key="v" size="small">{{ v }}</el-tag>
+                  <span v-if="!(row.meta.game_versions || []).length"><el-tag size="small" type="info">未知</el-tag></span>
+                </el-space>
               </template>
-            </el-table-column>
-
-            <el-table-column label="状态" width="120" align="center">
-              <template #default="{ row }">
-                <el-switch v-model="row.enabled" @change="toggleMod(row)" :loading="row.loading" :disabled="isServerRunning"/>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="280" align="center">
-              <template #default="{ row }">
-                <el-button-group>
-                  <el-button size="small" type="success" :icon="Download" :loading="row.loading" @click="downloadMod(row)">下载</el-button>
-                  <el-button size="small" type="primary" @click="openChangeVersion(row)">更改版本</el-button>
-                  <el-popconfirm title="确定删除这个模组吗？" width="220" @confirm="deleteMod(row)">
-                    <template #reference>
-                      <el-button size="small" type="danger" :icon="Delete" :loading="row.loading" :disabled="isServerRunning">删除</el-button>
-                    </template>
-                  </el-popconfirm>
-                </el-button-group>
-              </template>
-            </el-table-column>
-          </el-table>
-        </div>
-
-        <!-- 分页 -->
-        <div class="mt-3 flex items-center justify-end">
-          <el-pagination
-            background
-            layout="prev, pager, next, sizes, total"
-            :page-sizes="[15, 20, 50, 100]"
-            :page-size="pageSize"
-            :current-page="page"
-            :total="filteredMods.length"
-            @current-change="p => page = p"
-            @size-change="s => { pageSize = s; page = 1 }"
-          />
-        </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="120" align="center">
+            <template #default="{ row }">
+              <el-switch v-model="row.enabled" @change="toggleMod(row)" :loading="row.loading" :disabled="isServerRunning"/>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="250" align="center">
+            <template #default="{ row }">
+              <div class="row-actions">
+                <button class="act-btn act-dl" :disabled="row.loading" @click="downloadMod(row)">
+                  <el-icon :size="12"><Download /></el-icon>下载
+                </button>
+                <button class="act-btn act-detail" @click="openChangeVersion(row)">更改版本</button>
+                <el-popconfirm title="确定删除这个模组吗？" width="220" @confirm="deleteMod(row)">
+                  <template #reference>
+                    <button class="act-btn act-danger" :disabled="row.loading || isServerRunning">
+                      <el-icon :size="12"><Delete /></el-icon>删除
+                    </button>
+                  </template>
+                </el-popconfirm>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
       </div>
-    </el-main>
+
+      <!-- Footer: pagination -->
+      <div class="mm-footer">
+        <el-pagination
+          background
+          layout="prev, pager, next, sizes, total"
+          :page-sizes="[15, 20, 50, 100]"
+          :page-size="pageSize"
+          :current-page="page"
+          :total="filteredMods.length"
+          @current-change="p => page = p"
+          @size-change="s => { pageSize = s; page = 1 }"
+        />
+      </div>
+    </div>
 
     <!-- 对话框：Modrinth 搜索 -->
     <el-dialog v-if="modrinthDialog.visible" v-model="modrinthDialog.visible" title="从 Modrinth 添加" width="70%" top="8vh" destroy-on-close>
@@ -187,15 +146,11 @@
       <el-table :data="modrinthDialog.items" v-loading="modrinthDialog.loading" height="50vh" stripe border row-key="project_id">
         <el-table-column label="模组" min-width="320">
           <template #default="{ row }">
-            <div class="plugin-cell-layout">
-              <el-tag type="primary" effect="plain" size="small">{{ row.slug }}</el-tag>
-              <div>
-                <div class="plugin-name">{{ row.title }}</div>
-                <el-tooltip :content="row.description" placement="top-start" effect="light">
-                  <div class="plugin-description ellipsis">{{ row.description }}</div>
-                </el-tooltip>
-              </div>
-            </div>
+            <PluginNameCell
+              :id="row.slug"
+              :name="row.title"
+              :description="row.description"
+            />
           </template>
         </el-table-column>
         <el-table-column label="当前安装" width="140">
@@ -206,7 +161,15 @@
         </el-table-column>
         <el-table-column label="统计" width="160" align="center">
           <template #default="{ row }">
-            <span>⬇ {{ abbrNumber(row.downloads) }}　★ {{ abbrNumber(row.follows) }}</span>
+            <div class="stats-cell">
+              <span class="stat-chip stat-dl-chip">
+                <el-icon :size="11"><Download /></el-icon>
+                {{ abbrNumber(row.downloads) }}
+              </span>
+              <span class="stat-chip stat-star">
+                ★ {{ abbrNumber(row.follows) }}
+              </span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="240" align="center">
@@ -321,22 +284,22 @@
 <script setup>
 import {ref, computed, onMounted, watch} from 'vue'
 import { ElMessage, ElNotification } from 'element-plus'
-import { Search, Plus, Delete, Download, Upload, UploadFilled, Refresh, CopyDocument } from '@element-plus/icons-vue'
+import { Delete, Download, Upload, UploadFilled, Refresh, Search } from '@element-plus/icons-vue'
+import PluginNameCell from '@/components/PluginNameCell.vue'
 import apiClient, { isRequestCanceled } from '@/api'
-import { useUiStore } from '@/store/ui'
 import { useTasksStore } from '@/store/tasks'
 import { useTransfersStore } from '@/store/transfers'
 import { useUserStore } from '@/store/user'
 import { storeToRefs } from 'pinia'
 import router from '@/router'
-const { asideCollapsed, asideCollapsing } = storeToRefs(useUiStore())
+import ModsToolbar from './mods-manager/ModsToolbar.vue'
+import ModsServerPicker from './mods-manager/ModsServerPicker.vue'
 const { fetchTasks } = useTasksStore()
 const { startDownload, startUpload } = useTransfersStore()
 const { activeGroupIds } = storeToRefs(useUserStore())
 
 // 左侧数据
 const servers = ref([])
-const serverQuery = ref('')
 const serversLoading = ref(false)
 const modsCountsLoaded = ref(false)
 const totalModsCount = computed(() => {
@@ -356,12 +319,6 @@ const overview = ref(null)
 const page = ref(1)
 const pageSize = ref(15)
 
-const filteredServers = computed(() => {
-  if (!serverQuery.value.trim()) return servers.value
-  const q = serverQuery.value.toLowerCase()
-  return servers.value.filter(s => s.name?.toLowerCase().includes(q) || String(s.id).includes(q))
-})
-
 const filteredMods = computed(() => mods.value)
 const pagedMods = computed(() => {
   const start = (page.value - 1) * pageSize.value
@@ -370,10 +327,12 @@ const pagedMods = computed(() => {
 
 const isVelocity = (s) => (s?.core_config?.server_type || s?.core_config?.serverType) === 'velocity'
 const isServerRunning = computed(() => selectedServer.value?.status === 'running')
-const tableMaxHeight = computed(() => {
-  const h = window.innerHeight || 900
-  return Math.max(240, h - 320)
-})
+
+const selectServerById = async (id) => {
+  if (!id) { selectedServer.value = null; return }
+  const srv = servers.value.find(s => s.id === id)
+  if (srv) await selectServer(srv)
+}
 
 const formatBytes = (bytes) => {
   const b = Number(bytes || 0)
@@ -440,6 +399,11 @@ const handleSelectServer = async (server) => {
 }
 
 const selectServer = async (server) => {
+  const type = (server?.core_config?.server_type || server?.core_config?.serverType || '').toLowerCase()
+  if (type === 'vanilla' && !(server?.core_config?.is_fabric || server?.core_config?.isFabric)) {
+    ElMessage.warning('Vanilla 服务器不支持模组管理')
+    return
+  }
   selectedServer.value = server
   page.value = 1
   await fetchMods()
@@ -825,39 +789,160 @@ onMounted(initialLoad)
 </script>
 
 <style scoped>
-.mods-manager-layout { display: flex; gap: 12px; height: calc(100vh - 64px); overflow: hidden; }
-.left-panel { width: 280px; max-width: 280px; flex-shrink: 0; align-self: stretch; height: 100%; min-height: 0; transition: width 0.32s cubic-bezier(.34,1.56,.64,1); will-change: width; overflow: hidden; }
-.is-collapsed .left-panel, .is-collapsing .left-panel { width: 0 !important; }
-.is-collapsing .left-panel :deep(.el-card__body), .is-collapsing .left-panel :deep(.el-card__header) { display: none !important; }
-.mods-content-area { padding: 0 20px 20px; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; }
-.main-placeholder { display: flex; justify-content: center; align-items: center; height: 100%; }
+/* ── Page layout ─────────────────────────────────────────── */
+.mm-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: calc(100vh - var(--el-header-height) - 48px);
+  overflow: hidden;
+  min-height: 0;
+}
 
-.mb-3 { margin-bottom: 12px; }
-.mt-3 { margin-top: 12px; }
-.flex { display: flex; }
-.items-center { align-items: center; }
-.justify-between { justify-content: space-between; }
-.justify-end { justify-content: flex-end; }
-.gap-2 { gap: 8px; }
-.plugin-cell-layout { display: flex; align-items: flex-start; gap: 8px; }
-.plugin-name { font-weight: 500; line-height: 1.2; }
-.plugin-description { font-size: 12px; color: #909399; line-height: 1.3; max-width: 520px; }
-.ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ── Placeholder (no server selected) ────────────────────── */
+.mm-placeholder {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-self: center;
+  width: 100%;
+  max-width: 520px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.58);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(167, 139, 250, 0.18);
+  box-shadow: 0 4px 32px rgba(167, 139, 250, 0.10);
+}
+:global(.dark) .mm-placeholder {
+  background: rgba(15, 23, 42, 0.65);
+  border-color: rgba(167, 139, 250, 0.12);
+}
+
+/* ── Glass card (server selected) ────────────────────────── */
+.mm-glass-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.58);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(167, 139, 250, 0.18);
+  box-shadow: 0 4px 32px rgba(167, 139, 250, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.80);
+  overflow: hidden;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.mm-glass-card:hover {
+  border-color: rgba(167, 139, 250, 0.28);
+  box-shadow: 0 8px 40px rgba(167, 139, 250, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.80);
+}
+:global(.dark) .mm-glass-card {
+  background: rgba(15, 23, 42, 0.65);
+  border-color: rgba(167, 139, 250, 0.12);
+  box-shadow: 0 4px 32px rgba(0, 0, 0, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* shimmer accent line */
+.shimmer-line {
+  height: 3px;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, #a78bfa 0%, var(--brand-primary) 50%, #a78bfa 100%);
+  background-size: 200% 100%;
+  animation: shimmer-slide 3s linear infinite;
+  border-radius: 3px 3px 0 0;
+}
+@keyframes shimmer-slide {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* overview strip */
+.mm-overview {
+  flex-shrink: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(167, 139, 250, 0.12);
+}
+
+.mm-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  padding: 0 4px;
+}
+
+.mm-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 10px 20px;
+  border-top: 1px solid rgba(167, 139, 250, 0.12);
+}
+
+/* ── Shared cell styles ───────────────────────────────────── */
+.muted { font-size: 12px; color: var(--el-text-color-secondary); }
+
+.version-cell { display: flex; align-items: center; gap: 8px; }
+.version-cell .el-button.is-circle .el-icon { display: inline-flex; align-items: center; justify-content: center; }
+
 .ellipsis-tags { display: inline-flex; align-items: center; }
-.server-name { font-weight: 500; }
-.muted { font-size: 12px; color: #909399; }
 
-/* 左侧面板内部元素宽度与溢出控制，避免横向滚动 */
-.left-panel :deep(.el-card) { height: 100%; display: flex; flex-direction: column; }
-.left-panel :deep(.el-card__body) { padding: 8px; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.left-panel :deep(.el-input),
-.left-panel :deep(.el-input__wrapper) { width: 100%; }
-.left-panel :deep(.el-table),
-.left-panel :deep(.el-table__inner-wrapper) { width: 100%; }
-.left-panel :deep(.el-table) { flex: 1 1 auto; min-height: 0; }
-.left-panel :deep(.el-scrollbar__wrap) { overflow-x: hidden !important; }
+/* ── Table deep overrides (glass card) ───────────────────── */
+.mm-glass-card :deep(.el-table) { background: transparent !important; }
+.mm-glass-card :deep(.el-table tr) { background: transparent !important; }
+.mm-glass-card :deep(.el-table th.el-table__cell) {
+  background: rgba(167, 139, 250, 0.05) !important;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--el-text-color-secondary);
+}
+.mm-glass-card :deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
+  background: rgba(167, 139, 250, 0.03) !important;
+}
+.mm-glass-card :deep(.el-table__body tr.hover-row > td.el-table__cell) {
+  background: rgba(167, 139, 250, 0.07) !important;
+}
+.mm-glass-card :deep(.el-table__inner-wrapper::before) { display: none; }
+.mm-glass-card :deep(.el-table__body-wrapper) { background: transparent !important; }
 
-/* 对话框底部布局：左下角兼容开关，右下角分页 */
-.dialog-footer-flex { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+/* ── Stat chips ──────────────────────────────────────────── */
+.stats-cell { display: inline-flex; align-items: center; gap: 6px; }
+.stat-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.stat-star { background: rgba(245,158,11,0.10); color: #f59e0b; border: 1px solid rgba(245,158,11,0.22); }
+.stat-dl-chip { background: rgba(167,139,250,0.10); color: #a78bfa; border: 1px solid rgba(167,139,250,0.22); }
+
+/* ── Row action buttons ──────────────────────────────────── */
+.row-actions { display: inline-flex; align-items: center; gap: 4px; }
+.act-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 26px; padding: 0 10px; border-radius: 8px;
+  border: 1px solid rgba(167,139,250,0.20);
+  background: transparent;
+  color: var(--el-text-color-regular);
+  font-size: 12px; font-weight: 500; font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.act-btn:not(:disabled):hover { transform: translateY(-1px); }
+.act-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.act-detail:hover { background: rgba(167,139,250,0.10); color: #a78bfa; border-color: rgba(167,139,250,0.35); }
+.act-dl:not(:disabled):hover { background: rgba(52,211,153,0.10); color: #10b981; border-color: rgba(52,211,153,0.30); }
+.act-danger:not(:disabled):hover { background: rgba(239,68,68,0.10); color: #ef4444; border-color: rgba(239,68,68,0.30); }
+
+/* ── Dialog util ─────────────────────────────────────────── */
+.mb-3 { margin-bottom: 12px; }
 .plugin-toolbar.compact { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; }
+.dialog-footer-flex { display: flex; align-items: center; justify-content: space-between; width: 100%; }
 </style>

@@ -1,138 +1,117 @@
 <template>
-  <div class="mcdr-explorer">
-    <!-- Toolbar -->
-    <el-card shadow="never" class="mb-3">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <span class="text-base font-medium">MCDR 插件浏览</span>
-            <el-tag type="info" v-if="stats.total">共 {{ stats.total }} 个插件</el-tag>
-            <el-tag type="success" v-if="stats.updatedAt">最近刷新：{{ stats.updatedAt }}</el-tag>
-          </div>
-          <div class="flex items-center gap-2">
-            <el-button :loading="loading" type="primary" @click="load">刷新</el-button>
-          </div>
+  <div class="mcdr-page">
+
+    <!-- Glass toolbar -->
+    <div class="mcdr-toolbar">
+      <div class="mcdr-toolbar-left">
+        <span class="mcdr-title">MCDR 插件市场</span>
+        <el-tag type="info" v-if="stats.total" size="small">共 {{ stats.total }} 个</el-tag>
+        <el-tag type="success" v-if="stats.updatedAt" size="small">{{ stats.updatedAt }}</el-tag>
+        <div class="toolbar-divider" />
+        <div class="search-wrap">
+          <el-input v-model="query" placeholder="搜索：名称 / ID / 作者 / 标签 / 描述" clearable class="search-input" @input="handleSearch">
+            <template #prefix><el-icon style="color:var(--brand-primary)"><Search /></el-icon></template>
+          </el-input>
         </div>
-      </template>
-
-      <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
-        <el-input
-            v-model="query"
-            placeholder="搜索：名称 / ID / 作者 / 标签 / 描述"
-            clearable
-            class="md:col-span-4"
-            @input="handleSearch"
-        >
-          <template #prefix>
-            <el-icon>
-              <Search/>
-            </el-icon>
-          </template>
-        </el-input>
-
-        <el-select v-model="selectedLabels" class="md:col-span-3" multiple collapse-tags collapse-tags-tooltip
-                   placeholder="标签筛选">
+        <el-select v-model="selectedLabels" multiple collapse-tags collapse-tags-tooltip placeholder="标签筛选" class="labels-select">
           <el-option v-for="l in allLabels" :key="l" :label="l" :value="l"/>
         </el-select>
-
-        <el-select v-model="sortBy" class="md:col-span-2" placeholder="排序">
+        <el-select v-model="sortBy" placeholder="排序" class="sort-select">
           <el-option label="最新发布" value="latestDate"/>
           <el-option label="下载最多" value="downloads"/>
           <el-option label="Star 最多" value="stars"/>
           <el-option label="名称" value="name"/>
         </el-select>
-
-        <div class="md:col-span-3 flex items-center gap-3">
-          <el-checkbox v-model="showPrerelease">包含预发布</el-checkbox>
-          <el-checkbox v-model="hideArchived">隐藏已归档</el-checkbox>
+        <div class="check-group">
+          <el-checkbox v-model="showPrerelease" size="small">预发布</el-checkbox>
+          <el-checkbox v-model="hideArchived" size="small">隐藏归档</el-checkbox>
         </div>
       </div>
-    </el-card>
-
-    <!-- List -->
-    <div class="table-card">
-      <el-table :data="paged" v-loading="loading" stripe size="small" @row-dblclick="openDetail">
-      <el-table-column label="插件" min-width="260">
-        <template #default="{ row }">
-          <div class="flex items-start gap-2">
-            <el-tag type="primary" effect="plain">{{ row.meta.id }}</el-tag>
-            <div>
-              <div class="font-medium leading-5">{{ row.meta.name }}</div>
-              <div class="text-xs text-gray-500 leading-4">
-                {{ row.meta.description?.zh_cn || row.meta.description?.en_us || '-' }}
-              </div>
-            </div>
-          </div>
-        </template>
-      </el-table-column>
-
-      <el-table-column prop="release.latest_version" label="最新版本" width="130">
-        <template #default="{ row }">
-          <el-tag size="small" :type="row.latest?.prerelease ? 'warning' : 'success'">
-            {{ row.release?.latest_version || '-' }}
-          </el-tag>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="作者" min-width="160">
-        <template #default="{ row }">
-          <el-space wrap>
-            <el-tag v-for="a in row.meta?.authors || []" :key="a" size="small">{{ a }}</el-tag>
-          </el-space>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="统计" width="220" align="center">
-        <template #default="{ row }">
-          <el-space>
-            <el-tooltip content="Repo Stars">
-              <el-tag type="info" size="small">
-                <el-icon class="mr-1">
-                  <Star/>
-                </el-icon>
-                {{ row.repository?.stargazers_count ?? 0 }}
-              </el-tag>
-            </el-tooltip>
-            <el-tooltip content="Latest Asset Downloads">
-              <el-tag type="info" size="small">
-                <el-icon class="mr-1">
-                  <Download/>
-                </el-icon>
-                {{ row.latest?.asset?.download_count ?? 0 }}
-              </el-tag>
-            </el-tooltip>
-          </el-space>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="操作" width="230" align="center">
-        <template #default="{ row }">
-          <el-button-group>
-            <el-button size="small" @click="openDetail(row)">详情</el-button>
-            <el-button size="small" type="primary" :disabled="!row.latest?.asset?.browser_download_url"
-                       @click="go(row.latest?.asset?.browser_download_url)">下载
-            </el-button>
-            <el-button size="small" type="success" :icon="Upload" @click="handleInstallClick(row, row.latest)">
-              为服务器安装
-            </el-button>
-          </el-button-group>
-        </template>
-      </el-table-column>
-      </el-table>
+      <div class="mcdr-toolbar-right">
+        <button class="btn-refresh" :class="{ 'is-loading': loading }" @click="load">
+          <el-icon :size="13"><Refresh /></el-icon>
+          <span>刷新</span>
+        </button>
+      </div>
     </div>
 
-    <!-- Pagination -->
-    <div class="mt-3 flex items-center justify-end">
-      <el-pagination
+    <!-- Glass card -->
+    <div class="mcdr-glass-card">
+      <div class="shimmer-line" aria-hidden="true" />
+
+      <!-- Table -->
+      <div class="mcdr-table-wrap" v-loading="loading" element-loading-background="transparent">
+        <el-table :data="paged" stripe size="small" style="width:100%" @row-dblclick="openDetail">
+          <el-table-column label="插件" min-width="280">
+            <template #default="{ row }">
+              <PluginNameCell
+                :id="row.meta.id"
+                :name="row.meta.name"
+                :description="row.meta.description?.zh_cn || row.meta.description?.en_us"
+              />
+            </template>
+          </el-table-column>
+
+          <el-table-column label="最新版本" width="130">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.latest?.prerelease ? 'warning' : 'success'">
+                {{ row.release?.latest_version || '-' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="作者" min-width="160">
+            <template #default="{ row }">
+              <AuthorTagsCell :authors="row.meta?.authors" />
+            </template>
+          </el-table-column>
+
+          <el-table-column label="统计" width="170" align="center">
+            <template #default="{ row }">
+              <div class="stats-cell">
+                <el-tooltip content="Repo Stars">
+                  <span class="stat-chip stat-star">
+                    <el-icon :size="11"><Star /></el-icon>
+                    {{ row.repository?.stargazers_count ?? 0 }}
+                  </span>
+                </el-tooltip>
+                <el-tooltip content="下载量">
+                  <span class="stat-chip stat-dl">
+                    <el-icon :size="11"><Download /></el-icon>
+                    {{ row.latest?.asset?.download_count ?? 0 }}
+                  </span>
+                </el-tooltip>
+              </div>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="操作" width="230" align="center">
+            <template #default="{ row }">
+              <div class="row-actions">
+                <button class="act-btn act-detail" @click="openDetail(row)">详情</button>
+                <button class="act-btn act-dl" :disabled="!row.latest?.asset?.browser_download_url" @click="go(row.latest?.asset?.browser_download_url)">下载</button>
+                <button class="act-btn act-install" @click="handleInstallClick(row, row.latest)">
+                  <el-icon :size="12"><Upload /></el-icon>安装
+                </button>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+
+      <!-- Footer pagination -->
+      <div class="mcdr-footer">
+        <el-pagination
           background
           layout="prev, pager, next, sizes, total"
           :page-sizes="[10, 20, 50, 100]"
           :page-size="pageSize"
           :current-page="page"
           :total="filtered.length"
-          @current-change="(p:number)=>page=p"
-          @size-change="(s:number)=>{pageSize=s; page=1}"
-      />
+          @current-change="(p:number) => page = p"
+          @size-change="(s:number) => { pageSize = s; page = 1 }"
+        />
+      </div>
     </div>
 
     <!-- Detail Drawer -->
@@ -299,8 +278,10 @@
 <script lang="ts" setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import {ElMessage, ElNotification} from 'element-plus'
-import {Search, Star, Download, Upload} from '@element-plus/icons-vue'
+import {Search, Star, Download, Upload, Refresh} from '@element-plus/icons-vue'
 import apiClient, { isRequestCanceled } from '@/api'
+import PluginNameCell from '@/components/PluginNameCell.vue'
+import AuthorTagsCell from '@/components/AuthorTagsCell.vue'
 import { useTasksStore } from '@/store/tasks'
 const { fetchTasks } = useTasksStore()
 
@@ -718,128 +699,223 @@ onMounted(() => {
 
 
 <style scoped>
-.mcdr-explorer :deep(.el-card__header) {
-  padding: 10px 16px;
-}
-
-.mb-3 {
-  margin-bottom: 12px;
-}
-
-.text-gray-500 {
-  color: #909399;
-}
-
-.text-gray-700 {
-  color: #606266;
-}
-
-.flex {
+/* ── Page layout ──────────────────────────────────────────── */
+.mcdr-page {
   display: flex;
-}
-
-.items-center {
-  align-items: center;
-}
-
-.items-start {
-  align-items: flex-start;
-}
-
-.justify-between {
-  justify-content: space-between;
-}
-
-.justify-end {
-  justify-content: flex-end;
-}
-
-.gap-2 {
-  gap: 8px;
-}
-
-.gap-3 {
-  gap: 12px;
-}
-
-.grid {
-  display: grid;
-}
-
-.grid-cols-1 {
-  grid-template-columns:repeat(1, minmax(0, 1fr));
-}
-
-.md\:grid-cols-12 {
-  grid-template-columns:repeat(12, minmax(0, 1fr));
-}
-
-.md\:col-span-2 {
-  grid-column: span 2/span 2;
-}
-
-.md\:col-span-3 {
-  grid-column: span 3/span 3;
-}
-
-.md\:col-span-4 {
-  grid-column: span 4/span 4;
-}
-
-.mt-3 {
-  margin-top: 12px;
-}
-
-.mt-4 {
-  margin-top: 16px;
-}
-
-.mb-2 {
-  margin-bottom: 8px;
-}
-
-.font-medium {
-  font-weight: 500;
-}
-
-.text-base {
-  font-size: 14px;
-}
-
-.text-xs {
-  font-size: 12px;
-}
-
-.leading-5 {
-  line-height: 20px;
-}
-
-.leading-4 {
-  line-height: 16px;
-}
-
-.leading-6 {
-  line-height: 24px;
-}
-
-.w-full {
-  width: 100%;
-}
-
-/* 表格与描述组件圆角 */
-.rounded-table {
-  border-radius: 8px;
+  flex-direction: column;
+  gap: 14px;
+  height: calc(100vh - var(--el-header-height) - 48px);
   overflow: hidden;
+  min-height: 0;
 }
-/* 让本页滚动限制在视图内部，避免出现页面级滚动条；隐藏滚动条但保留滚动功能 */
-.mcdr-explorer {
-  height: calc(100vh - var(--el-header-height) - 48px); /* 减去头部与 el-main 内边距 */
-  overflow: auto;
-  box-sizing: border-box;
-  scrollbar-gutter: stable;
+
+/* ── Glass toolbar ───────────────────────────────────────── */
+.mcdr-toolbar {
+  font-family: 'Lexend', -apple-system, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  background: rgba(255, 255, 255, 0.62);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119, 181, 254, 0.18);
+  border-radius: 20px;
+  box-shadow: 0 4px 24px rgba(119, 181, 254, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  flex-shrink: 0;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.mcdr-toolbar:hover {
+  border-color: rgba(119, 181, 254, 0.28);
+  box-shadow: 0 6px 32px rgba(119, 181, 254, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+:global(.dark) .mcdr-toolbar {
+  background: rgba(15, 23, 42, 0.68);
+  border-color: rgba(119, 181, 254, 0.12);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.mcdr-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.mcdr-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.mcdr-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.toolbar-divider {
+  width: 1px; height: 20px;
+  background: linear-gradient(180deg, transparent, rgba(119,181,254,0.35), transparent);
+  flex-shrink: 0;
+}
+.search-wrap { flex: 1 1 auto; min-width: 180px; max-width: 280px; }
+.search-input :deep(.el-input__wrapper) {
+  border-radius: 22px !important;
+  background: rgba(255,255,255,0.60) !important;
+  border: 1px solid rgba(119,181,254,0.22) !important;
+  box-shadow: none !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+.search-input :deep(.el-input__wrapper:hover) { border-color: rgba(119,181,254,0.42) !important; }
+.search-input :deep(.el-input__wrapper.is-focus) {
+  border-color: rgba(119,181,254,0.60) !important;
+  box-shadow: 0 0 0 3px rgba(119,181,254,0.12) !important;
+}
+:global(.dark) .search-input :deep(.el-input__wrapper) {
+  background: rgba(15,23,42,0.60) !important;
+  border-color: rgba(119,181,254,0.18) !important;
+}
+.labels-select { width: 160px; flex-shrink: 0; }
+.sort-select { width: 110px; flex-shrink: 0; }
+.check-group { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+.btn-refresh {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 14px; border-radius: 22px;
+  border: 1px solid rgba(119,181,254,0.28);
+  background: rgba(119,181,254,0.08);
+  color: var(--brand-primary); font-size: 12px; font-weight: 600;
+  font-family: inherit; cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.18s ease;
+}
+.btn-refresh:hover { background: rgba(119,181,254,0.16); border-color: rgba(119,181,254,0.50); transform: translateY(-1px); }
+
+/* ── Glass card ──────────────────────────────────────────── */
+.mcdr-glass-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.58);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119, 181, 254, 0.18);
+  box-shadow: 0 4px 32px rgba(119, 181, 254, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.80);
+  overflow: hidden;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.mcdr-glass-card:hover {
+  border-color: rgba(119, 181, 254, 0.28);
+  box-shadow: 0 8px 40px rgba(119, 181, 254, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.80);
+}
+:global(.dark) .mcdr-glass-card {
+  background: rgba(15, 23, 42, 0.65);
+  border-color: rgba(119, 181, 254, 0.12);
+  box-shadow: 0 4px 32px rgba(0, 0, 0, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.shimmer-line {
+  height: 3px;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, transparent, rgba(119,181,254,0.7), rgba(239,183,186,0.6), rgba(167,139,250,0.5), transparent);
+  background-size: 200% 100%;
+  animation: shimmer-slide 4s linear infinite;
+  border-radius: 3px 3px 0 0;
+  pointer-events: none;
+}
+@keyframes shimmer-slide {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.mcdr-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-width: thin;
 }
-/* Element Plus 自定义滚动条保持可见 */
-.mcdr-explorer :deep(.el-scrollbar__bar) { opacity: 0.9; }
+.mcdr-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 10px 20px;
+  border-top: 1px solid rgba(119, 181, 254, 0.12);
+}
 
+/* ── Table deep overrides ────────────────────────────────── */
+:deep(.el-table) { background: transparent !important; }
+:deep(.el-table tr) { background: transparent !important; }
+:deep(.el-table th.el-table__cell) {
+  background: rgba(119, 181, 254, 0.04) !important;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--el-text-color-secondary);
+}
+:deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
+  background: rgba(119, 181, 254, 0.025) !important;
+}
+:deep(.el-table__body tr.hover-row > td.el-table__cell) {
+  background: rgba(119, 181, 254, 0.06) !important;
+}
+:deep(.el-table__inner-wrapper::before) { display: none; }
+:deep(.el-table__body-wrapper) { background: transparent !important; }
+
+/* ── Table cell styles ──────────────────────────────────── */
+.stats-cell { display: inline-flex; align-items: center; gap: 6px; }
+.stat-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 999px;
+  font-size: 12px; font-weight: 600;
+  white-space: nowrap;
+}
+.stat-star { background: rgba(245,158,11,0.10); color: #f59e0b; border: 1px solid rgba(245,158,11,0.22); }
+.stat-dl   { background: rgba(119,181,254,0.10); color: var(--brand-primary); border: 1px solid rgba(119,181,254,0.22); }
+
+/* ── Row action buttons ──────────────────────────────────── */
+.row-actions { display: inline-flex; align-items: center; gap: 4px; }
+.act-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 26px; padding: 0 10px; border-radius: 8px;
+  border: 1px solid rgba(119,181,254,0.20);
+  background: transparent;
+  color: var(--el-text-color-regular);
+  font-size: 12px; font-weight: 500; font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.act-btn:not(:disabled):hover { transform: translateY(-1px); }
+.act-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.act-detail:hover { background: rgba(119,181,254,0.10); color: var(--brand-primary); border-color: rgba(119,181,254,0.35); }
+.act-dl:not(:disabled):hover { background: rgba(52,211,153,0.10); color: #10b981; border-color: rgba(52,211,153,0.30); }
+.act-install { background: linear-gradient(135deg, var(--brand-primary), #a78bfa); color: #fff; border-color: transparent; }
+.act-install:hover { box-shadow: 0 4px 12px rgba(119,181,254,0.40); transform: translateY(-1px); }
+
+/* ── Utility classes used in drawer/dialog ───────────────── */
+.flex { display: flex; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.justify-between { justify-content: space-between; }
+.gap-2 { gap: 8px; }
+.mt-4 { margin-top: 16px; }
+.mb-2 { margin-bottom: 8px; }
+.font-medium { font-weight: 500; }
+.text-base { font-size: 14px; }
+.text-sm { font-size: 13px; }
+.text-xs { font-size: 12px; }
+.leading-5 { line-height: 20px; }
+.leading-4 { line-height: 16px; }
+.leading-6 { line-height: 24px; }
+.w-full { width: 100%; }
+.whitespace-pre-wrap { white-space: pre-wrap; }
+.text-gray-500 { color: #909399; }
+.text-gray-700 { color: #606266; }
 </style>

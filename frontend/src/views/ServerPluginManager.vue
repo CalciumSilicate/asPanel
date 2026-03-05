@@ -1,118 +1,63 @@
 <template>
-  <div class="server-plugin-manager-layout" :class="{ 'is-collapsed': asideCollapsed, 'is-collapsing': asideCollapsing }">
-  
-    <!-- 左侧边栏：参考 PrimeBackup 风格 -->
-    <div class="table-card left-panel">
-      <el-card shadow="never" v-loading="serversLoading">
-        <template #header>
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <span class="text-base font-medium">选择服务器</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <el-tag type="success">总插件数：{{ totalPluginCount }}</el-tag>
-            </div>
-          </div>
-        </template>
+  <div class="pm-page">
 
-        <el-input v-model="serverQuery" placeholder="搜索服务器" clearable class="mb-2">
-          <template #prefix><el-icon><Search/></el-icon></template>
-        </el-input>
+    <!-- Toolbar -->
+    <PluginToolbar
+      :selected-server="selectedServer"
+      :total-count="filteredPlugins.length"
+      :total-plugin-count="totalPluginCount"
+      :query="query"
+      :filter-status="filterStatus"
+      @select-server="selectServer"
+      @update:query="query = $event; page = 1"
+      @update:filter-status="filterStatus = $event; page = 1"
+      @add-online="openAddOnlinePluginDialog"
+      @add-db="openAddDbPluginDialog"
+    />
 
-        <el-table :data="filteredServers" size="small" stripe height="100%" @row-click="(row: ServerInfo) => selectServer(row.id)">
-          <el-table-column label="服务器" min-width="180">
-            <template #default="{ row }">
-              <div class="flex items-center justify-between w-full">
-                <div class="server-cell">
-                  <div class="server-name">{{ row.name }}</div>
-                  <div class="muted">ID: {{ row.id }}</div>
-                </div>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="插件数" width="100" align="center">
-            <template #default="{ row }">
-              <span>{{ Number(row.plugins_count) || 0 }}</span>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-card>
+    <!-- No server selected: Picker -->
+    <div v-if="!selectedServer" class="pm-placeholder">
+      <PluginServerPicker
+        :servers="servers"
+        :loading="serversLoading"
+        :total-plugin-count="totalPluginCount"
+        @select="selectServer"
+      />
     </div>
 
-    <!-- Main Content Area -->
-    <el-main class="plugin-content-area">
-      <div v-if="!selectedServer" class="main-placeholder">
-        <el-empty description="请从左侧选择一个服务器以管理插件"/>
-      </div>
+    <!-- Server selected: Glass card -->
+    <div v-else class="pm-glass-card">
+      <div class="shimmer-line" aria-hidden="true" />
 
-      <div v-else>
-        <!-- Toolbar -->
-        <el-card shadow="never" class="mb-3">
-          <template #header>
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <span class="text-base font-medium">{{ selectedServer ? selectedServer.name : '请选择服务器' }}</span>
-                <el-tag type="info" v-if="selectedServer">共 {{ currentPlugins.length }} 个插件</el-tag>
-              </div>
-              <div class="flex items-center gap-2">
-                <el-button-group>
-                  <el-button type="success" :icon="Plus" @click="openAddOnlinePluginDialog" :disabled="!selectedServer">添加联网插件</el-button>
-                  <el-button type="primary" :icon="Coin" @click="openAddDbPluginDialog" :disabled="!selectedServer">添加数据库插件</el-button>
-                </el-button-group>
-              </div>
-            </div>
-          </template>
-          <div class="flex items-center gap-2">
-            <el-input v-model="query" placeholder="搜索：名称 / ID / 文件名" clearable style="max-width: 300px;">
-              <template #prefix>
-                <el-icon>
-                  <Search/>
-                </el-icon>
-              </template>
-            </el-input>
-            <el-radio-group v-model="filterStatus">
-              <el-radio-button value="all">全部</el-radio-button>
-              <el-radio-button value="enabled">已启用</el-radio-button>
-              <el-radio-button value="disabled">已禁用</el-radio-button>
-            </el-radio-group>
-          </div>
-        </el-card>
-
-        <!-- Plugin List Table -->
-        <div class="table-card">
-          <el-table :data="pagedPlugins" v-loading="pluginsLoading" stripe size="small"
-                    :row-class-name="pluginRowClassName">
-          
+      <!-- Plugin table -->
+      <div class="pm-table-wrap" v-loading="pluginsLoading" element-loading-background="transparent">
+        <el-table
+          :data="pagedPlugins"
+          stripe
+          size="small"
+          :row-class-name="pluginRowClassName"
+          style="width: 100%"
+        >
           <el-table-column label="插件" min-width="280">
             <template #default="{ row }">
-              <div class="plugin-cell-layout">
-                <el-tag type="primary" effect="plain" size="small" v-if="row.meta.id">{{ row.meta.id }}</el-tag>
-                <div>
-                  <div class="plugin-name">{{ row.meta.name || '未知名称' }}</div>
-                  <div class="plugin-description">
-                    {{ row.meta.description?.zh_cn || row.meta.description?.en_us || row.file_name }}
-                  </div>
-                </div>
-              </div>
+              <PluginNameCell
+                :id="row.meta.id"
+                :name="row.meta.name"
+                :description="row.meta.description?.zh_cn || row.meta.description?.en_us"
+                :filename="row.file_name"
+              />
             </template>
           </el-table-column>
           <el-table-column label="作者" min-width="160">
             <template #default="{ row }">
-              <el-space wrap>
-                <el-tag v-for="a in getAuthorsArray(row.meta)" :key="a" size="small">{{ a }}</el-tag>
-                <span v-if="getAuthorsArray(row.meta).length === 0"><el-tag size="small"
-                                                                            type="info">未知</el-tag></span>
-              </el-space>
+              <AuthorTagsCell :authors="getAuthorsArray(row.meta)" />
             </template>
           </el-table-column>
           <el-table-column label="版本" width="180">
             <template #default="{ row }">
               <div class="version-cell">
-                <el-tag size="small" :type="row.meta.version ? 'success' : 'info'">{{
-                    row.meta.version || '未知'
-                  }}
-                </el-tag>
-                <el-tooltip :content="`有新版：${onlinePluginsMap.get(row.meta.id)?.release?.latest_version || ''}`" placement="top-start" effect="light" v-if="isUpdateAvailable(row)">
+                <el-tag size="small" :type="row.meta.version ? 'success' : 'info'">{{ row.meta.version || '未知' }}</el-tag>
+                <el-tooltip v-if="isUpdateAvailable(row)" :content="`有新版：${onlinePluginsMap.get(row.meta.id)?.release?.latest_version || ''}`" placement="top-start" effect="light">
                   <el-button size="small" type="warning" circle plain :icon="Refresh" :loading="row.loading" @click="handleUpdatePlugin(row)" />
                 </el-tooltip>
               </div>
@@ -125,41 +70,46 @@
           </el-table-column>
           <el-table-column label="状态" width="100" align="center">
             <template #default="{ row }">
-              <el-switch v-model="row.enabled" @change="handlePluginSwitch(row)" :loading="row.loading"/>
+              <el-switch v-model="row.enabled" @change="handlePluginSwitch(row)" :loading="row.loading" />
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="250" align="center">
+          <el-table-column label="操作" width="200" align="center">
             <template #default="{ row }">
-              <el-button size="small" type="success" :icon="Download" :loading="row.loading"
-                         @click="handlePluginDownload(row)">下载
-              </el-button>
-              <el-popconfirm title="确定删除这个插件吗？" width="220" @confirm="handlePluginDelete(row)">
-                <template #reference>
-                  <el-button size="small" type="danger" :icon="Delete" :loading="row.loading">删除</el-button>
-                </template>
-              </el-popconfirm>
+              <div class="row-actions">
+                <button class="act-btn act-dl" :disabled="row.loading" @click="handlePluginDownload(row)">
+                  <el-icon :size="12"><Download /></el-icon>下载
+                </button>
+                <el-popconfirm title="确定删除这个插件吗？" width="220" @confirm="handlePluginDelete(row)">
+                  <template #reference>
+                    <button class="act-btn act-danger" :disabled="row.loading">
+                      <el-icon :size="12"><Delete /></el-icon>删除
+                    </button>
+                  </template>
+                </el-popconfirm>
+              </div>
             </template>
           </el-table-column>
-          </el-table>
-        </div>
-
-        <!-- Pagination -->
-        <div class="mt-3 flex items-center justify-end">
-          <el-pagination
-              background
-              layout="prev, pager, next, sizes, total"
-              :page-sizes="[10, 20, 50, 100]"
-              :page-size="pageSize"
-              :current-page="page"
-              :total="filteredPlugins.length"
-              @current-change="(p: number) => page = p"
-              @size-change="(s: number) => { pageSize = s; page = 1; }"
-          />
-        </div>
+        </el-table>
       </div>
-    </el-main>
 
-    <!-- [MODIFIED] New Online Plugin Explorer Dialog -->
+      <!-- Footer: pagination -->
+      <div class="pm-footer">
+        <el-pagination
+          background
+          layout="prev, pager, next, sizes, total"
+          :page-sizes="[10, 20, 50, 100]"
+          :page-size="pageSize"
+          :current-page="page"
+          :total="filteredPlugins.length"
+          @current-change="(p: number) => page = p"
+          @size-change="(s: number) => { pageSize = s; page = 1; }"
+        />
+      </div>
+    </div>
+
+    <!-- ───────────────────────── Dialogs ───────────────────────── -->
+
+    <!-- Online Plugin Explorer -->
     <el-dialog v-if="addOnlinePluginDialogVisible" v-model="addOnlinePluginDialogVisible" title="MCDR 插件市场"
                width="85%" top="5vh" destroy-on-close>
       <!-- Toolbar -->
@@ -217,15 +167,11 @@
         <el-table :data="onlinePaged" v-loading="onlinePluginsLoading" stripe size="small" @row-dblclick="openOnlineDetail">
           <el-table-column label="插件" min-width="260">
             <template #default="{ row }">
-              <div class="flex items-start gap-2" style="display: flex; gap: 8px;">
-                <el-tag type="primary" effect="plain">{{ row.meta.id }}</el-tag>
-                <div>
-                  <div class="font-medium leading-5" style="font-weight: 500;">{{ row.meta.name }}</div>
-                  <div class="text-xs text-gray-500 leading-4" style="font-size: 12px; color: #909399;">
-                    {{ row.meta.description?.zh_cn || row.meta.description?.en_us || '-' }}
-                  </div>
-                </div>
-              </div>
+              <PluginNameCell
+                :id="row.meta.id"
+                :name="row.meta.name"
+                :description="row.meta.description?.zh_cn || row.meta.description?.en_us"
+              />
             </template>
           </el-table-column>
 
@@ -248,42 +194,38 @@
 
           <el-table-column label="作者" min-width="160">
             <template #default="{ row }">
-              <el-space wrap>
-                <el-tag v-for="a in row.meta?.authors || []" :key="a" size="small">{{ a }}</el-tag>
-              </el-space>
+              <AuthorTagsCell :authors="row.meta?.authors" />
             </template>
           </el-table-column>
 
           <el-table-column label="统计" width="160" align="center">
             <template #default="{ row }">
-              <el-space>
+              <div class="stats-cell">
                 <el-tooltip content="Repo Stars">
-                  <el-tag type="info" size="small">
-                    <el-icon class="mr-1"><Star/></el-icon>
+                  <span class="stat-chip stat-star">
+                    <el-icon :size="11"><Star/></el-icon>
                     {{ row.repository?.stargazers_count ?? 0 }}
-                  </el-tag>
+                  </span>
                 </el-tooltip>
-                <el-tooltip content="Latest Asset Downloads">
-                  <el-tag type="info" size="small">
-                    <el-icon class="mr-1"><Download/></el-icon>
+                <el-tooltip content="下载量">
+                  <span class="stat-chip stat-dl-chip">
+                    <el-icon :size="11"><Download/></el-icon>
                     {{ row.latest?.asset?.download_count ?? 0 }}
-                  </el-tag>
+                  </span>
                 </el-tooltip>
-              </el-space>
+              </div>
             </template>
           </el-table-column>
 
-          <el-table-column label="操作" width="220" align="center">
+          <el-table-column label="操作" width="210" align="center">
             <template #default="{ row }">
-              <el-button-group>
-                <el-button size="small" @click="openOnlineDetail(row)">详情</el-button>
-                <el-button size="small" type="primary" :disabled="!row.latest?.asset?.browser_download_url"
-                           @click="go(row.latest?.asset?.browser_download_url)">下载
-                </el-button>
-                <el-button size="small" type="success" :icon="Upload" @click="handleInstallOnlineRow(row)">
-                  安装
-                </el-button>
-              </el-button-group>
+              <div class="row-actions">
+                <button class="act-btn act-detail" @click="openOnlineDetail(row)">详情</button>
+                <button class="act-btn act-dl" :disabled="!row.latest?.asset?.browser_download_url" @click="go(row.latest?.asset?.browser_download_url)">下载</button>
+                <button class="act-btn act-install" @click="handleInstallOnlineRow(row)">
+                  <el-icon :size="12"><Upload /></el-icon>安装
+                </button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -512,7 +454,11 @@
 import {ref, onMounted, computed, watch} from 'vue';
 import {ElMessage, ElNotification} from 'element-plus';
 import {Search, Refresh, Plus, Coin, Delete, Download, Star, Upload} from '@element-plus/icons-vue';
+import PluginNameCell from '@/components/PluginNameCell.vue';
+import AuthorTagsCell from '@/components/AuthorTagsCell.vue';
 import apiClient, { isRequestCanceled } from '@/api';
+import PluginToolbar from './server-plugin-manager/PluginToolbar.vue';
+import PluginServerPicker from './server-plugin-manager/PluginServerPicker.vue';
 import { useUiStore } from '@/store/ui'
 import { useTasksStore } from '@/store/tasks'
 import { useTransfersStore } from '@/store/transfers'
@@ -813,7 +759,12 @@ const initialLoad = async (forceOnlineRefresh = false) => {
   }
 };
 
-const selectServer = async (serverId: number) => {
+const selectServer = async (serverId: number | null) => {
+  if (serverId === null) {
+    selectedServerId.value = null;
+    currentPlugins.value = [];
+    return;
+  }
   if (selectedServerId.value === serverId && currentPlugins.value.length > 0) return;
   selectedServerId.value = serverId;
   page.value = 1;
@@ -1144,205 +1095,173 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* Main layout */
-.server-plugin-manager-layout {
+/* ── Page layout ─────────────────────────────────────────── */
+.pm-page {
   display: flex;
-  align-items: stretch; /* 让右侧主视图占满高度，保证可滚动 */
-  gap: 16px; /* 与 PB 左右间距一致 */
-  /* 与全局头部高度一致，且扣除 el-main 上下各 24px 的内边距 */
+  flex-direction: column;
+  gap: 14px;
   height: calc(100vh - var(--el-header-height) - 48px);
-  /* 限制外溢，滚动交由内部区域处理 */
   overflow: hidden;
   min-height: 0;
-  background-color: transparent;
 }
 
-/* Sidebar */
-.server-sidebar {
-  background-color: #fff;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  padding: 10px;
+/* ── Placeholder (no server selected) ────────────────────── */
+.pm-placeholder {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
-}
-
-.sidebar-inner { display: flex; flex-direction: column; }
-
-.sidebar-header {
-  padding: 15px;
-  border-bottom: 1px solid #e6e6e6;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  align-self: center;
+  width: 100%;
+  max-width: 520px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.58);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119, 181, 254, 0.18);
+  box-shadow: 0 4px 32px rgba(119, 181, 254, 0.10);
+}
+:global(.dark) .pm-placeholder {
+  background: rgba(15, 23, 42, 0.65);
+  border-color: rgba(119, 181, 254, 0.12);
 }
 
-/* 刷新按钮样式优化：更轻的文本按钮 + 悬浮色 */
-.refresh-btn {
+/* ── Glass card (server selected) ────────────────────────── */
+.pm-glass-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.58);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119, 181, 254, 0.18);
+  box-shadow: 0 4px 32px rgba(119, 181, 254, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.80);
+  overflow: hidden;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.pm-glass-card:hover {
+  border-color: rgba(119, 181, 254, 0.28);
+  box-shadow: 0 8px 40px rgba(119, 181, 254, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.80);
+}
+:global(.dark) .pm-glass-card {
+  background: rgba(15, 23, 42, 0.65);
+  border-color: rgba(119, 181, 254, 0.12);
+  box-shadow: 0 4px 32px rgba(0, 0, 0, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* shimmer accent line at top of card */
+.shimmer-line {
+  height: 3px;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, var(--brand-primary) 0%, #a78bfa 50%, var(--brand-primary) 100%);
+  background-size: 200% 100%;
+  animation: shimmer-slide 3s linear infinite;
+  border-radius: 3px 3px 0 0;
+}
+@keyframes shimmer-slide {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.pm-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  padding: 0 4px;
+}
+
+.pm-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 10px 20px;
+  border-top: 1px solid rgba(119, 181, 254, 0.12);
+}
+
+/* ── Shared cell styles ───────────────────────────────────── */
+.version-cell { display: flex; align-items: center; gap: 8px; }
+.version-cell .el-button.is-circle .el-icon { display: inline-flex; align-items: center; justify-content: center; }
+
+/* ── Table deep overrides (glass card) ───────────────────── */
+.pm-glass-card :deep(.el-table) { background: transparent !important; }
+.pm-glass-card :deep(.el-table tr) { background: transparent !important; }
+.pm-glass-card :deep(.el-table th.el-table__cell) {
+  background: rgba(119, 181, 254, 0.04) !important;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--el-text-color-secondary);
 }
-.refresh-btn:hover {
-  color: var(--el-color-primary);
+.pm-glass-card :deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
+  background: rgba(119, 181, 254, 0.025) !important;
 }
-
-.server-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+.pm-glass-card :deep(.el-table__body tr.hover-row > td.el-table__cell) {
+  background: rgba(119, 181, 254, 0.06) !important;
 }
+.pm-glass-card :deep(.el-table__inner-wrapper::before) { display: none; }
+.pm-glass-card :deep(.el-table__body-wrapper) { background: transparent !important; }
 
-.server-list-item {
-  padding: 12px 15px;
+/* ── Stat chips ──────────────────────────────────────────── */
+.stats-cell { display: inline-flex; align-items: center; gap: 6px; }
+.stat-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.stat-star { background: rgba(245,158,11,0.10); color: #f59e0b; border: 1px solid rgba(245,158,11,0.22); }
+.stat-dl-chip { background: rgba(119,181,254,0.10); color: var(--brand-primary); border: 1px solid rgba(119,181,254,0.22); }
+
+/* ── Row action buttons ──────────────────────────────────── */
+.row-actions { display: inline-flex; align-items: center; gap: 4px; }
+.act-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 26px; padding: 0 10px; border-radius: 8px;
+  border: 1px solid rgba(119,181,254,0.20);
+  background: transparent;
+  color: var(--el-text-color-regular);
+  font-size: 12px; font-weight: 500; font-family: inherit;
   cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  transition: background-color 0.2s;
-  border-bottom: 1px solid #f0f2f5;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
+.act-btn:not(:disabled):hover { transform: translateY(-1px); }
+.act-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.act-detail:hover { background: rgba(119,181,254,0.10); color: var(--brand-primary); border-color: rgba(119,181,254,0.35); }
+.act-dl:not(:disabled):hover { background: rgba(52,211,153,0.10); color: #10b981; border-color: rgba(52,211,153,0.30); }
+.act-danger:not(:disabled):hover { background: rgba(239,68,68,0.10); color: #ef4444; border-color: rgba(239,68,68,0.30); }
+.act-install { background: linear-gradient(135deg, var(--brand-primary), #a78bfa); color: #fff; border-color: transparent; }
+.act-install:hover { box-shadow: 0 4px 12px rgba(119,181,254,0.40); transform: translateY(-1px); }
 
-.server-list-item:hover {
-  background-color: #ecf5ff;
-}
+/* ── Table card (in dialogs/drawers) ────────────────────── */
+.table-card { margin-bottom: 16px; border-radius: 8px; overflow: hidden; }
 
-.server-list-item.is-active {
-  background-color: #d9ecff;
-  color: #409EFF;
-  font-weight: 500;
-}
+/* ── Dialog / toolbar util ───────────────────────────────── */
+.plugin-toolbar { display: flex; gap: 15px; margin-bottom: 15px; align-items: center; }
 
-.server-name {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding-right: 10px;
-}
+.mb-3 { margin-bottom: 12px; }
+.mt-3 { margin-top: 12px; }
+.mr-1 { margin-right: 4px; }
+.flex { display: flex; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.justify-end { justify-content: flex-end; }
+.gap-2 { gap: 8px; }
+.gap-3 { gap: 12px; }
+.font-medium { font-weight: 500; }
+.text-base { font-size: 14px; }
+.text-sm { font-size: 13px; }
+.text-xs { font-size: 12px; }
+.text-gray-500 { color: #909399; }
+.text-gray-700 { color: #606266; }
+.leading-6 { line-height: 24px; }
+.whitespace-pre-wrap { white-space: pre-wrap; }
 
-.no-servers-placeholder {
-  padding-top: 40px;
-}
-
-/* Main Content Area */
-.plugin-content-area {
-  padding: 0 20px 20px;
-  flex: 1 1 auto;
-  min-height: 0; /* 允许在父 flex 容器内收缩，避免溢出 */
-  overflow: auto; /* 内部滚动 */
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-}
-
-/* 左侧面板（与 PB 对齐） */
-.left-panel { width: 320px; flex-shrink: 0; align-self: stretch; height: 100%; min-height: 0; }
-.left-panel { transition: width 0.32s cubic-bezier(.34,1.56,.64,1); will-change: width; overflow: hidden; }
-.left-panel :deep(.el-card) { height: 100%; display: flex; flex-direction: column; }
-.left-panel :deep(.el-card__body) { padding: 8px; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.left-panel :deep(.el-input), .left-panel :deep(.el-input__wrapper) { width: 100%; }
-.left-panel :deep(.el-table__inner-wrapper) { width: 100%; }
-.left-panel :deep(.el-table) { flex: 1 1 auto; min-height: 0; }
-.is-collapsed .left-panel, .is-collapsing .left-panel { width: 0 !important; }
-.is-collapsing .left-panel :deep(.el-card__body), .is-collapsing .left-panel :deep(.el-card__header) { display: none !important; }
-
-/* Element Plus 自定义滚动条保持可见 */
-.server-plugin-manager-layout :deep(.el-scrollbar__bar) { opacity: 0.9; }
-
-.main-placeholder {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100%;
-}
-
-/* Reused Styles & Dialog Styles */
-.mb-3 {
-  margin-bottom: 12px;
-}
-
-.mt-3 {
-  margin-top: 12px;
-}
-
-.flex {
-  display: flex;
-}
-
-.items-center {
-  align-items: center;
-}
-
-.justify-between {
-  justify-content: space-between;
-}
-
-.justify-end {
-  justify-content: flex-end;
-}
-
-.gap-2 {
-  gap: 8px;
-}
-
-.gap-3 {
-  gap: 12px;
-}
-
-.gap-4 {
-  gap: 16px;
-}
-
-.font-medium {
-  font-weight: 500;
-}
-
-.text-base {
-  font-size: 14px;
-}
-
-.plugin-cell-layout {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.plugin-name {
-  font-weight: 500;
-  line-height: 1.2;
-}
-
-.plugin-description {
-  font-size: 12px;
-  color: #909399;
-  line-height: 1.3;
-}
-
-.version-cell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-/* 圆形按钮内图标可见性（当前版本旁刷新按钮） */
-.version-cell .el-button.is-circle .el-icon { display: inline-flex; align-items: center; justify-content: center; }
-.version-cell .el-button.el-button--primary.is-circle:not(.is-plain) .el-icon { color: #fff; }
-.version-cell .el-button.el-button--primary.is-circle.is-plain .el-icon { color: var(--brand-primary); }
-
-.plugin-toolbar {
-  display: flex;
-  gap: 15px;
-  margin-bottom: 15px;
-  align-items: center;
-}
-
-/* 表格圆角统一样式 */
-.rounded-table {
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-:deep(.disabled-plugin-row) {
-  color: #a8abb2;
-  background-color: #fafafa;
-}
-
-:deep(.disabled-plugin-row:hover > td) {
-  background-color: #f5f5f5 !important;
-}
+:deep(.disabled-plugin-row) { color: #a8abb2; }
+:deep(.disabled-plugin-row:hover > td) { background-color: rgba(119, 181, 254, 0.04) !important; }
 </style>
