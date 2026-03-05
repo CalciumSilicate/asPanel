@@ -70,7 +70,7 @@
           active-text="编辑"
           inactive-text="查看"
           size="small"
-          :disabled="!selectedServerId || !hasRole('HELPER')"
+          :disabled="!selectedServerId"
           @change="onEditModeChange"
         />
 
@@ -547,7 +547,7 @@ const playbackProgressModel = computed({
     playbackCurrentTs.value = virtualToReal(total * Math.max(0, Math.min(100, pct)) / 100)
     if (playbackPosition.value) {
       const { mx, mz, mapDim } = playerToMap(playbackPosition.value.x, playbackPosition.value.z, playbackPosition.value.dim)
-      if (mapDim !== activeDim.value) activeDim.value = mapDim
+      switchDimSilent(mapDim)
       if (playbackLockCamera.value) { view.cx = mx; view.cz = mz }
     }
     scheduleRender()
@@ -732,11 +732,15 @@ function drawGrid(ctx) {
   }
   ctx.stroke()
 
-  // axes + scale bar in one pass
+  // axes: X=red (vertical), Z=blue (horizontal)
   const [ox] = w2c(0, 0); const [, oy] = w2c(0, 0)
-  ctx.strokeStyle = '#c0c4cc'; ctx.lineWidth = 1.5
+  ctx.lineWidth = 1.5
   ctx.beginPath()
+  ctx.strokeStyle = '#fca5a5'
   if (ox >= 0 && ox <= view.cssW) { ctx.moveTo(ox, 0); ctx.lineTo(ox, view.cssH) }
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.strokeStyle = '#93c5fd'
   if (oy >= 0 && oy <= view.cssH) { ctx.moveTo(0, oy); ctx.lineTo(view.cssW, oy) }
   ctx.stroke()
 
@@ -797,7 +801,6 @@ function drawEdges(ctx) {
 }
 
 function drawNodes(ctx) {
-  const showLabels = view.scale > 0.12
   for (const node of parsedNodes.value) {
     if (!node.visible) continue
     // Virtual nodes only drawn in edit mode; always draw stations
@@ -837,7 +840,7 @@ function drawNodes(ctx) {
       ctx.lineWidth = isSelected ? 2 : 1.5
       ctx.fill(); ctx.stroke()
 
-      if (showLabels && node.name) {
+      if (node.name) {
         ctx.font = `${Math.min(14, Math.max(10, view.scale * 18))}px sans-serif`
         ctx.fillStyle = '#1e2332'
         ctx.textAlign = 'center'
@@ -1367,6 +1370,12 @@ function onKeyDown(e) {
       deleteSelected()
     }
   }
+  const tag = document.activeElement?.tagName
+  const inInput = tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable
+  if (!inInput && editMode.value && !editingNodeKey.value) {
+    if (e.key === 's' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); saveMap() }
+    if (e.key === 'e') { e.preventDefault(); toggleConnectMode() }
+  }
 }
 
 // ─── Edit Operations ──────────────────────────────────────────────────────────
@@ -1516,7 +1525,7 @@ async function loadServers() {
   }
 }
 
-async function loadMapData() {
+async function loadMapData(skipFit = false) {
   if (!selectedServerId.value) { mapJsonRaw.value = null; return }
   mapLoading.value = true
   try {
@@ -1526,7 +1535,7 @@ async function loadMapData() {
     )
     mapJsonRaw.value = data
     dirty.value = false
-    fitView()
+    if (!skipFit) fitView()
   } catch (e) {
     if (e.response?.status !== 404) ElMessage.error('加载地图数据失败')
     mapJsonRaw.value = null
@@ -1585,7 +1594,7 @@ async function loadTrajectory(playerName) {
       const last = data[data.length - 1]
       playbackCurrentTs.value = last.ts ? new Date(last.ts).getTime() : (data[0].ts ? new Date(data[0].ts).getTime() : 0)
       const { mapDim } = playerToMap(last.x, last.z, last.dim)
-      activeDim.value = mapDim
+      switchDimSilent(mapDim)
     }
     scheduleRender()
   } catch {
@@ -1738,7 +1747,7 @@ function playbackTick(now) {
   playbackCurrentTs.value = adjusted
   if (playbackPosition.value) {
     const { mx, mz, mapDim } = playerToMap(playbackPosition.value.x, playbackPosition.value.z, playbackPosition.value.dim)
-    if (mapDim !== activeDim.value) activeDim.value = mapDim
+    switchDimSilent(mapDim)
     if (playbackLockCamera.value) { view.cx = mx; view.cz = mz }
   }
   scheduleRender()
@@ -1792,6 +1801,14 @@ async function onServerChange() {
   selectedEdgeKey.value = null; editMode.value = false; dirty.value = false
   loadMapData(); loadPlayers(); loadConfig()
   startPlayerRefresh()
+}
+
+function switchDimSilent(dim) {
+  if (activeDim.value === dim) return
+  activeDim.value = dim
+  _prevDim = dim
+  selectedNodeKey.value = null; selectedEdgeKey.value = null
+  loadMapData(true)
 }
 
 async function onDimChange() {
