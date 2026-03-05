@@ -129,7 +129,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useUiStore } from '@/store/ui';
 import { useUserStore } from '@/store/user';
@@ -150,6 +150,11 @@ const router = useRouter();
 const uiStore = useUiStore()
 const { asideCollapsed: isCollapse, asideCollapsing: isCollapsing } = storeToRefs(uiStore)
 const toggleCollapse = uiStore.toggleAside
+
+// Pause all expensive paint work while the sidebar is animating
+watch(isCollapsing, (v) => {
+  document.documentElement.classList.toggle('aside-animating', v)
+})
 
 const userStore = useUserStore()
 const user = userStore.user
@@ -659,9 +664,11 @@ onUnmounted(() => {
 }
 
 .app-aside {
-  will-change: width;
   transform: translateZ(0);
-  transition: width 0.32s cubic-bezier(.34,1.56,.64,1), box-shadow 0.32s var(--ease-standard);
+  transition: width 0.30s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.30s var(--ease-standard);
+}
+.app-aside.is-collapsing {
+  will-change: width;
 }
 
 /* ─── Logo区域 ──────────────────────────────────────────── */
@@ -805,5 +812,47 @@ onUnmounted(() => {
   opacity: 0;
   transform: translateY(-6px) scale(1.005);
   filter: blur(3px);
+}
+
+/* ─── 侧边栏动画期间：暂停所有重绘开销 ──────────────── */
+/* Freeze backdrop-filter (biggest single cost) */
+:global(.aside-animating) .el-aside {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  background: rgba(240, 246, 255, 0.88) !important;
+}
+:global(.dark .aside-animating) .el-aside {
+  background: rgba(13, 20, 35, 0.92) !important;
+}
+:global(.aside-animating) .el-header {
+  -webkit-backdrop-filter: blur(6px) !important;
+  backdrop-filter: blur(6px) !important;
+}
+
+/* Pause all continuous paint animations */
+:global(.aside-animating) .orb {
+  animation-play-state: paused !important;
+}
+:global(.aside-animating) .app-aside::after {
+  animation-play-state: paused !important;
+}
+:global(.aside-animating) .el-header::after {
+  animation-play-state: paused !important;
+}
+:global(.aside-animating) .brand {
+  animation-play-state: paused !important;
+  filter: none !important;
+}
+:global(.aside-animating .el-menu-item.is-active .el-icon) {
+  animation: none !important;
+  filter: none !important;
+}
+
+/* Disable the submenu collapse animation while sidebar itself is animating */
+:global(.aside-animating) .app-aside :deep(.el-sub-menu.is-opened > .el-menu) {
+  animation: none !important;
+  max-height: none !important;
+  opacity: 1 !important;
+  transform: none !important;
 }
 </style>

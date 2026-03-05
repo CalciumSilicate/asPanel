@@ -9,17 +9,13 @@ export const useUiStore = defineStore('ui', () => {
   const asideCollapsing = ref(false)
 
   const toggleAside = () => {
-    if (!asideCollapsed.value) {
-      asideCollapsing.value = true
-      requestAnimationFrame(() => {
-        asideCollapsed.value = true
-        setTimeout(() => {
-          asideCollapsing.value = false
-        }, ASIDE_COLLAPSE_MS)
-      })
-    } else {
-      asideCollapsed.value = false
-    }
+    asideCollapsing.value = true
+    requestAnimationFrame(() => {
+      asideCollapsed.value = !asideCollapsed.value
+      setTimeout(() => {
+        asideCollapsing.value = false
+      }, ASIDE_COLLAPSE_MS)
+    })
   }
 
   const setAsideCollapsed = (value: boolean) => {

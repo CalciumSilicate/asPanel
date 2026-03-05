@@ -1,30 +1,31 @@
 <template>
-  <el-card shadow="never" class="resource-monitor-card">
-    <template #header>
-      <div class="card-header">
-        <span>资源监控</span>
-        <span class="header-hint">仅显示运行中 · 每 5 秒刷新</span>
+  <div class="monitor-section">
+    <!-- 区块标题 -->
+    <div class="section-head">
+      <div class="section-title">
+        <span class="title-bar" aria-hidden="true"></span>
+        资源监控
       </div>
-    </template>
+      <span class="section-hint">仅显示运行中 · 每 5 秒刷新</span>
+    </div>
 
-    <div v-if="servers.length === 0" class="resource-empty">
+    <!-- 空态 -->
+    <div v-if="servers.length === 0" class="empty-state">
       <el-empty description="当前没有正在运行的服务器" />
     </div>
-    <el-row v-else :gutter="16" class="resource-grid">
-      <el-col
+
+    <!-- 服务器网格 -->
+    <div v-else class="server-grid">
+      <ServerUsageCard
         v-for="server in servers"
         :key="server.id"
-        :xs="24" :sm="12" :md="8" :lg="6"
-      >
-        <ServerUsageCard
-          :server="server"
-          :host-memory-total-mb="hostMemoryTotalMb"
-          :show-console="showConsole"
-          @console="emit('console', $event)"
-        />
-      </el-col>
-    </el-row>
-  </el-card>
+        :server="server"
+        :host-memory-total-mb="hostMemoryTotalMb"
+        :show-console="showConsole"
+        @console="emit('console', $event)"
+      />
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -41,18 +42,64 @@ const emit = defineEmits<{ console: [id: number] }>()
 </script>
 
 <style scoped>
-.card-header {
-  font-weight: bold;
+/* ─── 容器 ──────────────────────────────────────────────── */
+.monitor-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ─── 标题行 ─────────────────────────────────────────────── */
+.section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
-.header-hint {
-  font-weight: normal;
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+/* 左侧渐变竖条 */
+.title-bar {
+  display: inline-block;
+  width: 3px;
+  height: 18px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--brand-primary), #a78bfa);
+  box-shadow: 0 0 8px rgba(119, 181, 254, 0.55);
+  flex-shrink: 0;
+}
+.section-hint {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
-.resource-empty { padding: 20px 0; }
-.resource-grid { padding: 4px 2px 2px; }
+
+/* ─── 空态 ──────────────────────────────────────────────── */
+.empty-state {
+  background: rgba(255, 255, 255, 0.55);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(119, 181, 254, 0.14);
+  border-radius: 18px;
+  padding: 20px;
+}
+:global(.dark) .empty-state {
+  background: rgba(15, 23, 42, 0.62);
+  border-color: rgba(119, 181, 254, 0.10);
+}
+
+/* ─── 服务器网格 ─────────────────────────────────────────── */
+.server-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+@media (max-width: 1199px) { .server-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 899px)  { .server-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 599px)  { .server-grid { grid-template-columns: 1fr; } }
 </style>
