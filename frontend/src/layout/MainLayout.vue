@@ -430,6 +430,12 @@
             </el-icon>
             <span>设置</span>
           </el-menu-item>
+          <el-menu-item index="/audit-log" v-if="isPlatformAdmin">
+            <el-icon>
+              <Tickets/>
+            </el-icon>
+            <span>审计日志</span>
+          </el-menu-item>
           <el-menu-item index="/profile">
             <el-icon>
               <UserFilled/>

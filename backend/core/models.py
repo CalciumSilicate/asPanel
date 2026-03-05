@@ -225,3 +225,36 @@ class PlayerPosition(Base):
     y = Column(Float, nullable=True)
     z = Column(Float, nullable=True)
     dim = Column(String, nullable=True)
+
+
+class AuditLog(Base):
+    """审计事件日志：记录系统、用户、服务器、玩家等所有关键操作"""
+    __tablename__ = "audit_logs"
+    id          = Column(Integer, primary_key=True, index=True)
+    ts          = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # 事件分类：SYSTEM / AUTH / USER / SERVER / PLAYER / PLUGIN / ARCHIVE / SETTINGS / GROUP
+    category    = Column(String, nullable=False)
+    # 具体动作：如 panel_start / login / server_start / player_join 等
+    action      = Column(String, nullable=False)
+    # 操作人（系统自动事件为 NULL）
+    actor_id    = Column(Integer, nullable=True)
+    actor_name  = Column(String, nullable=True)
+    # 客户端 IP（系统事件为 NULL）
+    ip_address  = Column(String, nullable=True)
+    # 操作对象
+    target_type = Column(String, nullable=True)   # server / user / player / plugin / archive / group
+    target_id   = Column(String, nullable=True)   # 对象 id（字符串化）
+    target_name = Column(String, nullable=True)   # 对象名称快照
+    # 扩展 JSON 字段（额外上下文，如 old/new 值、参数等）
+    detail      = Column(Text, nullable=True)
+    # 执行结果
+    result      = Column(String, nullable=False, default="success")  # success / failure
+    error_msg   = Column(String, nullable=True)
+
+    __table_args__ = (
+        Index("idx_audit_ts",       "ts"),
+        Index("idx_audit_category", "category"),
+        Index("idx_audit_action",   "action"),
+        Index("idx_audit_actor",    "actor_id"),
+        Index("idx_audit_cat_ts",   "category", "ts"),
+    )

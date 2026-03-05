@@ -599,6 +599,16 @@ async def _handle_single(payload: Dict[str, Any]):
                         logger.debug(f"[MCDR-WS] 跳过标记bot | player={player} 已存在正版玩家记录")
                     else:
                         crud.set_player_is_bot(db, player, True)
+                # 审计：Bot 加入
+                try:
+                    from backend.core.audit import write_audit as _wa
+                    _wa(
+                        category="PLAYER", action="bot_join",
+                        target_type="player", target_name=player,
+                        detail={"server": server_name},
+                    )
+                except Exception:
+                    pass
         if event in {"mcdr.player_joined", "mcdr.player_left", "mcdr.player_position"} and isinstance(data, dict):
             server_name = str(data.get("server") or "")
             if server_name and _is_proxy_server(server_name):
@@ -719,6 +729,16 @@ async def _handle_single(payload: Dict[str, Any]):
                     await onebot.handle_player_join(server_name, player)
                 except Exception:
                     pass
+                # 审计：玩家加入
+                try:
+                    from backend.core.audit import write_audit as _wa
+                    _wa(
+                        category="PLAYER", action="join",
+                        target_type="player", target_name=player,
+                        detail={"server": server_name, "uuid": reported_uuid},
+                    )
+                except Exception:
+                    pass
         elif event == "mcdr.player_left" and isinstance(data, dict):
             server_name = str(data.get("server") or "")
             player = str(data.get("player") or "")
@@ -792,6 +812,16 @@ async def _handle_single(payload: Dict[str, Any]):
                     pass
                 try:
                     await onebot.handle_player_leave(server_name, player)
+                except Exception:
+                    pass
+                # 审计：玩家退出
+                try:
+                    from backend.core.audit import write_audit as _wa
+                    _wa(
+                        category="PLAYER", action="leave",
+                        target_type="player", target_name=player,
+                        detail={"server": server_name},
+                    )
                 except Exception:
                     pass
         elif event in ("mcdr.server_startup", "mcdr.server_stop") and isinstance(data, dict):

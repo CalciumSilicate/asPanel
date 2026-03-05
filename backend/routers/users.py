@@ -26,6 +26,7 @@ from backend.core.schemas import Role, UserUpdate, UserSelfUpdate, PasswordChang
 from backend.core.bind_verification import bind_verification_service
 from backend.core.schemas import BindRequestCreate, BindRequestResponse, BindVerifyRequest, BindPendingResponse
 from backend.services.permission_service import PermissionService
+from backend.core.audit import audit, write_audit, get_client_ip
 
 router = APIRouter(
     prefix="/api",
@@ -58,7 +59,13 @@ async def register_user(user: schemas.UserCreate, db: Session = Depends(get_db))
         pass
 
     # 新用户默认不是管理员，不绑定玩家（登录后在个人资料页绑定）
-    return crud.create_user(db, user, is_owner=False, is_admin=False, bound_player_id=None, server_link_group_ids=[])
+    new_user = crud.create_user(db, user, is_owner=False, is_admin=False, bound_player_id=None, server_link_group_ids=[])
+    await audit(
+        category="AUTH", action="register",
+        actor_id=new_user.id, actor_name=new_user.username,
+        target_type="user", target_id=new_user.id, target_name=new_user.username,
+    )
+    return new_user
 
 
 @router.post("/token", response_model=schemas.Token)
@@ -70,6 +77,12 @@ def login_for_access_token(request: Request, form_data: OAuth2PasswordRequestFor
     user = crud.get_user_by_username(db, form_data.username)
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         login_limiter.record(client_ip)
+        write_audit(
+            category="AUTH", action="login",
+            actor_name=form_data.username,
+            ip_address=client_ip,
+            result="failure", error_msg="账号名或密码错误",
+        )
         raise HTTPException(401, "账号名或密码错误", {"WWW-Authenticate": "Bearer"})
     
     # 登录时更新用户的 server_link_group_ids (Legacy & New)
@@ -104,6 +117,11 @@ def login_for_access_token(request: Request, form_data: OAuth2PasswordRequestFor
     # 从数据库读取 token 过期时间
     sys_settings = crud.get_system_settings_data(db)
     expire_minutes = sys_settings.get("token_expire_minutes", 60)
+    write_audit(
+        category="AUTH", action="login",
+        actor_id=user.id, actor_name=user.username,
+        ip_address=client_ip,
+    )
     return {"access_token": security.create_access_token({"sub": user.username, "tv": getattr(user, "token_version", 0)}, expire_minutes=expire_minutes), "token_type": "bearer"}
 
 
@@ -168,8 +186,12 @@ async def update_current_user(
     db.add(current_user)
     db.commit()
     db.refresh(current_user)
-    
-    # Fetch latest permissions with names
+    await audit(
+        category="USER", action="self_update",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="user", target_id=current_user.id, target_name=current_user.username,
+        detail={k: v for k, v in payload.model_dump(exclude_none=True).items() if k != "password"},
+    )
     perms = crud.get_user_group_permissions(db, current_user.id)
     group_ids = [p.group_id for p in perms]
     groups = db.query(models.ServerLinkGroup).filter(models.ServerLinkGroup.id.in_(group_ids)).all()
@@ -321,6 +343,12 @@ async def verify_player_bind(
     from backend.services.permission_service import PermissionService
     PermissionService.increment_token_version(db, user)
     
+    await audit(
+        category="USER", action="bind_player",
+        actor_id=user.id, actor_name=user.username,
+        target_type="player", target_name=player.player_name,
+        detail={"player_uuid": player.uuid},
+    )
     return success({"bound": True, "player_name": player.player_name})
 
 
@@ -338,6 +366,11 @@ async def change_password(
     current_user.hashed_password = security.get_password_hash(payload.new_password)
     db.add(current_user)
     db.commit()
+    await audit(
+        category="AUTH", action="change_password",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="user", target_id=current_user.id, target_name=current_user.username,
+    )
     return {"success": True, "message": "密码修改成功"}
 
 
@@ -479,6 +512,12 @@ async def update_user(
         u = crud.update_user_fields(db, user_id, payload)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    await audit(
+        category="USER", action="update",
+        actor_id=actor.id, actor_name=actor.username,
+        target_type="user", target_id=user_id, target_name=u.username,
+        detail=payload.model_dump(exclude_none=True),
+    )
     # 返回更新后的用户信息
     for r in crud.list_users_sorted(db):
         if r['id'] == u.id:
@@ -653,6 +692,11 @@ async def upload_avatar_for_user(
             os.remove(AVATAR_STORAGE_PATH / legacy_avatar.replace(AVATAR_URL_PREFIX, ""))
     except Exception:
         pass
+    await audit(
+        category="USER", action="upload_avatar",
+        actor_id=actor.id, actor_name=actor.username,
+        target_type="user", target_id=user_id, target_name=target_user.username,
+    )
     for r in crud.list_users_sorted(db):
         if r['id'] == target_user.id:
             return r
@@ -677,6 +721,11 @@ async def reset_password(
     crud.reset_user_password(db, user_id, new_password)
     u.token_version = (u.token_version or 0) + 1
     db.commit()
+    await audit(
+        category="USER", action="reset_password",
+        actor_id=actor.id, actor_name=actor.username,
+        target_type="user", target_id=user_id, target_name=u.username,
+    )
     return {"id": user_id, "new_password": new_password}
 
 
@@ -697,6 +746,11 @@ async def delete_user(
     if u.is_owner and crud.count_owners(db) <= 1:
         raise HTTPException(400, "系统必须至少保留 1 个 OWNER，无法删除唯一的 OWNER")
     crud.delete_user_by_id(db, user_id)
+    await audit(
+        category="USER", action="delete",
+        actor_id=actor.id, actor_name=actor.username,
+        target_type="user", target_id=user_id, target_name=u.username,
+    )
     return success({"id": user_id, "deleted": True})
 
 
@@ -718,4 +772,9 @@ async def batch_delete_users(
             to_keep.append(uid)
         ids = to_keep
     deleted = crud.delete_users_by_ids(db, ids)
+    await audit(
+        category="USER", action="batch_delete",
+        actor_id=actor.id, actor_name=actor.username,
+        detail={"ids": ids, "deleted_count": deleted},
+    )
     return success({"deleted": deleted})

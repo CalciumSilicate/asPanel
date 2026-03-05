@@ -8,6 +8,7 @@ from backend.core.auth import require_role
 from backend.core.database import get_db
 from backend.core.schemas import Role
 from backend.core.utils import find_local_java_commands
+from backend.core.audit import audit
 
 
 router = APIRouter(
@@ -35,6 +36,11 @@ async def update_settings(payload: schemas.SystemSettingsUpdate,
                           _user: models.User = Depends(require_role(Role.OWNER))):
     """更新系统级设置（部分字段）。需要 OWNER 权限。"""
     data = crud.update_system_settings(db, payload.model_dump(exclude_unset=True))
+    await audit(
+        category="SETTINGS", action="update",
+        actor_id=_user.id, actor_name=_user.username,
+        detail=payload.model_dump(exclude_unset=True),
+    )
     return schemas.SystemSettings(**data)
 
 

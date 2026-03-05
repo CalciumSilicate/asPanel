@@ -119,6 +119,26 @@ class MCDRManager:
         await process.wait()
         logger.info(f"[MCDR] 服务器 {server_id} (PID: {process.pid}) 已退出 (code={process.returncode})")
 
+        # 审计：区分正常停止与异常宕机
+        from backend.core.audit import write_audit
+        try:
+            rc = process.returncode
+            if rc not in (None, 0):
+                write_audit(
+                    category="SERVER", action="crashed",
+                    target_type="server", target_id=server_id,
+                    detail={"return_code": rc, "pid": process.pid},
+                    result="failure", error_msg=f"进程异常退出，return_code={rc}",
+                )
+            else:
+                write_audit(
+                    category="SERVER", action="stopped_normally",
+                    target_type="server", target_id=server_id,
+                    detail={"return_code": rc, "pid": process.pid},
+                )
+        except Exception:
+            pass
+
         # [修改] 停止并清理日志发送器任务，并进行最后一次日志刷新
         if server_id in self.log_emitter_tasks:
             self.log_emitter_tasks.pop(server_id).cancel()

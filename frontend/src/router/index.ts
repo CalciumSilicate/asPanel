@@ -160,6 +160,12 @@ const routes: RouteRecordRaw[] = [
                 component: () => import('../views/Profile.vue'),
                 meta: { requiredRole: 'GUEST' }
             },
+            {
+                path: 'audit-log',
+                name: 'AuditLog',
+                component: () => import('../views/AuditLog.vue'),
+                meta: { requiredRole: 'ADMIN', requiresPlatformAdmin: true }
+            },
             // 未来可以在此添加 statistics, settings 等子路由
         ]
     },

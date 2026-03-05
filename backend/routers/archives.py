@@ -21,6 +21,7 @@ from backend.services.permission_service import (
     require_server_manage,
     GroupAction,
 )
+from backend.core.audit import audit, write_audit
 
 router = APIRouter(
     prefix="/api",
@@ -42,6 +43,12 @@ async def create_archive_from_server(
 ):
     """从服务器创建存档（需要服务器 MANAGE 权限）"""
     task = await archive_manager.start_create_archive_from_server_task(db, server_id)
+    await audit(
+        category="ARCHIVE", action="create_from_server",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="server", target_id=server_id,
+        detail={"task_id": task.id},
+    )
     return {"task_id": task.id, "message": "已开始创建存档任务"}
 
 
@@ -61,6 +68,12 @@ async def upload_archive(
     with open(temp_file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     task = await archive_manager.start_create_archive_from_upload_task(temp_file_path, archive_name, mc_version)
+    await audit(
+        category="ARCHIVE", action="upload",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="archive", target_name=archive_name,
+        detail={"task_id": task.id, "mc_version": mc_version},
+    )
     return {"task_id": task.id, "message": "文件已上传，开始后台处理"}
 
 
@@ -166,6 +179,11 @@ def delete_archive(
             raise HTTPException(status_code=500, detail=f"Failed to delete archive file: {e}")
 
     db.commit()
+    write_audit(
+        category="ARCHIVE", action="delete",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="archive", target_id=archive_id, target_name=getattr(db_archive, "name", ""),
+    )
     return
 
 
@@ -206,4 +224,10 @@ async def restore_archive_to_server(
     if not PermissionService.is_platform_admin(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要平台管理员权限")
     task = await archive_manager.start_restore_archive_task(archive_id, server_id)
+    await audit(
+        category="ARCHIVE", action="restore",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="archive", target_id=archive_id,
+        detail={"server_id": server_id, "task_id": task.id},
+    )
     return {"task_id": task.id, "message": "已开始恢复存档任务"}

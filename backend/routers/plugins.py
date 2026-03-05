@@ -21,6 +21,7 @@ from backend.core.database import get_db, SessionLocal
 from backend.core.dependencies import server_service, plugin_manager
 from backend.core.logger import logger
 from backend.services.permission_service import PermissionService, GroupAction
+from backend.core.audit import audit
 
 router = APIRouter(
     prefix="/api",
@@ -117,6 +118,12 @@ async def install_plugin_from_online(
         get_server_by_id_func=crud.get_server_by_id,
         db_session_factory=SessionLocal
     )
+    await audit(
+        category="PLUGIN", action="install_online",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="server", target_id=server_id, target_name=server.name,
+        detail={"plugin_id": plugin_id, "tag_name": tag_name, "task_id": task.id},
+    )
     return {"message": f"Plugin installation for '{plugin_id}' has been started.", "task_id": task.id}
 
 
@@ -140,6 +147,12 @@ async def upload_plugin(file: UploadFile, db: Session = Depends(get_db), _user=D
         meta=meta
     )
     db_plugin = crud.create_plugin_record(db, plugin_create)
+    await audit(
+        category="PLUGIN", action="upload",
+        actor_id=_user.id, actor_name=_user.username,
+        target_type="plugin", target_id=db_plugin.id, target_name=file.filename,
+        detail={"size": db_plugin.size},
+    )
     return db_plugin
 
 
@@ -176,6 +189,12 @@ async def install_plugin_from_db(
 
     crud.add_server_to_plugin(db, plugin_db_id, server_id)
 
+    await audit(
+        category="PLUGIN", action="install_from_db",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="server", target_id=server_id, target_name=server.name,
+        detail={"plugin_db_id": plugin_db_id, "file_name": plugin_record.file_name},
+    )
     return {"message": "Plugin installed successfully from DB.", "path": str(installed_path)}
 
 
@@ -194,6 +213,12 @@ async def switch_server_plugin(
         server_path=Path(server.path),
         file_name=file_name,
         enable=enable
+    )
+    await audit(
+        category="PLUGIN", action="switch",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="server", target_id=server_id, target_name=server.name,
+        detail={"file_name": new_path.name, "enabled": new_status},
     )
     return {"message": "Plugin status changed.", "file_name": new_path.name, "enabled": new_status}
 
@@ -222,6 +247,12 @@ async def delete_server_plugin(
         plugin_manager.delete_plugin(Path(server.path), file_name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete plugin file from filesystem: {e}")
+    await audit(
+        category="PLUGIN", action="delete",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="server", target_id=server_id, target_name=server.name,
+        detail={"file_name": file_name},
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -252,6 +283,11 @@ async def delete_db_plugin(plugin_db_id: int, db: Session = Depends(get_db), _us
 
     # 删除数据库记录
     crud.delete_plugin_record(db, plugin_db_id)
+    await audit(
+        category="PLUGIN", action="delete_from_db",
+        actor_id=_user.id, actor_name=_user.username,
+        target_type="plugin", target_id=plugin_db_id, target_name=plugin_record.file_name,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

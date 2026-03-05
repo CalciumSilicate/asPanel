@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from backend.services import player_manager
 from backend.core.constants import UUID_HYPHEN_PATTERN
 from backend.core.dependencies import task_manager
+from backend.core.audit import audit
 
 router = APIRouter(
     prefix="/api/players",
@@ -158,6 +159,12 @@ async def set_offline_player_name(player_id: int, payload: schemas.PlayerNameUpd
     if not payload.name or not isinstance(payload.name, str):
         raise HTTPException(400, "无效的名字")
     rec = crud.update_player_name(db, rec, name=payload.name, is_offline=True)
+    await audit(
+        category="PLAYER", action="rename",
+        actor_id=_user.id, actor_name=_user.username,
+        target_type="player", target_id=player_id, target_name=payload.name,
+        detail={"new_name": payload.name},
+    )
     return rec
 
 

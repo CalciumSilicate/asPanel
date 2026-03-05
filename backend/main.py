@@ -33,6 +33,7 @@ from backend.routers import stats as stats_router
 from backend.routers import settings as settings_router
 from backend.routers import mods as mods_router
 from backend.routers import configuration as configuration_router
+from backend.routers import audit as audit_router
 from backend.services.ws import router as ws_router
 from backend.services import onebot
 from backend.routers.system import cpu_sampler
@@ -43,6 +44,7 @@ from backend.core.ws import sio
 from backend.core.logger import logger
 from backend.core.schemas import ServerCoreConfig
 from backend.core.dependencies import mcdr_manager
+from backend.core.audit import write_audit
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -227,6 +229,7 @@ app.include_router(settings_router.router)
 app.include_router(players_router.router)
 app.include_router(world_map_router.router)
 app.include_router(stats_router.router)
+app.include_router(audit_router.router)
 
 
 async def warmup_cache():
@@ -283,12 +286,27 @@ async def _auto_start_servers_on_boot():
             if ok:
                 started += 1
                 logger.info(f"自动启动：已启动 server_id={s.id} name={getattr(s, 'name', '')}")
+                write_audit(
+                    category="SERVER", action="auto_start",
+                    target_type="server", target_id=s.id, target_name=getattr(s, 'name', ''),
+                    detail={"pid_or_msg": msg},
+                )
             else:
                 failed += 1
                 logger.warning(f"自动启动：启动失败 server_id={s.id} | {msg}")
+                write_audit(
+                    category="SERVER", action="auto_start",
+                    target_type="server", target_id=s.id, target_name=getattr(s, 'name', ''),
+                    result="failure", error_msg=msg,
+                )
         except Exception as e:
             failed += 1
             logger.warning(f"自动启动：启动异常 server_id={getattr(s, 'id', None)}：{e}")
+            write_audit(
+                category="SERVER", action="auto_start",
+                target_type="server", target_id=getattr(s, 'id', None), target_name=getattr(s, 'name', ''),
+                result="failure", error_msg=str(e),
+            )
         # 避免同时拉起过多进程造成瞬时 IO/CPU 峰值
         await asyncio.sleep(0.3)
 
@@ -298,6 +316,7 @@ async def _auto_start_servers_on_boot():
 @app.on_event("startup")
 async def startup_event():
     logger.warning(f"服务器启动中")
+    write_audit(category="SYSTEM", action="panel_start", detail={"message": "ASPanel 面板已启动"})
     await task_manager.register_coroutine("cpu_sampler", cpu_sampler())
     await task_manager.register_coroutine("warmup_cache", warmup_cache())
     try:
@@ -351,6 +370,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.warning("服务器关闭中...")
+    write_audit(category="SYSTEM", action="panel_shutdown", detail={"message": "ASPanel 面板正常关闭"})
     await task_manager.cancel_all_coroutines()
     logger.success("服务器已关闭")
 

@@ -29,6 +29,7 @@ from backend.core.api import (
     get_forge_installer_meta
 )
 from backend.services.permission_service import PermissionService, GroupAction
+from backend.core.audit import audit, get_client_ip
 
 
 def check_server_admin_permission(db: Session, user: models.User, server_id: int) -> None:
@@ -122,6 +123,12 @@ async def create_server(
                     detail=f"您没有权限在组 ID={group_id} 中创建服务器"
                 )
     task = await server_service.start_create_server_task(server, user.id)
+    await audit(
+        category="SERVER", action="create",
+        actor_id=user.id, actor_name=user.username,
+        target_type="server", target_name=server.name,
+        detail={"path": server.path, "task_id": task.id},
+    )
     return {"task_id": task.id, "message": "已开始创建服务器任务"}
 
 
@@ -130,7 +137,14 @@ async def delete_server(server_id: int, db: Session = Depends(get_db),
                        current_user: models.User = Depends(get_current_user)):
     # PERMISSION: 组 ADMIN 或平台管理员
     check_server_admin_permission(db, current_user, server_id)
+    srv = crud.get_server_by_id(db, server_id)
     task = await server_service.start_delete_server_task(server_id)
+    await audit(
+        category="SERVER", action="delete",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="server", target_id=server_id, target_name=getattr(srv, "name", ""),
+        detail={"task_id": task.id},
+    )
     return {"task_id": task.id, "message": "已开始删除服务器任务"}
 
 
@@ -146,6 +160,12 @@ async def rename_server(server_id: int, new_name: str, db: Session = Depends(get
         db_server = crud.rename_server(db, server_id, new_name)
         if not db_server:
             raise HTTPException(status_code=404, detail="服务器不存在")
+        await audit(
+            category="SERVER", action="rename",
+            actor_id=current_user.id, actor_name=current_user.username,
+            target_type="server", target_id=server_id, target_name=new_name,
+            detail={"new_name": new_name},
+        )
         return {"status": "success", "message": f"服务器已重命名为 '{new_name}'", "name": new_name}
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
@@ -162,7 +182,19 @@ async def start_server(server_id: int, db: Session = Depends(get_db),
         raise HTTPException(404, "Server not found")
     success, message = await mcdr_manager.start(server)
     if not success:
+        await audit(
+            category="SERVER", action="start",
+            actor_id=current_user.id, actor_name=current_user.username,
+            target_type="server", target_id=server_id, target_name=server.name,
+            result="failure", error_msg=message,
+        )
         raise HTTPException(409, message)
+    await audit(
+        category="SERVER", action="start",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="server", target_id=server_id, target_name=server.name,
+        detail={"pid": message},
+    )
     return {"status": "success", "pid": message}
 
 
@@ -181,6 +213,12 @@ async def set_server_auto_start(
         core_config = ServerCoreConfig.model_validate(json.loads(db_server.core_config))
     except Exception:
         core_config = ServerCoreConfig()
+    await audit(
+        category="SERVER", action="set_auto_start",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="server", target_id=payload.server_id, target_name=db_server.name,
+        detail={"auto_start": bool(core_config.auto_start)},
+    )
     return {"status": "success", "server_id": int(db_server.id), "auto_start": bool(core_config.auto_start)}
 
 
@@ -191,6 +229,11 @@ async def stop_server(server_id: int, db: Session = Depends(get_db),
     check_server_admin_permission(db, current_user, server_id)
     server = crud.get_server_by_id(db, server_id)
     await mcdr_manager.stop(server)
+    await audit(
+        category="SERVER", action="stop",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="server", target_id=server_id, target_name=getattr(server, "name", ""),
+    )
     return {"status": "success"}
 
 
@@ -202,8 +245,19 @@ async def force_kill_server(server_id: int, db: Session = Depends(get_db),
     server = crud.get_server_by_id(db, server_id)
     success, message = await mcdr_manager.force_kill(server)
     if not success:
+        await audit(
+            category="SERVER", action="force_kill",
+            actor_id=current_user.id, actor_name=current_user.username,
+            target_type="server", target_id=server_id, target_name=getattr(server, "name", ""),
+            result="failure", error_msg=message,
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
-
+    await audit(
+        category="SERVER", action="force_kill",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="server", target_id=server_id, target_name=getattr(server, "name", ""),
+        detail={"message": message},
+    )
     return {"status": "success", "message": message}
 
 
@@ -217,7 +271,18 @@ async def restart_server_endpoint(server_id: int, db: Session = Depends(get_db),
         raise HTTPException(404, "Server not found")
     success, message = await mcdr_manager.restart(server, server.path)
     if not success:
+        await audit(
+            category="SERVER", action="restart",
+            actor_id=current_user.id, actor_name=current_user.username,
+            target_type="server", target_id=server_id, target_name=server.name,
+            result="failure", error_msg=message,
+        )
         raise HTTPException(409, message)
+    await audit(
+        category="SERVER", action="restart",
+        actor_id=current_user.id, actor_name=current_user.username,
+        target_type="server", target_id=server_id, target_name=server.name,
+    )
     return {"status": "success", "pid": message}
 
 
@@ -279,6 +344,11 @@ async def batch_action_on_servers(action: str, payload: schemas.BatchActionPaylo
             tasks.append(mcdr_manager.send_command(server, payload.command))
     if tasks:
         await asyncio.gather(*tasks)
+    await audit(
+        category="SERVER", action="batch_action",
+        actor_id=current_user.id, actor_name=current_user.username,
+        detail={"action": action, "ids": list(payload.ids), "command": getattr(payload, "command", None)},
+    )
     return {"status": "success", "message": f"Action '{action}' sent."}
 
 
@@ -683,6 +753,12 @@ async def save_config_file(
         # 确保目录存在
         await asyncio.to_thread(file_path.parent.mkdir, parents=True, exist_ok=True)
         await asyncio.to_thread(file_path.write_text, payload.content, encoding='utf-8')
+        await audit(
+            category="SERVER", action="save_config_file",
+            actor_id=current_user.id, actor_name=current_user.username,
+            target_type="server", target_id=server_id, target_name=server.name,
+            detail={"file_type": payload.file_type},
+        )
         return {"message": "File saved successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
@@ -770,4 +846,9 @@ async def api_import_server(server_data: schemas.ServerImport,
     # PERMISSION: ADMIN
     task = await server_service.start_import_server_task(server_data, user.id)
     op = task.name or "导入服务器"
+    await audit(
+        category="SERVER", action="import",
+        actor_id=user.id, actor_name=user.username,
+        detail={"task_id": task.id, "op": op},
+    )
     return {"task_id": task.id, "message": f"已开始{op}任务"}
