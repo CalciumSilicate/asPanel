@@ -111,8 +111,10 @@ import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import apiClient from '@/api'
 import { ArrowDown } from '@element-plus/icons-vue'
-import { fetchTasks } from '@/store/tasks'
-import { startDownload, startUpload } from '@/store/transfers'
+import { useTasksStore } from '@/store/tasks'
+import { useTransfersStore } from '@/store/transfers'
+const { fetchTasks } = useTasksStore()
+const { startDownload, startUpload } = useTransfersStore()
 
 interface LtmRow {
   file_name: string

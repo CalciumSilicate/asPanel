@@ -155,7 +155,9 @@ import { ref, computed, onMounted, watch } from 'vue'
 import apiClient from '@/api'
 import { fetchDeltaSeries, fetchTotalSeries, fetchMetrics, fetchLeaderboardTotal } from '@/api/stats'
 import { loadECharts } from '@/utils/echartsLoader'
-import { activeGroupIds } from '@/store/user'
+import { useUserStore } from '@/store/user'
+import { storeToRefs } from 'pinia'
+const { activeGroupIds } = storeToRefs(useUserStore())
 
 const players = ref<any[]>([])
 const servers = ref<any[]>([])

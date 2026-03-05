@@ -211,10 +211,15 @@ import {useRoute} from 'vue-router';
 import {ElMessage, ElMessageBox} from 'element-plus';
 import {Upload, Download, Delete, WarningFilled, FolderAdd, Search, Refresh, Folder, Document} from '@element-plus/icons-vue';
 import apiClient, { isRequestCanceled } from '@/api';
-import { settings } from '@/store/settings'
-import { fetchTasks, onTaskEvent } from '@/store/tasks'
-import { downloadArchive, startUpload } from '@/store/transfers'
-import { activeGroupIds } from '@/store/user'
+import { useSettingsStore } from '@/store/settings'
+import { useTasksStore } from '@/store/tasks'
+import { useTransfersStore } from '@/store/transfers'
+import { useUserStore } from '@/store/user'
+import { storeToRefs } from 'pinia'
+const settings = useSettingsStore().settings
+const { fetchTasks, onTaskEvent } = useTasksStore()
+const { downloadArchive, startUpload } = useTransfersStore()
+const { activeGroupIds } = storeToRefs(useUserStore())
 
 // --- 状态 ---
 const allArchives = ref([]);

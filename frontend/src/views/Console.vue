@@ -62,7 +62,8 @@ import {io} from 'socket.io-client';
 import apiClient from '@/api';
 import { API_BASE_URL } from '@/config';
 import {ElMessage, ElTag, ElButton, ElInput, ElDropdown, ElDropdownMenu, ElDropdownItem, ElCard, ElIcon} from 'element-plus';
-import { user } from '@/store/user';
+import { useUserStore } from '@/store/user';
+const user = useUserStore().user;
 
 const route = useRoute();
 const serverId = ref(route.params.server_id);

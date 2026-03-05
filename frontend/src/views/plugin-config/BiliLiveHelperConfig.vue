@@ -62,9 +62,11 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
-import { asideCollapsed, asideCollapsing } from '@/store/ui'
+import { useUiStore } from '@/store/ui'
+import { storeToRefs } from 'pinia'
 import { normalizeServerType, installMCDR, fetchServerPlugins, fetchServersCached, invalidateServerPlugins } from './_Shared'
 import PluginConfigForm from './components/PluginConfigForm.vue'
+const { asideCollapsed, asideCollapsing } = storeToRefs(useUiStore())
 
 const PLUGIN_ID = 'bili_live_helper'
 

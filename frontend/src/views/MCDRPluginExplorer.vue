@@ -301,7 +301,8 @@ import { ref, computed, onMounted, watch } from 'vue'
 import {ElMessage, ElNotification} from 'element-plus'
 import {Search, Star, Download, Upload} from '@element-plus/icons-vue'
 import apiClient, { isRequestCanceled } from '@/api'
-import { fetchTasks } from '@/store/tasks'
+import { useTasksStore } from '@/store/tasks'
+const { fetchTasks } = useTasksStore()
 
 // --- Interfaces ---
 interface Asset {

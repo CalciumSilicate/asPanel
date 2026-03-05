@@ -154,9 +154,16 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, ArrowDown, Promotion, UserFilled } from '@element-plus/icons-vue'
 import apiClient from '@/api'
 import { io } from 'socket.io-client'
-import { asideCollapsed, asideCollapsing } from '@/store/ui'
-import { settings } from '@/store/settings'
-import { hasRole, isPlatformAdmin, activeGroupId, capabilities, user } from '@/store/user'
+import { useUiStore } from '@/store/ui'
+import { useSettingsStore } from '@/store/settings'
+import { useUserStore } from '@/store/user'
+import { storeToRefs } from 'pinia'
+const { asideCollapsed, asideCollapsing } = storeToRefs(useUiStore())
+const settings = useSettingsStore().settings
+const userStore = useUserStore()
+const user = userStore.user
+const { isPlatformAdmin, activeGroupId, capabilities } = storeToRefs(userStore)
+const { hasRole } = userStore
 
 
 // 同源连接 WebSocket（开发环境走 Vite 代理 /ws，生产由反代处理）

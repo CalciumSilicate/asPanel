@@ -513,10 +513,15 @@ import {ref, onMounted, computed, watch} from 'vue';
 import {ElMessage, ElNotification} from 'element-plus';
 import {Search, Refresh, Plus, Coin, Delete, Download, Star, Upload} from '@element-plus/icons-vue';
 import apiClient, { isRequestCanceled } from '@/api';
-import { asideCollapsed, asideCollapsing } from '@/store/ui'
-import { fetchTasks } from '@/store/tasks'
-import { startDownload } from '@/store/transfers'
-import { activeGroupIds } from '@/store/user'
+import { useUiStore } from '@/store/ui'
+import { useTasksStore } from '@/store/tasks'
+import { useTransfersStore } from '@/store/transfers'
+import { useUserStore } from '@/store/user'
+import { storeToRefs } from 'pinia'
+const { asideCollapsed, asideCollapsing } = storeToRefs(useUiStore())
+const { fetchTasks } = useTasksStore()
+const { startDownload } = useTransfersStore()
+const { activeGroupIds } = storeToRefs(useUserStore())
 
 // --- Interfaces ---
 interface Asset {

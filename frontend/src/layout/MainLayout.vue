@@ -14,7 +14,7 @@
         <div class="group-selector" v-if="user.id && !isPlatformAdmin && user.group_permissions.length > 0" style="margin-right: 12px;">
           <el-select
             :model-value="activeGroupIds[0]"
-            @update:model-value="(val) => activeGroupIds = val ? [val] : []"
+            @update:model-value="(val: number | undefined) => activeGroupIds = val ? [val] : []"
             placeholder="选择上下文"
             style="width: 180px;"
           >
@@ -30,142 +30,8 @@
           </el-select>
         </div>
 
-        <el-dropdown
-          trigger="click"
-          class="transfers-dropdown"
-          placement="bottom-end"
-          :popper-options="dropdownPopperOptions"
-          :hide-on-click="false"
-        >
-          <el-badge
-            :value="activeTransfersCount"
-            :max="99"
-            type="primary"
-            :hidden="activeTransfersCount === 0"
-            class="transfers-badge"
-          >
-            <el-button
-              class="transfers-toggle"
-              aria-label="传输"
-              title="传输"
-              circle
-              text
-            >
-              <el-icon :size="18">
-                <Download/>
-              </el-icon>
-            </el-button>
-          </el-badge>
-          <template #dropdown>
-            <el-dropdown-menu class="transfers-menu">
-              <el-dropdown-item class="transfers-menu-actions-item">
-                <div class="transfers-menu-actions">
-                  <span class="transfers-menu-header">传输</span>
-                  <el-button
-                    size="small"
-                    text
-                    :disabled="clearTransfersDisabled"
-                    @click.stop="handleClearTransfers"
-                  >
-                    清除已完成
-                  </el-button>
-                </div>
-              </el-dropdown-item>
-
-              <el-dropdown-item v-for="t in transfers" :key="t.id" class="transfer-menu-item">
-                <div class="transfer-row">
-                  <div class="transfer-row-header">
-                    <span class="transfer-name">
-                      <el-icon v-if="t.type === 'upload'" class="transfer-type-icon"><Upload/></el-icon>
-                      <el-icon v-else class="transfer-type-icon"><Download/></el-icon>
-                      {{ t.title }}
-                    </span>
-                    <span class="transfer-state">{{ transferStatusLabel(t.status) }}</span>
-                    <span class="transfer-percent">{{ transferDisplayPercent(t) }}%</span>
-                  </div>
-                  <div v-if="transferDesc(t)" class="transfer-row-desc" :title="transferDesc(t)">{{ transferDesc(t) }}</div>
-                  <el-progress
-                    v-if="t.status === 'TRANSFERRING' || t.status === 'PREPARING'"
-                    class="transfer-progress"
-                    :class="t.status.toLowerCase()"
-                    :percentage="transferProgressPercent(t)"
-                    :stroke-width="4"
-                    :show-text="false"
-                  />
-                  <div class="transfer-row-actions" v-if="t.status === 'PREPARING' || t.status === 'TRANSFERRING'">
-                    <el-button size="small" text @click.stop="cancelTransfer(t.id)">取消</el-button>
-                  </div>
-                </div>
-              </el-dropdown-item>
-              <el-dropdown-item v-if="transfers.length === 0" disabled>暂无传输</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-
-        <el-dropdown
-          trigger="click"
-          class="tasks-dropdown"
-          placement="bottom-end"
-          :popper-options="dropdownPopperOptions"
-          :hide-on-click="false"
-        >
-          <el-badge
-            :value="activeTasksCount"
-            :max="99"
-            type="danger"
-            :hidden="activeTasksCount === 0"
-            class="tasks-badge"
-          >
-            <el-button
-              class="tasks-toggle"
-              aria-label="后台任务"
-              title="后台任务"
-              circle
-              text
-            >
-              <el-icon :size="18">
-                <Operation/>
-              </el-icon>
-            </el-button>
-          </el-badge>
-          <template #dropdown>
-            <el-dropdown-menu class="tasks-menu">
-              <el-dropdown-item class="tasks-menu-actions-item">
-                <div class="tasks-menu-actions">
-                  <span class="tasks-menu-header">后台任务</span>
-                  <el-button
-                    size="small"
-                    text
-                    :disabled="clearTasksDisabled"
-                    @click.stop="handleClearTasks"
-                  >
-                    {{ clearTasksText }}
-                  </el-button>
-                </div>
-              </el-dropdown-item>
-              <el-dropdown-item v-for="t in tasks" :key="t.id" disabled>
-                <div class="task-row">
-                  <div class="task-row-header">
-                    <span class="task-name">{{ taskTitle(t) }}</span>
-                    <span class="task-state">{{ statusLabel(t.status) }}</span>
-                    <span class="task-percent">{{ displayPercent(t) }}%</span>
-                  </div>
-                  <div class="task-row-desc" :title="taskDesc(t)">{{ taskDesc(t) }}</div>
-                  <el-progress
-                    v-if="t.status !== 'PENDING'"
-                    class="task-progress"
-                    :class="(t.status || '').toLowerCase()"
-                    :percentage="progressPercent(t)"
-                    :stroke-width="4"
-                    :show-text="false"
-                    :color="progressColor(t.status)"
-                  />
-                </div>
-              </el-dropdown-item>
-              <el-dropdown-item v-if="tasks.length === 0" disabled>暂无任务</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <TransfersDropdown />
+        <TasksDropdown />
 
         <el-button
           class="theme-toggle"
@@ -465,52 +331,44 @@
   </el-container>
 </template>
 
-<script setup>
-import {ref, computed, onMounted, onUnmounted, nextTick} from 'vue';
-import {useRoute, useRouter} from 'vue-router';
-import { asideCollapsed as isCollapse, asideCollapsing as isCollapsing, toggleAside as toggleCollapse } from '@/store/ui';
-import { ElMessage, ElNotification } from 'element-plus'
+<script setup lang="ts">
+import { computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { useUiStore } from '@/store/ui';
+import { useUserStore } from '@/store/user';
+import { isDark, toggleTheme } from '@/store/theme'
+import { useTasksStore } from '@/store/tasks'
+import { storeToRefs } from 'pinia'
+import type { Task } from '@/store/tasks'
 import {
-  // Original Icons
   UserFilled, Fold, Expand, DataAnalysis, Tickets, TrendCharts,
   ChatDotRound, Setting, Files, Management, Shop, Coin, VideoCamera,
-  // New Icons for placeholders
-  Cpu, Grid, Umbrella, Tools, Promotion, MapLocation, Connection, User, Printer,
-  // Icons for Server Configuration
-  SetUp, Link, Refresh, VideoPlay, Key,
-  LocationInformation, Place, List, RefreshRight, Comment, DocumentCopy, Operation, Download, Upload,
+  Cpu, Grid, Umbrella, Promotion, MapLocation, Connection, User, Printer,
+  SetUp, Link, Refresh, VideoPlay,
+  LocationInformation, List, RefreshRight, Comment, DocumentCopy,
   Moon, Sunny
 } from '@element-plus/icons-vue';
-import {user, fullAvatarUrl, fetchUser, clearUser, hasRole, activeGroupIds, isPlatformAdmin, capabilities, isOwner} from '@/store/user';
-import { isDark, toggleTheme } from '@/store/theme'
-import {
-  tasks,
-  activeTasksCount,
-  failedTasksCount,
-  successTasksCount,
-  fetchTasks,
-  connectTasksSocket,
-  disconnectTasksSocket,
-  onTaskEvent,
-  clearTasks,
-} from '@/store/tasks'
-import {
-  transfers,
-  activeTransfersCount,
-  finishedTransfersCount,
-  cancelTransfer,
-  clearFinishedTransfers,
-} from '@/store/transfers'
+import { ElNotification } from 'element-plus'
 import { cancelPendingRequests } from '@/api'
+import TasksDropdown from './TasksDropdown.vue'
+import TransfersDropdown from './TransfersDropdown.vue'
 
-
-// 折叠状态由全局 ui store 提供
-// const isCollapse = ref(false);
-// const isCollapsing = ref(false); // 折叠过渡前的瞬时隐藏与子菜单上收阶段
 const route = useRoute();
 const router = useRouter();
 
-const TASK_TYPE_LABELS = {
+const uiStore = useUiStore()
+const { asideCollapsed: isCollapse, asideCollapsing: isCollapsing } = storeToRefs(uiStore)
+const toggleCollapse = uiStore.toggleAside
+
+const userStore = useUserStore()
+const user = userStore.user
+const { fullAvatarUrl, activeGroupIds, capabilities, isPlatformAdmin, isOwner } = storeToRefs(userStore)
+const { fetchUser, clearUser, hasRole } = userStore
+
+const tasksStore = useTasksStore()
+const { fetchTasks, connectTasksSocket, disconnectTasksSocket, onTaskEvent } = tasksStore
+
+const TASK_TYPE_LABELS: Record<string, string> = {
   DOWNLOAD: '下载',
   CREATE_ARCHIVE: '创建存档',
   UPLOAD_ARCHIVE: '上传存档',
@@ -527,76 +385,20 @@ const TASK_TYPE_LABELS = {
   LITEMATIC_GENERATE: '生成命令',
 }
 
-const taskTitle = (t) => t?.name || TASK_TYPE_LABELS[t?.type] || '任务'
-const taskDesc = (t) => t?.error || t?.message || ''
-
-// 进度条颜色：RUNNING 蓝色、FAILED 红色、SUCCESS 绿色、其他信息色
-const progressColor = (status) => {
-  if (status === 'RUNNING') return 'var(--el-color-primary)';
-  if (status === 'FAILED') return 'var(--el-color-danger)';
-  if (status === 'SUCCESS') return 'var(--el-color-success)';
-  return 'var(--el-color-info)';
-};
-// Dropdown 的 Popper 配置，防止溢出并靠右展开
-const dropdownPopperOptions = {
-  modifiers: [
-    { name: 'offset', options: { offset: [0, 8] } },
-    { name: 'preventOverflow', options: { padding: 8, boundary: 'viewport' } },
-    { name: 'flip', options: { fallbackPlacements: ['bottom-end', 'bottom-start', 'top-end', 'top-start'] } },
-  ],
-};
-// 状态中文文案
-const statusLabel = (status) => ({
-  PENDING: '排队',
-  RUNNING: '进行中',
-  SUCCESS: '成功',
-  FAILED: '失败'
-}[status] || status);
-// 展示用百分比文案（SUCCESS/FAILED 都显示 100）
-const displayPercent = (t) => (t.status === 'SUCCESS' || t.status === 'FAILED') ? 100 : t.progress;
-// 实际进度条渲染百分比
-const progressPercent = (t) => (t.status === 'SUCCESS' || t.status === 'FAILED') ? 100 : t.progress;
-
-const clearTasksText = computed(() => (failedTasksCount.value > 0 ? '清除失败任务' : '清除已完成任务'))
-const clearTasksDisabled = computed(() => failedTasksCount.value === 0 && successTasksCount.value === 0)
-const handleClearTasks = async () => {
-  if (clearTasksDisabled.value) return
-  const status = failedTasksCount.value > 0 ? 'FAILED' : 'SUCCESS'
-  try {
-    const cleared = await clearTasks(status)
-    ElMessage.success(`已清理 ${cleared} 个任务`)
-  } catch (e) {
-    ElMessage.error(`清理失败: ${e.response?.data?.detail || e.message}`)
-  }
-}
-
-const clearTransfersDisabled = computed(() => finishedTransfersCount.value === 0)
-const handleClearTransfers = () => {
-  if (clearTransfersDisabled.value) return
-  clearFinishedTransfers()
-  ElMessage.success('已清理已完成传输')
-}
-
-const transferStatusLabel = (status) => ({
-  PREPARING: '准备中',
-  TRANSFERRING: '传输中',
-  SUCCESS: '完成',
-  FAILED: '失败',
-  CANCELED: '已取消',
-}[status] || status)
-const transferDesc = (t) => t?.error || t?.message || ''
-const transferDisplayPercent = (t) => (t.status === 'SUCCESS' || t.status === 'FAILED' || t.status === 'CANCELED') ? 100 : (t.progress || 0)
-const transferProgressPercent = (t) => (t.status === 'SUCCESS' || t.status === 'FAILED' || t.status === 'CANCELED') ? 100 : (t.progress || 0)
+const taskTitle = (t: Partial<Task>): string => t?.name || TASK_TYPE_LABELS[t?.type ?? ''] || '任务'
+const taskDesc = (t: Partial<Task>): string => t?.error || t?.message || ''
 
 // 右上角合并通知：新增/完成/失败
 const NOTIFY_WINDOW_MS = 4500
-const toastBuckets = {
+interface ToastBucket { count: number; version: number; handle: ReturnType<typeof ElNotification> | null; timer: ReturnType<typeof setTimeout> | null }
+interface ToastOpts { title: string; type: 'info' | 'success' | 'error'; single: string; multi: (n: number) => string }
+const toastBuckets: Record<string, ToastBucket> = {
   created: { count: 0, version: 0, handle: null, timer: null },
   success: { count: 0, version: 0, handle: null, timer: null },
-  failed: { count: 0, version: 0, handle: null, timer: null },
+  failed:  { count: 0, version: 0, handle: null, timer: null },
 }
 
-const bumpToast = (bucketKey, opts) => {
+const bumpToast = (bucketKey: string, opts: ToastOpts) => {
   const b = toastBuckets[bucketKey]
   b.count += 1
   b.version += 1
@@ -621,11 +423,7 @@ const bumpToast = (bucketKey, opts) => {
   })
   b.timer = setTimeout(() => {
     if (b.version !== v) return
-    try {
-      b.handle?.close()
-    } catch (e) {
-      // ignore
-    }
+    try { b.handle?.close() } catch { /* ignore */ }
     b.handle = null
     b.timer = null
     b.count = 0
@@ -647,7 +445,7 @@ const handleMenuSelect = () => {
 
 // 折叠/展开逻辑改为使用全局 ui store 的 toggleAside（此处不再定义同名函数）
 
-const handleCommand = (command) => {
+const handleCommand = (command: string) => {
   if (command === 'logout') {
     clearUser();
     localStorage.removeItem('token');
@@ -657,8 +455,8 @@ const handleCommand = (command) => {
   }
 };
 
-let offTaskEvents = null
-let removeCancelGuard = null
+let offTaskEvents: (() => void) | null = null
+let removeCancelGuard: (() => void) | null = null
 
 // 预加载所有子页面组件，在浏览器空闲时执行
 const preloadRouteComponents = () => {
@@ -720,16 +518,10 @@ onMounted(() => {
   fetchTasks().catch(() => {})
   connectTasksSocket()
 
-  // 预加载所有子页面组件
-  nextTick(() => {
-    preloadRouteComponents()
-  })
-
   offTaskEvents = onTaskEvent((evt) => {
     if (evt.action === 'created') {
       bumpToast('created', {
-        title: '新增任务',
-        type: 'info',
+        title: '新增任务', type: 'info',
         single: `新增 ${taskTitle(evt.task)} 任务：${taskDesc(evt.task)}`,
         multi: (n) => `新增 ${n} 个任务`,
       })
@@ -737,8 +529,7 @@ onMounted(() => {
     }
     if (evt.action === 'finished' && evt.task?.status === 'SUCCESS') {
       bumpToast('success', {
-        title: '任务完成',
-        type: 'success',
+        title: '任务完成', type: 'success',
         single: `${taskTitle(evt.task)}：${taskDesc(evt.task)} 已完成`,
         multi: (n) => `完成 ${n} 个任务`,
       })
@@ -746,24 +537,24 @@ onMounted(() => {
     }
     if (evt.action === 'finished' && evt.task?.status === 'FAILED') {
       bumpToast('failed', {
-        title: '任务失败',
-        type: 'error',
+        title: '任务失败', type: 'error',
         single: `${taskTitle(evt.task)}：${taskDesc(evt.task)} 失败`,
         multi: (n) => `失败 ${n} 个任务`,
       })
     }
   })
+
+  // 预加载所有子页面组件
+  nextTick(() => {
+    preloadRouteComponents()
+  })
 });
 
 onUnmounted(() => {
-  try {
-    offTaskEvents?.()
-  } catch (e) {
-    // ignore
-  }
+  try { offTaskEvents?.() } catch { /* ignore */ }
   try {
     removeCancelGuard?.()
-  } catch (e) {
+  } catch {
     // ignore
   }
   disconnectTasksSocket()
@@ -923,71 +714,8 @@ onUnmounted(() => {
 }
 .collapse-icon :deep(svg) { display: block; }
 
-/* 任务按钮样式（小圆按钮） */
-.tasks-dropdown { margin-right: 8px; }
+/* 任务/传输按钮留给子组件自身处理，此处只保留 theme-toggle 间距 */
 .theme-toggle { margin-right: 8px; }
-
-/* 任务下拉菜单内容样式 */
-.tasks-menu { width: 460px; max-width: min(560px, 92vw); padding: 6px 0; overflow-x: hidden; box-sizing: border-box; }
-/* 允许下拉项内多行布局，并改为块级容器以包裹自定义结构 */
-.tasks-menu :deep(.el-dropdown-menu__item) {
-  white-space: normal;
-  height: auto;
-  line-height: 1.4;
-  padding: 0 !important;
-  display: block !important;
-  align-items: initial !important;
-}
-.tasks-menu-actions { padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; }
-.tasks-menu-actions-item { cursor: default; }
-.tasks-menu-actions-item:hover { background-color: transparent !important; }
-.tasks-menu .tasks-menu-header { font-weight: 600; color: var(--color-text); }
-.task-row { padding: 10px 14px; display: block; width: 100%; box-sizing: border-box; }
-.task-row-header { display: grid; grid-template-columns: 1fr auto auto; column-gap: 12px; align-items: baseline; margin-bottom: 4px; }
-.task-name { font-size: 13px; color: var(--color-text); font-weight: 600; text-align: left; }
-.task-state { font-size: 12px; color: var(--el-text-color-secondary); text-align: right; }
-.task-percent { font-size: 12px; color: var(--el-text-color-secondary); text-align: right; }
-.task-row-desc {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  margin: 2px 0 6px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.task-progress { display: block; width: 96%; margin: 0 auto; }
-.task-progress.running :deep(.el-progress-bar__outer) {
-  background-color: #4c4d4f; /* 深灰未完成部分 */
-}
-.task-progress.failed :deep(.el-progress-bar__outer),
-.task-progress.failed :deep(.el-progress-bar__inner) {
-  background-color: var(--el-color-danger);
-}
-.tasks-badge :deep(.el-badge__content) { transform: translate(4px, -6px); }
-
-.transfers-dropdown { margin-right: 8px; }
-.transfers-menu { width: 420px; max-width: min(520px, 92vw); padding: 6px 0; overflow-x: hidden; box-sizing: border-box; }
-.transfers-menu :deep(.el-dropdown-menu__item) {
-  white-space: normal;
-  height: auto;
-  line-height: 1.4;
-  padding: 0 !important;
-  display: block !important;
-  align-items: initial !important;
-}
-.transfers-menu-actions { padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; }
-.transfers-menu-actions-item { cursor: default; }
-.transfers-menu-actions-item:hover { background-color: transparent !important; }
-.transfers-menu .transfers-menu-header { font-weight: 600; color: var(--color-text); }
-.transfer-row { padding: 10px 14px; display: block; width: 100%; box-sizing: border-box; }
-.transfer-row-header { display: grid; grid-template-columns: 1fr auto auto; column-gap: 12px; align-items: baseline; margin-bottom: 4px; }
-.transfer-name { font-size: 13px; color: var(--color-text); font-weight: 600; text-align: left; display: flex; align-items: center; gap: 4px; }
-.transfer-type-icon { font-size: 14px; color: var(--el-text-color-secondary); flex-shrink: 0; }
-.transfer-state, .transfer-percent { font-size: 12px; color: var(--el-text-color-secondary); text-align: right; }
-.transfer-row-desc { font-size: 11px; color: var(--el-text-color-secondary); margin: 2px 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.transfer-progress { display: block; width: 96%; margin: 0 auto; }
-.transfer-row-actions { display: flex; justify-content: flex-end; padding: 6px 14px 0; }
-.transfers-badge :deep(.el-badge__content) { transform: translate(4px, -6px); }
 
 .header-right .user-info {
   display: flex;

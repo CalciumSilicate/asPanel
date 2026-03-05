@@ -213,7 +213,10 @@ import { Search, Refresh, Delete, Key, Edit } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import AvatarUploader from '@/components/AvatarUploader.vue'
-import { isOwner, isPlatformAdmin } from '@/store/user'
+import { useUserStore } from '@/store/user'
+import { storeToRefs } from 'pinia'
+const userStore = useUserStore()
+const { isOwner, isPlatformAdmin } = storeToRefs(userStore)
 
 type GroupRole = 'USER' | 'HELPER' | 'ADMIN'
 
@@ -300,7 +303,7 @@ const groupRoleTagType = (role: string | null): 'primary' | 'success' | 'info' |
   }
 }
 
-import { user as currentUser } from '@/store/user'
+const currentUser = userStore.user
 const currentUserId = computed(() => currentUser.id)
 
 const canEditGlobalPerm = (row: UserRow): boolean => {

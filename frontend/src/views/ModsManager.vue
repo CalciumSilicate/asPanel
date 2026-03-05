@@ -323,11 +323,16 @@ import {ref, computed, onMounted, watch} from 'vue'
 import { ElMessage, ElNotification } from 'element-plus'
 import { Search, Plus, Delete, Download, Upload, UploadFilled, Refresh, CopyDocument } from '@element-plus/icons-vue'
 import apiClient, { isRequestCanceled } from '@/api'
-import { asideCollapsed, asideCollapsing } from '@/store/ui'
+import { useUiStore } from '@/store/ui'
+import { useTasksStore } from '@/store/tasks'
+import { useTransfersStore } from '@/store/transfers'
+import { useUserStore } from '@/store/user'
+import { storeToRefs } from 'pinia'
 import router from '@/router'
-import { fetchTasks } from '@/store/tasks'
-import { startDownload, startUpload } from '@/store/transfers'
-import { activeGroupIds } from '@/store/user'
+const { asideCollapsed, asideCollapsing } = storeToRefs(useUiStore())
+const { fetchTasks } = useTasksStore()
+const { startDownload, startUpload } = useTransfersStore()
+const { activeGroupIds } = storeToRefs(useUserStore())
 
 // 左侧数据
 const servers = ref([])

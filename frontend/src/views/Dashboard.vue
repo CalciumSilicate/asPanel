@@ -3,7 +3,6 @@
     <!-- 1. 欢迎卡片 -->
     <el-card shadow="never" class="welcome-card">
       <div class="welcome-content">
-        <!-- 此处正确使用了 store 中的 fullAvatarUrl，无需修改 -->
         <el-avatar :size="70" :src="fullAvatarUrl" :icon="UserFilled" />
         <div class="welcome-text">
           <div class="title">欢迎回来, {{ user.username || 'admin' }}!</div>
@@ -17,8 +16,8 @@
       <el-col :xs="24" :sm="12" :lg="6">
         <el-card shadow="hover">
           <div class="stat-item">
-            <div class="icon-wrapper" style="background: #e7f6f6;">
-              <el-icon class="icon" color="#40c9c6"><Tickets /></el-icon>
+            <div class="icon-wrapper stat-servers-bg">
+              <el-icon class="icon stat-servers-color"><Tickets /></el-icon>
             </div>
             <div class="text">
               <div class="label">服务器状态</div>
@@ -31,8 +30,8 @@
       <el-col :xs="24" :sm="12" :lg="6">
         <el-card shadow="hover">
           <div class="stat-item">
-            <div class="icon-wrapper" style="background: #eaf3fe;">
-              <el-icon class="icon" color="#36a3f7"><Cpu /></el-icon>
+            <div class="icon-wrapper stat-cpu-bg">
+              <el-icon class="icon stat-cpu-color"><Cpu /></el-icon>
             </div>
             <div class="text">
               <div class="label">主机 CPU 负载</div>
@@ -45,8 +44,8 @@
       <el-col :xs="24" :sm="12" :lg="6">
         <el-card shadow="hover">
           <div class="stat-item">
-            <div class="icon-wrapper" style="background: #fef5f5;">
-              <el-icon class="icon" color="#f4516c"><DataLine /></el-icon>
+            <div class="icon-wrapper stat-memory-bg">
+              <el-icon class="icon stat-memory-color"><DataLine /></el-icon>
             </div>
             <div class="text">
               <div class="label">主机内存占用</div>
@@ -59,8 +58,8 @@
       <el-col :xs="24" :sm="12" :lg="6">
         <el-card shadow="hover">
           <div class="stat-item">
-            <div class="icon-wrapper" style="background: #f3eefc;">
-              <el-icon class="icon" color="#9575cd"><Folder /></el-icon>
+            <div class="icon-wrapper stat-disk-bg">
+              <el-icon class="icon stat-disk-color"><Folder /></el-icon>
             </div>
             <div class="text">
               <div class="label">主机磁盘占用</div>
@@ -142,25 +141,56 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import apiClient, { isRequestCanceled } from '@/api';
 import { UserFilled, Monitor, Tickets, Cpu, DataLine, Folder } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import { user, fullAvatarUrl, hasRole, activeGroupIds } from '@/store/user';
+import { useUserStore } from '@/store/user'
+import { storeToRefs } from 'pinia'
+const userStore = useUserStore()
+const user = userStore.user
+const { fullAvatarUrl, activeGroupIds } = storeToRefs(userStore)
+const { hasRole } = userStore
+
+interface SystemStatus {
+  cpu_percent: number
+  memory_percent: number
+  memory_used: number
+  memory_total: number
+  disk_percent: number
+  disk_used_gb: number
+  disk_total_gb: number
+}
+
+interface ServerStats {
+  total_servers: number
+  running_servers: number
+}
+
+interface ServerUsage {
+  id: number
+  name: string
+  cpu_percent: number
+  memory_mb: number
+}
+
+interface ServerItem {
+  id: number
+  status: string
+}
 
 const router = useRouter();
 
-const stats = ref({ total_servers: 0, running_servers: 0 });
+const stats = ref<ServerStats>({ total_servers: 0, running_servers: 0 });
 const serverPercent = computed(() => {
-  const total = Number(stats.value.total_servers) || 0;
-  const running = Number(stats.value.running_servers) || 0;
+  const total = stats.value.total_servers;
+  const running = stats.value.running_servers;
   if (!total) return 0;
-  const p = Math.round((running / total) * 100);
-  return Math.min(100, Math.max(0, p));
+  return Math.min(100, Math.max(0, Math.round((running / total) * 100)));
 });
-const systemStatus = ref({
+const systemStatus = ref<SystemStatus>({
   cpu_percent: 0,
   memory_percent: 0,
   memory_used: 0,
@@ -169,24 +199,24 @@ const systemStatus = ref({
   disk_used_gb: 0,
   disk_total_gb: 0,
 });
-const runningServersUsage = ref([]);
+const runningServersUsage = ref<ServerUsage[]>([]);
 
-let refreshInterval = null;
+let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
-const clampPercent = (n) => Math.min(100, Math.max(0, Number(n) || 0));
-const formatCpuPercent = (n) => `${clampPercent(n).toFixed(2)}%`;
-const formatMemoryMb = (mb) => {
+const clampPercent = (n: number) => Math.min(100, Math.max(0, Number(n) || 0));
+const formatCpuPercent = (n: number) => `${clampPercent(n).toFixed(2)}%`;
+const formatMemoryMb = (mb: number) => {
   const n = Number(mb);
   if (!Number.isFinite(n)) return '--';
   return `${Math.round(n).toLocaleString()} MB`;
 };
-const hostMemoryTotalMb = computed(() => (Number(systemStatus.value.memory_total) || 0) * 1024);
-const getMemoryPercent = (mb) => {
+const hostMemoryTotalMb = computed(() => (systemStatus.value.memory_total || 0) * 1024);
+const getMemoryPercent = (mb: number) => {
   const totalMb = hostMemoryTotalMb.value;
   if (!totalMb) return 0;
   return clampPercent(((Number(mb) || 0) / totalMb) * 100);
 };
-const getUsageStatus = (p) => {
+const getUsageStatus = (p: number): '' | 'success' | 'warning' | 'exception' => {
   const n = Number(p) || 0;
   if (n >= 90) return 'exception';
   if (n >= 70) return 'warning';
@@ -200,13 +230,11 @@ const fetchDashboardData = async () => {
       apiClient.get('/api/system/status'),
       apiClient.get('/api/servers/resource-usage'),
     ]);
-    const servers = Array.isArray(serversRes.data) ? serversRes.data : [];
+    const servers: ServerItem[] = Array.isArray(serversRes.data) ? serversRes.data : [];
     const running = servers.filter(s => s.status === 'running').length;
     stats.value = { total_servers: servers.length, running_servers: running };
-    // 规范化并夹紧系统百分比，确保 0-100
     const s = systemRes.data || {};
     systemStatus.value = {
-      ...systemStatus.value,
       cpu_percent: clampPercent(s.cpu_percent),
       memory_percent: clampPercent(s.memory_percent),
       memory_used: Number(s.memory_used) || 0,
@@ -216,7 +244,7 @@ const fetchDashboardData = async () => {
       disk_total_gb: Number(s.disk_total_gb) || 0,
     };
     const runningIds = new Set(servers.filter(sv => sv.status === 'running').map(sv => sv.id));
-    const usageList = Array.isArray(usageRes.data) ? usageRes.data : [];
+    const usageList: ServerUsage[] = Array.isArray(usageRes.data) ? usageRes.data : [];
     runningServersUsage.value = usageList.filter(u => runningIds.has(u?.id));
   } catch (error) {
     if (isRequestCanceled(error)) return;
@@ -228,7 +256,7 @@ const fetchDashboardData = async () => {
   }
 };
 
-const goToConsole = (serverId) => {
+const goToConsole = (serverId: number) => {
   router.push(`/console/${serverId}`);
 };
 
@@ -237,7 +265,6 @@ onMounted(() => {
   refreshInterval = setInterval(fetchDashboardData, 5000);
 });
 
-// 监听组切换，重新获取仪表盘数据
 watch(activeGroupIds, () => {
   fetchDashboardData();
 }, { deep: true });
@@ -257,7 +284,7 @@ onUnmounted(() => {
 }
 
 .welcome-card {
-  background-color: #fff;
+  background-color: var(--color-surface) !important;
 }
 .welcome-content {
   display: flex;
@@ -270,7 +297,7 @@ onUnmounted(() => {
   margin-bottom: 10px;
 }
 .welcome-text .subtitle {
-  color: #999;
+  color: var(--el-text-color-secondary);
 }
 
 .stats-cards .el-card {
@@ -284,7 +311,6 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-
 }
 .stat-item .icon-wrapper {
   padding: 16px;
@@ -298,21 +324,32 @@ onUnmounted(() => {
   text-align: right;
 }
 .stat-item .text .label {
-  color: rgba(0,0,0,.45);
+  color: var(--el-text-color-secondary);
   font-size: 16px;
   margin-bottom: 12px;
 }
 .stat-item .text .value {
   font-size: 20px;
   font-weight: bold;
-  color: #666;
+  color: var(--color-text);
 }
 .stat-item .text .unit {
   font-size: 14px;
   font-weight: normal;
   margin-left: 5px;
-  color: #999;
+  color: var(--el-text-color-secondary);
 }
+
+/* 统计卡片色组（引用全局 theme.css 中的 CSS 变量） */
+.stat-servers-bg { background: var(--stat-servers-bg); }
+.stat-servers-color { color: var(--stat-servers-color); }
+.stat-cpu-bg { background: var(--stat-cpu-bg); }
+.stat-cpu-color { color: var(--stat-cpu-color); }
+.stat-memory-bg { background: var(--stat-memory-bg); }
+.stat-memory-color { color: var(--stat-memory-color); }
+.stat-disk-bg { background: var(--stat-disk-bg); }
+.stat-disk-color { color: var(--stat-disk-color); }
+
 .el-col:hover .icon-wrapper {
     transform: translateY(-5px);
 }
@@ -340,7 +377,7 @@ onUnmounted(() => {
 .server-usage-card {
   border-radius: 12px;
   border: 1px solid var(--el-border-color-lighter);
-  background: linear-gradient(180deg, rgba(54, 163, 247, 0.06) 0%, rgba(255, 255, 255, 1) 70%);
+  background: linear-gradient(180deg, rgba(54, 163, 247, 0.06) 0%, var(--color-surface) 70%) !important;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .server-usage-card:hover {

@@ -126,8 +126,8 @@ apiClient.interceptors.response.use(
                         isRedirectingToLogin = true;
                         localStorage.removeItem('token');
                         // 动态导入避免循环依赖
-                        import('@/store/user').then(({ clearUser }) => {
-                            clearUser();
+                        import('@/store/user').then(({ useUserStore }) => {
+                            useUserStore().clearUser();
                         });
                         router.push({
                             path: '/login',

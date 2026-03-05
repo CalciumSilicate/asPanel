@@ -170,8 +170,13 @@
 import { reactive, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import apiClient from '@/api'
-import { settings, loadSettings, updateSettings, COMMON_TIMEZONES, USER_ROLES } from '@/store/settings'
-import { asideCollapsed, asideCollapsing } from '@/store/ui'
+import { useSettingsStore, COMMON_TIMEZONES, USER_ROLES } from '@/store/settings'
+import { useUiStore } from '@/store/ui'
+import { storeToRefs } from 'pinia'
+const settingsStore = useSettingsStore()
+const settings = settingsStore.settings
+const { loadSettings, updateSettings } = settingsStore
+const { asideCollapsed, asideCollapsing } = storeToRefs(useUiStore())
 
 const form = reactive({
   python_executable: settings.python_executable,

@@ -35,6 +35,16 @@
   --t-base: .25s var(--ease-standard);
   --t-slow: .35s var(--ease-standard);
 
+  /* Dashboard 统计卡片色组 */
+  --stat-servers-bg: #e7f6f6;
+  --stat-servers-color: #40c9c6;
+  --stat-cpu-bg: #eaf3fe;
+  --stat-cpu-color: #36a3f7;
+  --stat-memory-bg: #fef5f5;
+  --stat-memory-color: #f4516c;
+  --stat-disk-bg: #f3eefc;
+  --stat-disk-color: #9575cd;
+
   /* Element Plus 主题变量覆盖 */
   --el-color-primary: var(--brand-primary);
   --el-color-primary-light-3: #98C7FE; /* approx lighten-3 */
@@ -220,6 +230,12 @@ h1, h2, h3, h4, h5, h6 { color: var(--color-text); }
   --brand-accent: #EFB7BA;
   --brand-soft: #E5C0C8;
   --brand-sky: #8FB6EA;
+
+  /* Dashboard 统计卡片色组（暗色：改用低不透明度背景避免视觉刺眼） */
+  --stat-servers-bg: rgba(64, 201, 198, 0.12);
+  --stat-cpu-bg: rgba(54, 163, 247, 0.12);
+  --stat-memory-bg: rgba(244, 81, 108, 0.12);
+  --stat-disk-bg: rgba(149, 117, 205, 0.12);
 
   /* Element Plus 主题变量覆盖（暗色） */
   --el-color-primary: var(--brand-primary);

@@ -1,16 +1,13 @@
-// src/router/index.ts
-
 import { createRouter, createWebHistory } from 'vue-router';
 import type { RouteRecordRaw } from 'vue-router'
 import MainLayout from '../layout/MainLayout.vue';
-import { hasRole, fetchUser, user, clearUser, type LegacyRole, isPlatformAdmin, isOwner } from '@/store/user';
+import { useUserStore } from '@/store/user';
 import { ElMessage } from 'element-plus';
 
-// 扩展 RouteMeta 类型
 declare module 'vue-router' {
     interface RouteMeta {
         requiresAuth?: boolean
-        requiredRole?: LegacyRole
+        requiredRole?: import('@/store/user').LegacyRole
         requiresPlatformAdmin?: boolean
         requiresOwner?: boolean
     }
@@ -29,65 +26,19 @@ const routes: RouteRecordRaw[] = [
     },
     {
         path: '/',
-        component: MainLayout, // 使用 MainLayout 作为根布局组件
+        component: MainLayout,
         redirect: '/dashboard',
-        meta: { requiresAuth: true }, // 权限验证放在父路由上
-        children: [ // 确保 'archives' 在这个 children 数组中
-            {
-                path: 'dashboard',
-                name: 'Dashboard',
-                component: () => import('../views/Dashboard.vue'),
-                meta: { requiredRole: 'GUEST' }
-            },
-            {
-                path: 'servers',
-                name: 'ServerList',
-                component: () => import('../views/ServerList.vue'),
-                meta: { requiredRole: 'USER' }
-            },
-            {
-                path: 'mcdr-plugin-explorer',
-                name: 'MCDRPluginExplorer',
-                component: () => import('../views/MCDRPluginExplorer.vue'),
-                meta: { requiredRole: 'HELPER' }
-            },
-            {
-                path: 'db-plugin-manager',
-                name: 'DbPluginExplorer',
-                component: () => import('../views/DbPluginExplorer.vue'),
-                meta: { requiredRole: 'ADMIN', requiresPlatformAdmin: true }
-            },
-            {
-                path: 'server-plugins',
-                name: 'ServerPluginManager',
-                component: () => import('../views/ServerPluginManager.vue'),
-                meta: { requiredRole: 'HELPER' }
-            },
-            {
-                path: 'tools/mods-manager',
-                name: 'ModsManager',
-                component: () => import('../views/ModsManager.vue'),
-                meta: { requiredRole: 'ADMIN' }
-            },
-            {
-                path: 'tools/superflat',
-                name: 'SuperFlatWorld',
-                component: () => import('../views/SuperFlatWorld.vue'),
-                meta: { requiredRole: 'USER' }
-            },
-            {
-                path: 'tools/prime-backup',
-                name: 'PrimeBackup',
-                component: () => import('../views/PrimeBackup.vue'),
-                meta: { requiredRole: 'HELPER' }
-            },
-            {
-                path: 'server-groups',
-                name: 'ServerLink',
-                component: () => import('../views/ServerLink.vue'),
-                meta: { requiredRole: 'ADMIN' }
-            },
-            // 插件配置
+        meta: { requiresAuth: true },
+        children: [
+            { path: 'dashboard', name: 'Dashboard', component: () => import('../views/Dashboard.vue'), meta: { requiredRole: 'GUEST' } },
+            { path: 'servers', name: 'ServerList', component: () => import('../views/ServerList.vue'), meta: { requiredRole: 'USER' } },
+            { path: 'mcdr-plugin-explorer', name: 'MCDRPluginExplorer', component: () => import('../views/MCDRPluginExplorer.vue'), meta: { requiredRole: 'HELPER' } },
+            { path: 'db-plugin-manager', name: 'DbPluginExplorer', component: () => import('../views/DbPluginExplorer.vue'), meta: { requiredRole: 'ADMIN', requiresPlatformAdmin: true } },
+            { path: 'server-plugins', name: 'ServerPluginManager', component: () => import('../views/ServerPluginManager.vue'), meta: { requiredRole: 'HELPER' } },
+            { path: 'tools/mods-manager', name: 'ModsManager', component: () => import('../views/ModsManager.vue'), meta: { requiredRole: 'ADMIN' } },
+            { path: 'tools/superflat', name: 'SuperFlatWorld', component: () => import('../views/SuperFlatWorld.vue'), meta: { requiredRole: 'USER' } },
+            { path: 'tools/prime-backup', name: 'PrimeBackup', component: () => import('../views/PrimeBackup.vue'), meta: { requiredRole: 'HELPER' } },
+            { path: 'server-groups', name: 'ServerLink', component: () => import('../views/ServerLink.vue'), meta: { requiredRole: 'ADMIN' } },
             { path: 'server-config/via-version-config', name: 'ViaVersionConfig', component: () => import('../views/plugin-config/ViaVersionConfig.vue'), meta: { requiredRole: 'ADMIN' } },
             { path: 'server-config/velocity-proxy-config', name: 'VelocityProxyConfig', component: () => import('../views/plugin-config/VelocityProxyConfig.vue'), meta: { requiredRole: 'ADMIN' } },
             { path: 'server-config/prime-backup-config', name: 'PrimeBackupConfig', component: () => import('../views/plugin-config/PrimeBackupConfig.vue'), meta: { requiredRole: 'HELPER' } },
@@ -97,82 +48,23 @@ const routes: RouteRecordRaw[] = [
             { path: 'server-config/crash-restart-config', name: 'CrashRestartConfig', component: () => import('../views/plugin-config/CrashRestartConfig.vue'), meta: { requiredRole: 'HELPER' } },
             { path: 'server-config/join-motd-config', name: 'JoinMOTDConfig', component: () => import('../views/plugin-config/JoinMOTDConfig.vue'), meta: { requiredRole: 'ADMIN' } },
             { path: 'server-config/quick-backup-multi-config', name: 'QuickBackupMultiConfig', component: () => import('../views/plugin-config/QuickBackupMultiConfig.vue'), meta: { requiredRole: 'HELPER' } },
-            {
-                path: 'players',
-                name: 'PlayerManager',
-                component: () => import('../views/PlayerManager.vue'),
-                meta: { requiredRole: 'ADMIN', requiresPlatformAdmin: true }
-            },
-            {
-                path: 'users',
-                name: 'UserManager',
-                component: () => import('../views/UserManager.vue'),
-                meta: { requiredRole: 'OWNER' }
-            },
-            {
-                path: 'tools/world-map',
-                name: 'WorldMap',
-                component: () => import('../views/WorldMap.vue'),
-                meta: { requiredRole: 'USER' }
-            },
-            {
-                path: 'tools/litematica',
-                name: 'Litematica',
-                component: () => import('../views/Litematica.vue'),
-                meta: { requiredRole: 'USER' }
-            },
-            {
-                path: 'chat',
-                name: 'ChatRoom',
-                component: () => import('../views/ChatRoom.vue'),
-                meta: { requiredRole: 'USER' }
-            },
-            {
-                path: 'settings',
-                name: 'Settings',
-                component: () => import('../views/Settings.vue'),
-                meta: { requiredRole: 'OWNER', requiresOwner: true }
-            },
-            {
-                // 【新增】存档管理页面的路由
-                // 它必须作为 MainLayout 的子路由，才能被正确渲染在布局内部
-                path: 'tools/archives',
-                name: 'ArchiveManagement',
-                component: () => import('../views/ArchiveManagement.vue'),
-                meta: { requiredRole: 'HELPER' }
-            },
-            {
-                path: 'console/:server_id',
-                name: 'Console',
-                component: () => import('../views/Console.vue'),
-                props: true,
-                meta: { requiredRole: 'ADMIN' }
-            },
-            {
-                path: 'statistics',
-                name: 'Statistics',
-                component: () => import('../views/Statistics.vue'),
-                meta: { requiredRole: 'USER' }
-            },
-            {
-                path: 'profile',
-                name: 'Profile',
-                component: () => import('../views/Profile.vue'),
-                meta: { requiredRole: 'GUEST' }
-            },
-            {
-                path: 'audit-log',
-                name: 'AuditLog',
-                component: () => import('../views/AuditLog.vue'),
-                meta: { requiredRole: 'ADMIN', requiresPlatformAdmin: true }
-            },
-            // 未来可以在此添加 statistics, settings 等子路由
+            { path: 'players', name: 'PlayerManager', component: () => import('../views/PlayerManager.vue'), meta: { requiredRole: 'ADMIN', requiresPlatformAdmin: true } },
+            { path: 'users', name: 'UserManager', component: () => import('../views/UserManager.vue'), meta: { requiredRole: 'OWNER' } },
+            { path: 'tools/world-map', name: 'WorldMap', component: () => import('../views/WorldMap.vue'), meta: { requiredRole: 'USER' } },
+            { path: 'tools/litematica', name: 'Litematica', component: () => import('../views/Litematica.vue'), meta: { requiredRole: 'USER' } },
+            { path: 'chat', name: 'ChatRoom', component: () => import('../views/ChatRoom.vue'), meta: { requiredRole: 'USER' } },
+            { path: 'settings', name: 'Settings', component: () => import('../views/Settings.vue'), meta: { requiredRole: 'OWNER', requiresOwner: true } },
+            { path: 'tools/archives', name: 'ArchiveManagement', component: () => import('../views/ArchiveManagement.vue'), meta: { requiredRole: 'HELPER' } },
+            { path: 'console/:server_id', name: 'Console', component: () => import('../views/Console.vue'), props: true, meta: { requiredRole: 'ADMIN' } },
+            { path: 'statistics', name: 'Statistics', component: () => import('../views/Statistics.vue'), meta: { requiredRole: 'USER' } },
+            { path: 'profile', name: 'Profile', component: () => import('../views/Profile.vue'), meta: { requiredRole: 'GUEST' } },
+            { path: 'audit-log', name: 'AuditLog', component: () => import('../views/AuditLog.vue'), meta: { requiredRole: 'ADMIN', requiresPlatformAdmin: true } },
         ]
     },
-    // 404 页面
     {
         path: '/:pathMatch(.*)*',
-        redirect: '/dashboard'
+        name: 'NotFound',
+        component: () => import('../views/NotFound.vue')
     }
 ];
 
@@ -181,65 +73,49 @@ const router = createRouter({
     routes,
 });
 
-// 全局路由守卫 (逻辑不变)
 router.beforeEach(async (to, from, next) => {
+    const userStore = useUserStore();
     const token = localStorage.getItem('token');
     const publicPages = ['/login', '/register'];
     const authRequired = to.matched.some(record => record.meta.requiresAuth);
 
-    // 未登录访问受保护路由：提示并回到上一个页面；若无来源（直达），跳转登录
     if (authRequired && !token) {
         ElMessage.warning('请先登录');
-        if (from && from.name) {
-            return next(false); // 取消本次导航，停留在上一个页面
-        }
+        if (from && from.name) return next(false);
         return next({ path: '/login', query: { redirect: to.fullPath } });
     }
 
-    // 已登录访问登录/注册：直接去仪表盘
     if (publicPages.includes(to.path) && token) {
         return next('/dashboard');
     }
 
-    // 按需拉取用户信息（用于角色判断）
-    // 只在用户信息缺失时才阻塞等待，避免每次路由切换都延迟
     try {
-        if (authRequired && token && !user.id) {
-            await fetchUser();
+        if (authRequired && token && !userStore.user.id) {
+            await userStore.fetchUser();
         }
     } catch (e) {
-        // 用户信息拉取失败，清除登录状态
         localStorage.removeItem('token');
-        clearUser();
+        userStore.clearUser();
         ElMessage.warning('登录已过期，请重新登录');
         return next({ path: '/login', query: { redirect: to.fullPath } });
     }
 
-    // 角色不足：提示并回到上一个页面；若无来源（直达），回到仪表盘
     const requiredRole = to.meta.requiredRole;
-    if (requiredRole && !hasRole(requiredRole)) {
+    if (requiredRole && !userStore.hasRole(requiredRole)) {
         ElMessage.error('无权限访问该页面');
-        if (from && from.name) {
-            return next(false); // 取消本次导航，停留在上一个页面
-        }
+        if (from && from.name) return next(false);
         return next('/dashboard');
     }
 
-    // 检查是否需要平台管理员权限
-    if (to.meta.requiresPlatformAdmin && !isPlatformAdmin.value) {
+    if (to.meta.requiresPlatformAdmin && !userStore.isPlatformAdmin) {
         ElMessage.error('此页面仅对平台管理员开放');
-        if (from && from.name) {
-            return next(false);
-        }
+        if (from && from.name) return next(false);
         return next('/dashboard');
     }
 
-    // 检查是否需要 OWNER 权限
-    if (to.meta.requiresOwner && !isOwner.value) {
+    if (to.meta.requiresOwner && !userStore.isOwner) {
         ElMessage.error('此页面仅对系统所有者开放');
-        if (from && from.name) {
-            return next(false);
-        }
+        if (from && from.name) return next(false);
         return next('/dashboard');
     }
 

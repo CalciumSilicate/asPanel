@@ -64,9 +64,11 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
-import { asideCollapsed, asideCollapsing } from '@/store/ui'
+import { useUiStore } from '@/store/ui'
+import { storeToRefs } from 'pinia'
 import { normalizeServerType, installModrinth, fetchServerMods, hasModrinthSlug, fetchServersCached, invalidateServerMods } from './_Shared'
 import PluginConfigForm from './components/PluginConfigForm.vue'
+const { asideCollapsed, asideCollapsing } = storeToRefs(useUiStore())
 
 const servers = ref<any[]>([])
 const loadingServers = ref(false)

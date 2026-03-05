@@ -120,8 +120,12 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import apiClient from '@/api'
-import { asideCollapsed, asideCollapsing } from '@/store/ui'
-import { isPlatformAdmin, activeGroupId } from '@/store/user'
+import { useUiStore } from '@/store/ui'
+import { useUserStore } from '@/store/user'
+import { storeToRefs } from 'pinia'
+const { asideCollapsed, asideCollapsing } = storeToRefs(useUiStore())
+const userStore = useUserStore()
+const { isPlatformAdmin, activeGroupId } = storeToRefs(userStore)
 
 // 服务器列表（来自 /api/servers）
 const servers = ref([])

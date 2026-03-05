@@ -153,11 +153,17 @@ import {ref, computed, onMounted} from 'vue'
 import {ElMessage, ElMessageBox, ElNotification} from 'element-plus'
 import { Search, Refresh, Download } from '@element-plus/icons-vue'
 import apiClient from '@/api'
-import { asideCollapsed, asideCollapsing } from '@/store/ui'
-import { settings } from '@/store/settings'
-import { hasRole } from '@/store/user'
-import { fetchTasks } from '@/store/tasks'
-import { startDownload } from '@/store/transfers'
+import { useUiStore } from '@/store/ui'
+import { useSettingsStore } from '@/store/settings'
+import { useUserStore } from '@/store/user'
+import { useTasksStore } from '@/store/tasks'
+import { useTransfersStore } from '@/store/transfers'
+import { storeToRefs } from 'pinia'
+const { asideCollapsed, asideCollapsing } = storeToRefs(useUiStore())
+const settings = useSettingsStore().settings
+const { hasRole } = useUserStore()
+const { fetchTasks } = useTasksStore()
+const { startDownload } = useTransfersStore()
 
 const PB_PLUGIN_META_ID = 'prime_backup'
 

@@ -62,10 +62,13 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
-import { asideCollapsed, asideCollapsing } from '@/store/ui'
+import { useUiStore } from '@/store/ui'
+import { useTasksStore } from '@/store/tasks'
+import { storeToRefs } from 'pinia'
 import { installMCDR, fetchServerPlugins, fetchServersCached, invalidateServerPlugins } from './_Shared'
-import { fetchTasks } from '@/store/tasks'
 import PluginConfigForm from './components/PluginConfigForm.vue'
+const { asideCollapsed, asideCollapsing } = storeToRefs(useUiStore())
+const { fetchTasks } = useTasksStore()
 
 const PLUGIN_ID = 'auto_plugin_reloader'
 

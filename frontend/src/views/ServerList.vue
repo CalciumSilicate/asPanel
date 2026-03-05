@@ -1110,9 +1110,16 @@ import {
 import {ElMessage, ElMessageBox, ElNotification} from 'element-plus';
 import ConfigEditor from '@/components/ConfigEditor.vue';
 import draggable from 'vuedraggable';
-import { settings } from '@/store/settings'
-import { hasRole, activeGroupIds, activeGroupId, user, isPlatformAdmin } from '@/store/user';
-import { fetchTasks } from '@/store/tasks'
+import { useSettingsStore } from '@/store/settings'
+import { useUserStore } from '@/store/user'
+import { useTasksStore } from '@/store/tasks'
+import { storeToRefs } from 'pinia'
+const settings = useSettingsStore().settings
+const userStore = useUserStore()
+const user = userStore.user
+const { activeGroupIds, activeGroupId, isPlatformAdmin } = storeToRefs(userStore)
+const { hasRole } = userStore
+const { fetchTasks } = useTasksStore()
 
 	const router = useRouter();
 	const serverList = ref([]);

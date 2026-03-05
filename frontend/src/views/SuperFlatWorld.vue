@@ -138,7 +138,12 @@ import {ElMessage, ElMessageBox, ElNotification} from 'element-plus'
 import draggable from 'vuedraggable'
 import { Plus, Refresh, Delete, Rank } from '@element-plus/icons-vue'
 import apiClient, { isRequestCanceled } from '@/api'
-import { hasRole, activeGroupIds, activeGroupId, user, isPlatformAdmin } from '@/store/user';
+import { useUserStore } from '@/store/user'
+import { storeToRefs } from 'pinia'
+const userStore = useUserStore()
+const user = userStore.user
+const { activeGroupIds, activeGroupId, isPlatformAdmin } = storeToRefs(userStore)
+const { hasRole } = userStore
 
 // 表单状态
 const form = ref({

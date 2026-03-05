@@ -12,14 +12,14 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue'
-import { setupBeforeUnloadWarning, removeBeforeUnloadWarning } from '@/store/transfers'
+import { useTransfersStore } from '@/store/transfers'
 
 onMounted(() => {
-  setupBeforeUnloadWarning()
+  useTransfersStore().setupBeforeUnloadWarning()
 })
 
 onUnmounted(() => {
-  removeBeforeUnloadWarning()
+  useTransfersStore().removeBeforeUnloadWarning()
 })
 </script>
 

@@ -277,8 +277,10 @@ import {ElMessage, ElNotification} from 'element-plus';
 // [MODIFIED] Import Remove icon
 import {Search, Refresh, UploadFilled, Download, Delete, Remove} from '@element-plus/icons-vue';
 import apiClient, { isRequestCanceled } from '@/api';
-import { fetchTasks } from '@/store/tasks'
-import { startUpload } from '@/store/transfers'
+import { useTasksStore } from '@/store/tasks'
+import { useTransfersStore } from '@/store/transfers'
+const { fetchTasks } = useTasksStore()
+const { startUpload } = useTransfersStore()
 
 // --- State ---
 const loading = ref(false);

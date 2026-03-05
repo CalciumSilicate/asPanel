@@ -298,8 +298,13 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Grid, MapLocation, User, Loading, VideoPlay, VideoPause, DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
 import apiClient from '@/api'
-import { activeGroupId, hasRole } from '@/store/user'
-import { settings } from '@/store/settings'
+import { useUserStore } from '@/store/user'
+import { useSettingsStore } from '@/store/settings'
+import { storeToRefs } from 'pinia'
+const userStore = useUserStore()
+const { activeGroupId } = storeToRefs(userStore)
+const { hasRole } = userStore
+const settings = useSettingsStore().settings
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
