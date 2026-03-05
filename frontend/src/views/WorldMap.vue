@@ -545,9 +545,10 @@ const playbackProgressModel = computed({
   set: (pct) => {
     const total = totalOnlineMs.value
     playbackCurrentTs.value = virtualToReal(total * Math.max(0, Math.min(100, pct)) / 100)
-    if (playbackLockCamera.value && playbackPosition.value) {
-      const { mx, mz } = playerToMap(playbackPosition.value.x, playbackPosition.value.z, playbackPosition.value.dim)
-      view.cx = mx; view.cz = mz
+    if (playbackPosition.value) {
+      const { mx, mz, mapDim } = playerToMap(playbackPosition.value.x, playbackPosition.value.z, playbackPosition.value.dim)
+      if (mapDim !== activeDim.value) activeDim.value = mapDim
+      if (playbackLockCamera.value) { view.cx = mx; view.cz = mz }
     }
     scheduleRender()
   },
@@ -717,51 +718,81 @@ function drawGrid(ctx) {
   const [sx0, sz0] = c2w(0, 0)
   const [sx1, sz1] = c2w(view.cssW, view.cssH)
 
+  // Batch all grid lines into two stroke() calls
   ctx.strokeStyle = '#e8eaf0'
   ctx.lineWidth = 1
-
+  ctx.beginPath()
   for (let x = Math.floor(sx0 / step) * step; x <= sx1 + step; x += step) {
     const [px] = w2c(x, 0)
-    ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, view.cssH); ctx.stroke()
+    ctx.moveTo(px, 0); ctx.lineTo(px, view.cssH)
   }
   for (let z = Math.floor(sz0 / step) * step; z <= sz1 + step; z += step) {
     const [, py] = w2c(0, z)
-    ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(view.cssW, py); ctx.stroke()
+    ctx.moveTo(0, py); ctx.lineTo(view.cssW, py)
   }
+  ctx.stroke()
 
-  // axes
+  // axes + scale bar in one pass
   const [ox] = w2c(0, 0); const [, oy] = w2c(0, 0)
   ctx.strokeStyle = '#c0c4cc'; ctx.lineWidth = 1.5
-  if (ox >= 0 && ox <= view.cssW) {
-    ctx.beginPath(); ctx.moveTo(ox, 0); ctx.lineTo(ox, view.cssH); ctx.stroke()
-  }
-  if (oy >= 0 && oy <= view.cssH) {
-    ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(view.cssW, oy); ctx.stroke()
-  }
+  ctx.beginPath()
+  if (ox >= 0 && ox <= view.cssW) { ctx.moveTo(ox, 0); ctx.lineTo(ox, view.cssH) }
+  if (oy >= 0 && oy <= view.cssH) { ctx.moveTo(0, oy); ctx.lineTo(view.cssW, oy) }
+  ctx.stroke()
 
-  // scale bar
   const barWorld = nice * 10 ** exp
   const barPx = barWorld * view.scale
   const bx = view.cssW - 20
   const by = 24
   ctx.strokeStyle = '#60707a'; ctx.lineWidth = 2
-  ctx.beginPath(); ctx.moveTo(bx - barPx, by); ctx.lineTo(bx, by); ctx.stroke()
-  ctx.beginPath(); ctx.moveTo(bx - barPx, by - 5); ctx.lineTo(bx - barPx, by + 5); ctx.stroke()
-  ctx.beginPath(); ctx.moveTo(bx, by - 5); ctx.lineTo(bx, by + 5); ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(bx - barPx, by); ctx.lineTo(bx, by)
+  ctx.moveTo(bx - barPx, by - 5); ctx.lineTo(bx - barPx, by + 5)
+  ctx.moveTo(bx, by - 5); ctx.lineTo(bx, by + 5)
+  ctx.stroke()
   ctx.font = '11px sans-serif'; ctx.fillStyle = '#60707a'
   ctx.textAlign = 'center'
   ctx.fillText(`${barWorld >= 1000 ? barWorld / 1000 + 'k' : barWorld} blk`, bx - barPx / 2, by - 7)
 }
 
 function drawEdges(ctx) {
+  const selKey = selectedEdgeKey.value
+  const pad = 10
+  const W = view.cssW, H = view.cssH
+
+  // Group non-selected edges by color, batch into one stroke() per color
+  const byColor = new Map()
   for (const edge of parsedEdges.value) {
-    const [x1, y1] = w2c(edge.x1, edge.z1)
-    const [x2, y2] = w2c(edge.x2, edge.z2)
-    const isSelected = edge.key === selectedEdgeKey.value
-    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2)
-    ctx.strokeStyle = isSelected ? '#f59e0b' : edge.color
-    ctx.lineWidth = isSelected ? 4 : 2
+    if (edge.key === selKey) continue
+    let arr = byColor.get(edge.color)
+    if (!arr) { arr = []; byColor.set(edge.color, arr) }
+    arr.push(edge)
+  }
+
+  ctx.lineWidth = 2
+  for (const [color, edges] of byColor) {
+    ctx.strokeStyle = color
+    ctx.beginPath()
+    for (const edge of edges) {
+      const [x1, y1] = w2c(edge.x1, edge.z1)
+      const [x2, y2] = w2c(edge.x2, edge.z2)
+      // Viewport cull: skip edges entirely outside the canvas
+      if (Math.max(x1, x2) < -pad || Math.min(x1, x2) > W + pad ||
+          Math.max(y1, y2) < -pad || Math.min(y1, y2) > H + pad) continue
+      ctx.moveTo(x1, y1); ctx.lineTo(x2, y2)
+    }
     ctx.stroke()
+  }
+
+  // Selected edge drawn last (on top)
+  if (selKey) {
+    const edge = parsedEdges.value.find(e => e.key === selKey)
+    if (edge) {
+      const [x1, y1] = w2c(edge.x1, edge.z1)
+      const [x2, y2] = w2c(edge.x2, edge.z2)
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2)
+      ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 4; ctx.stroke()
+    }
   }
 }
 
@@ -827,6 +858,7 @@ function drawTrajectory(ctx) {
   function drawTrajSegments(maxIdx, alpha, lw) {
     const currentMapDim = activeDim.value === 'end' ? 'end' : 'nether'
     let segDim = null, pathOpen = false
+    let lastSx = 0, lastSy = 0
     for (let i = 0; i <= maxIdx; i++) {
       const pt = pts[i]
       const { mx, mz, mapDim } = playerToMap(pt.x, pt.z, pt.dim)
@@ -838,8 +870,12 @@ function drawTrajectory(ctx) {
       if (!pathOpen || pt.dim !== segDim) {
         if (pathOpen) { ctx.strokeStyle = dimTrajectoryColor(segDim, alpha); ctx.lineWidth = lw; ctx.stroke() }
         ctx.beginPath(); ctx.moveTo(sx, sy); pathOpen = true; segDim = pt.dim
+        lastSx = sx; lastSy = sy
       } else {
+        const dx = sx - lastSx, dy = sy - lastSy
+        if (dx * dx + dy * dy < 1) continue  // skip sub-pixel points
         ctx.lineTo(sx, sy)
+        lastSx = sx; lastSy = sy
       }
     }
     if (pathOpen) { ctx.strokeStyle = dimTrajectoryColor(segDim, alpha); ctx.lineWidth = lw; ctx.stroke() }
@@ -1545,8 +1581,11 @@ async function loadTrajectory(playerName) {
       login:  s.login  ? new Date(s.login).getTime()  : 0,
       logout: s.logout ? new Date(s.logout).getTime() : null,
     }))
-    if (data.length > 0 && data[0].ts) {
-      playbackCurrentTs.value = new Date(data[0].ts).getTime()
+    if (data.length > 0) {
+      const last = data[data.length - 1]
+      playbackCurrentTs.value = last.ts ? new Date(last.ts).getTime() : (data[0].ts ? new Date(data[0].ts).getTime() : 0)
+      const { mapDim } = playerToMap(last.x, last.z, last.dim)
+      activeDim.value = mapDim
     }
     scheduleRender()
   } catch {
@@ -1697,9 +1736,10 @@ function playbackTick(now) {
     return
   }
   playbackCurrentTs.value = adjusted
-  if (playbackLockCamera.value && playbackPosition.value) {
-    const { mx, mz } = playerToMap(playbackPosition.value.x, playbackPosition.value.z, playbackPosition.value.dim)
-    view.cx = mx; view.cz = mz
+  if (playbackPosition.value) {
+    const { mx, mz, mapDim } = playerToMap(playbackPosition.value.x, playbackPosition.value.z, playbackPosition.value.dim)
+    if (mapDim !== activeDim.value) activeDim.value = mapDim
+    if (playbackLockCamera.value) { view.cx = mx; view.cz = mz }
   }
   scheduleRender()
   playbackRafHandle = requestAnimationFrame(playbackTick)

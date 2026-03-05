@@ -15,13 +15,62 @@ mcdr_manager.sio = sio
 CHAT_USERS: Dict[int, Dict[str, dict]] = {}
 CHAT_SID_GROUP: Dict[str, int] = {}
 
+# console 会话追踪：sid → {server_id, server_name, user_id, user_name}
+CONSOLE_SID_INFO: Dict[str, dict] = {}
+
+
+def _get_server_name(server_id: int) -> str:
+    try:
+        with get_db_context() as db:
+            s = crud.get_server_by_id(db, server_id)
+            return s.name if s else str(server_id)
+    except Exception:
+        return str(server_id)
+
+
+def _write_console_audit(action: str, info: dict) -> None:
+    try:
+        from backend.core.audit import write_audit
+        write_audit(
+            category="SERVER",
+            action=action,
+            actor_id=info.get("user_id"),
+            actor_name=info.get("user_name"),
+            target_type="server",
+            target_id=info.get("server_id"),
+            target_name=info.get("server_name"),
+        )
+    except Exception:
+        pass
+
 
 @sio.on('join_console_room')
 async def join_console_room(sid, data):
     server_id = data.get('server_id')
-    if server_id is not None:
-        await sio.enter_room(sid, f'server_console_{server_id}')
-        logger.info(f"Socket {sid} joined room for server {server_id}")
+    if server_id is None:
+        return
+    user = data.get('user') or {}
+    server_name = _get_server_name(int(server_id))
+    info = {
+        "server_id": server_id,
+        "server_name": server_name,
+        "user_id": user.get("id"),
+        "user_name": user.get("username"),
+    }
+    CONSOLE_SID_INFO[sid] = info
+    await sio.enter_room(sid, f'server_console_{server_id}')
+    logger.info(f"Socket {sid} joined console room for server {server_id} ({server_name})")
+    _write_console_audit("console_open", info)
+
+
+@sio.on('leave_console_room')
+async def leave_console_room(sid, data):
+    info = CONSOLE_SID_INFO.pop(sid, None)
+    if info:
+        server_id = info.get("server_id")
+        await sio.leave_room(sid, f'server_console_{server_id}')
+        logger.info(f"Socket {sid} left console room for server {server_id}")
+        _write_console_audit("console_close", info)
 
 
 @sio.on('console_command')
@@ -113,6 +162,11 @@ async def handle_leave_chat_group(sid, data):
 @sio.event
 async def disconnect(sid):
     """Socket 断开时清理在线用户并广播。"""
+    # console 会话清理
+    console_info = CONSOLE_SID_INFO.pop(sid, None)
+    if console_info:
+        _write_console_audit("console_close", console_info)
+
     group_id = CHAT_SID_GROUP.pop(sid, None)
     if group_id:
         try:

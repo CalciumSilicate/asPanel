@@ -62,6 +62,7 @@ import {io} from 'socket.io-client';
 import apiClient from '@/api';
 import { API_BASE_URL } from '@/config';
 import {ElMessage, ElTag, ElButton, ElInput, ElDropdown, ElDropdownMenu, ElDropdownItem, ElCard, ElIcon} from 'element-plus';
+import { user } from '@/store/user';
 
 const route = useRoute();
 const serverId = ref(route.params.server_id);
@@ -195,7 +196,10 @@ const setupSocketListeners = () => {
     // 重要提示: 请确保后端 socket_handlers.py 中处理 join_console_room 事件时，
     // 将客户端加入到名为 `server_console_{server_id}` 的房间中，
     // 例如: await sio.enter_room(sid, f'server_console_{server_id}')
-    socket.emit('join_console_room', {server_id: parseInt(serverId.value, 10)});
+    socket.emit('join_console_room', {
+      server_id: parseInt(serverId.value, 10),
+      user: { id: user.id, username: user.username },
+    });
     logs.value.push('--- [系统] 已连接到服务器控制台，开始接收实时日志 ---');
     trimLogs();
   });
@@ -277,6 +281,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (socket) {
+    if (isConnected.value) {
+      socket.emit('leave_console_room', { server_id: parseInt(serverId.value, 10) });
+    }
     // [修改] 确保清理所有事件监听器
     socket.off('connect');
     socket.off('console_log_batch');

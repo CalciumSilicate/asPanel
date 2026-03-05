@@ -56,11 +56,18 @@ body {
   margin: 0;
   background: var(--color-bg);
   color: var(--color-text);
-  font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Noto Sans',sans-serif;
+  font-family: 'Lexend', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', sans-serif;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background var(--t-base), color var(--t-base);
+}
+
+code, pre, kbd, samp,
+.el-input input, .el-textarea textarea,
+[class*="codemirror"], [class*="cm-"],
+.terminal, .console {
+  font-family: 'Maple Mono', ui-monospace, monospace !important;
 }
 
 /* 顶层布局背景渐变（统一作用于侧边栏与主视图，避免断层） */

@@ -81,12 +81,14 @@
       </div>
 
       <!-- 数据表格 -->
+      <div class="table-wrap">
       <el-table
         :data="rows"
         v-loading="loading"
         stripe
         size="small"
-        style="width:100%;margin-top:12px"
+        height="100%"
+        style="width:100%"
         row-key="id"
         :expand-row-keys="expandedIds"
         @expand-change="handleExpandChange"
@@ -170,6 +172,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
 
       <!-- 分页 -->
       <div class="pagination-bar">
@@ -314,6 +317,21 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+:deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  margin-top: 12px;
 }
 
 .header-bar {

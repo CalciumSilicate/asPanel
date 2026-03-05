@@ -1,3 +1,5 @@
+import '@fontsource/maple-mono/400.css';
+import '@fontsource/maple-mono/700.css';
 import {createApp} from 'vue';
 import ElementPlus from 'element-plus';
 import 'element-plus/dist/index.css';
