@@ -116,7 +116,26 @@ const transferProgressPercent = (t: TransferItem): number =>
 
 <style scoped>
 .transfers-dropdown { margin-right: 8px; }
-.transfers-menu { width: 420px; max-width: min(520px, 92vw); padding: 6px 0; overflow-x: hidden; box-sizing: border-box; }
+
+/* 触发按钮 hover 辉光 */
+.transfers-toggle {
+  border-radius: 50% !important;
+  transition: box-shadow 0.25s ease, transform 0.25s cubic-bezier(.34,1.56,.64,1) !important;
+}
+.transfers-toggle:hover {
+  box-shadow: 0 0 0 1px rgba(119,181,254,0.3), 0 0 14px rgba(119,181,254,0.32) !important;
+  transform: scale(1.10) !important;
+}
+
+/* 面板容器 */
+.transfers-menu {
+  width: 420px;
+  max-width: min(520px, 92vw);
+  padding: 0;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
 .transfers-menu :deep(.el-dropdown-menu__item) {
   white-space: normal;
   height: auto;
@@ -124,11 +143,35 @@ const transferProgressPercent = (t: TransferItem): number =>
   padding: 0 !important;
   display: block !important;
   align-items: initial !important;
+  border-radius: 10px !important;
+  margin: 2px 8px !important;
 }
-.transfers-menu-actions { padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; }
+.transfers-menu :deep(.el-dropdown-menu__item:hover) {
+  background: rgba(119,181,254,0.08) !important;
+}
+
+/* 标题行 */
+.transfers-menu-actions {
+  padding: 12px 16px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(119,181,254,0.12);
+  margin-bottom: 4px;
+}
 .transfers-menu-actions-item { cursor: default; }
 .transfers-menu-actions-item:hover { background-color: transparent !important; }
-.transfers-menu .transfers-menu-header { font-weight: 600; color: var(--color-text); }
+.transfers-menu .transfers-menu-header {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  background: linear-gradient(135deg, #77B5FE, #EFB7BA);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* 传输行 */
 .transfer-row { padding: 10px 14px; display: block; width: 100%; box-sizing: border-box; }
 .transfer-row-header { display: grid; grid-template-columns: 1fr auto auto; column-gap: 12px; align-items: baseline; margin-bottom: 4px; }
 .transfer-name { font-size: 13px; color: var(--color-text); font-weight: 600; text-align: left; display: flex; align-items: center; gap: 4px; }
@@ -136,6 +179,14 @@ const transferProgressPercent = (t: TransferItem): number =>
 .transfer-state, .transfer-percent { font-size: 12px; color: var(--el-text-color-secondary); text-align: right; }
 .transfer-row-desc { font-size: 11px; color: var(--el-text-color-secondary); margin: 2px 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .transfer-progress { display: block; width: 96%; margin: 0 auto; }
+.transfer-progress :deep(.el-progress-bar__outer) {
+  background: rgba(119,181,254,0.12) !important;
+  border-radius: 99px !important;
+}
+.transfer-progress :deep(.el-progress-bar__inner) {
+  border-radius: 99px !important;
+  box-shadow: 0 0 6px currentColor;
+}
 .transfer-row-actions { display: flex; justify-content: flex-end; padding: 6px 14px 0; }
 .transfers-badge :deep(.el-badge__content) { transform: translate(4px, -6px); }
 </style>

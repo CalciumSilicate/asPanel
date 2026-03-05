@@ -139,7 +139,27 @@ const handleClearTasks = async () => {
 
 <style scoped>
 .tasks-dropdown { margin-right: 8px; }
-.tasks-menu { width: 460px; max-width: min(560px, 92vw); padding: 6px 0; overflow-x: hidden; box-sizing: border-box; }
+
+/* 触发按钮 hover 辉光 */
+.tasks-toggle {
+  border-radius: 50% !important;
+  transition: box-shadow 0.25s ease, transform 0.25s cubic-bezier(.34,1.56,.64,1) !important;
+}
+.tasks-toggle:hover {
+  box-shadow: 0 0 0 1px rgba(119,181,254,0.3), 0 0 14px rgba(119,181,254,0.32) !important;
+  transform: scale(1.10) !important;
+}
+
+/* 面板容器 */
+.tasks-menu {
+  width: 460px;
+  max-width: min(560px, 92vw);
+  padding: 0;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  /* 玻璃态（el-dropdown__popper 已设背景，这里补充内部分区样式） */
+}
+
 .tasks-menu :deep(.el-dropdown-menu__item) {
   white-space: normal;
   height: auto;
@@ -147,12 +167,41 @@ const handleClearTasks = async () => {
   padding: 0 !important;
   display: block !important;
   align-items: initial !important;
+  border-radius: 10px !important;
+  margin: 2px 8px !important;
 }
-.tasks-menu-actions { padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; }
+.tasks-menu :deep(.el-dropdown-menu__item:hover) {
+  background: rgba(119,181,254,0.08) !important;
+}
+
+/* 标题行 */
+.tasks-menu-actions {
+  padding: 12px 16px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(119,181,254,0.12);
+  margin-bottom: 4px;
+}
 .tasks-menu-actions-item { cursor: default; }
 .tasks-menu-actions-item:hover { background-color: transparent !important; }
-.tasks-menu .tasks-menu-header { font-weight: 600; color: var(--color-text); }
-.task-row { padding: 10px 14px; display: block; width: 100%; box-sizing: border-box; }
+.tasks-menu .tasks-menu-header {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  background: linear-gradient(135deg, #77B5FE, #a78bfa);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* 任务行 */
+.task-row {
+  padding: 10px 14px;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
 .task-row-header { display: grid; grid-template-columns: 1fr auto auto; column-gap: 12px; align-items: baseline; margin-bottom: 4px; }
 .task-name { font-size: 13px; color: var(--color-text); font-weight: 600; text-align: left; }
 .task-state { font-size: 12px; color: var(--el-text-color-secondary); text-align: right; }
@@ -166,8 +215,17 @@ const handleClearTasks = async () => {
   text-overflow: ellipsis;
 }
 .task-progress { display: block; width: 96%; margin: 0 auto; }
-.task-progress.running :deep(.el-progress-bar__outer) { background-color: #4c4d4f; }
+.task-progress :deep(.el-progress-bar__outer) {
+  background: rgba(119,181,254,0.12) !important;
+  border-radius: 99px !important;
+}
+.task-progress :deep(.el-progress-bar__inner) {
+  border-radius: 99px !important;
+  box-shadow: 0 0 6px currentColor;
+}
+.task-progress.running :deep(.el-progress-bar__outer) { background-color: rgba(119,181,254,0.12) !important; }
 .task-progress.failed :deep(.el-progress-bar__outer),
-.task-progress.failed :deep(.el-progress-bar__inner) { background-color: var(--el-color-danger); }
+.task-progress.failed :deep(.el-progress-bar__inner) { background-color: var(--el-color-danger) !important; }
+
 .tasks-badge :deep(.el-badge__content) { transform: translate(4px, -6px); }
 </style>

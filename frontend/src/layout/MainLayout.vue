@@ -433,6 +433,28 @@ onUnmounted(() => {
   65%      { transform: translate(30px, 20px) scale(0.95); opacity: 0.22; }
 }
 
+/* 深色模式：光球更鲜艳、更有力 */
+:global(.dark) .orb-1 {
+  background: radial-gradient(circle, rgba(119,181,254,0.95), rgba(119,181,254,0) 70%);
+  filter: blur(65px);
+  opacity: 0.62;
+}
+:global(.dark) .orb-2 {
+  background: radial-gradient(circle, rgba(239,183,186,0.88), rgba(239,183,186,0) 70%);
+  filter: blur(65px);
+  opacity: 0.58;
+}
+:global(.dark) .orb-3 {
+  background: radial-gradient(circle, rgba(167,139,250,0.80), rgba(167,139,250,0) 70%);
+  filter: blur(55px);
+  opacity: 0.52;
+}
+:global(.dark) .orb-4 {
+  background: radial-gradient(circle, rgba(52,211,153,0.70), rgba(52,211,153,0) 70%);
+  filter: blur(55px);
+  opacity: 0.46;
+}
+
 /* ─── 布局骨架 ─────────────────────────────────────────── */
 .main-layout {
   height: 100vh;
@@ -532,12 +554,11 @@ onUnmounted(() => {
 .collapse-icon {
   font-size: 22px;
   cursor: pointer;
-  height: var(--el-header-height);
-  width: 40px;
+  height: 36px;
+  width: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  line-height: var(--el-header-height);
   border-radius: 10px;
   color: var(--color-text-secondary);
   transition:
