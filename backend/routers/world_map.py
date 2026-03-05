@@ -81,7 +81,7 @@ def get_map_data(
         raise HTTPException(404, "服务器不存在")
     p = _map_dir(server_id) / DIM_FILES[dim]
     if not p.exists():
-        return _EMPTY_MAP
+        raise HTTPException(404, "地图不存在")
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except Exception as e:
@@ -98,7 +98,8 @@ def save_map_data(
 ):
     if dim not in DIM_FILES:
         raise HTTPException(400, f"Unknown dim: {dim}")
-    if not crud.get_server_by_id(db, server_id):
+    server = crud.get_server_by_id(db, server_id)
+    if not server:
         raise HTTPException(404, "服务器不存在")
     d = _map_dir(server_id)
     d.mkdir(parents=True, exist_ok=True)
@@ -108,6 +109,15 @@ def save_map_data(
         )
     except Exception as e:
         raise HTTPException(500, f"保存地图数据失败: {e}")
+    # sync Server.map with the actual file path (consistent with upload endpoint)
+    try:
+        map_meta = json.loads(server.map or "{}")
+    except Exception:
+        map_meta = {}
+    flag_key = "nether_json" if dim == "nether" else "end_json"
+    map_meta[flag_key] = str(d / DIM_FILES[dim])
+    server.map = json.dumps(map_meta, ensure_ascii=False)
+    db.commit()
     return {"ok": True}
 
 
@@ -157,7 +167,7 @@ def get_map_players(
     db: Session = Depends(get_db),
     _user=Depends(require_role(Role.USER)),
 ):
-    """Return all players with a recorded position on this server (last 30 days)
+    """Return all players with a recorded position on this server (last 365 days)
     plus any currently online player even without a position.
     """
     from backend.services.ws import PLAYERS_BY_SERVER
@@ -169,7 +179,7 @@ def get_map_players(
     server_name = Path(server.path).name
     online_names: set = set(PLAYERS_BY_SERVER.get(server_name, set()))
 
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=30)
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=365)
 
     # latest position per player for this server
     latest_ts_sub = (
@@ -287,6 +297,71 @@ def get_player_trajectory(
 
     positions = crud.get_player_positions(db, player.id, start, end, server_ids=[server_id])
     return [
-        {"x": p.x, "y": p.y, "z": p.z, "dim": p.dim, "ts": p.ts.isoformat() if p.ts else None}
+        {"x": p.x, "y": p.y, "z": p.z, "dim": p.dim, "ts": (p.ts.isoformat() + "Z") if p.ts else None}
         for p in positions
+    ]
+
+
+@router.get("/tools/world-map/{server_id}/sessions/{player_name}")
+def get_player_sessions(
+    server_id: int,
+    player_name: str,
+    since: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _user=Depends(require_role(Role.USER)),
+):
+    """Return login sessions for a player on a server, matching the same time range as the trajectory endpoint."""
+    if not crud.get_server_by_id(db, server_id):
+        raise HTTPException(404, "服务器不存在")
+
+    player = crud.get_player_by_name(db, player_name)
+    if not player:
+        raise HTTPException(404, "玩家不存在")
+
+    if since:
+        try:
+            start = datetime.fromisoformat(since)
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(400, "无效的时间格式")
+        end = datetime.now(tz=timezone.utc)
+    else:
+        session = (
+            db.query(models.PlayerSession)
+            .filter(
+                models.PlayerSession.player_uuid == player.uuid,
+                models.PlayerSession.server_id == server_id,
+            )
+            .order_by(models.PlayerSession.login_time.desc())
+            .first()
+        )
+        if session:
+            start = session.login_time
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            end = session.logout_time or datetime.now(tz=timezone.utc)
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+        else:
+            end = datetime.now(tz=timezone.utc)
+            start = end - timedelta(hours=6)
+
+    sessions = (
+        db.query(models.PlayerSession)
+        .filter(
+            models.PlayerSession.player_uuid == player.uuid,
+            models.PlayerSession.server_id == server_id,
+            models.PlayerSession.login_time >= start,
+            models.PlayerSession.login_time <= end,
+        )
+        .order_by(models.PlayerSession.login_time)
+        .all()
+    )
+    return [
+        {
+            "login": (s.login_time.isoformat() + "Z") if s.login_time else None,
+            "logout": (s.logout_time.isoformat() + "Z") if s.logout_time else None,
+        }
+        for s in sessions
     ]

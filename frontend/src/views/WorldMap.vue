@@ -20,17 +20,24 @@
 
         <el-radio-group v-model="activeDim" size="small" @change="onDimChange" :disabled="!selectedServerId">
           <el-radio-button value="nether">下界/主世界</el-radio-button>
-          <el-radio-button value="end" :disabled="!currentServer?.available_dims?.includes('end')">末地</el-radio-button>
+          <el-radio-button value="end">末地</el-radio-button>
         </el-radio-group>
 
         <el-divider direction="vertical" />
+
+        <el-button
+          v-if="selectedServerId && !mapLoading && !mapJsonRaw"
+          size="small"
+          type="primary"
+          @click="createBlankMap"
+        >新建空白地图</el-button>
 
         <el-button-group size="small">
           <el-button :type="layout === 'left' ? 'primary' : ''" @click="layout = 'left'" title="仅显示地图">
             <el-icon><Grid /></el-icon>
           </el-button>
           <el-button :type="layout === 'split' ? 'primary' : ''" @click="layout = 'split'" title="双栏">
-            <el-icon><Grid /></el-icon> 双栏
+            双栏
           </el-button>
           <el-button :type="layout === 'right' ? 'primary' : ''" @click="layout = 'right'" title="仅显示 BlueMap">
             BlueMap
@@ -63,7 +70,7 @@
           active-text="编辑"
           inactive-text="查看"
           size="small"
-          :disabled="!selectedServerId"
+          :disabled="!selectedServerId || !hasRole('HELPER')"
           @change="onEditModeChange"
         />
 
@@ -91,11 +98,6 @@
             保存
           </el-button>
         </template>
-
-        <el-divider direction="vertical" />
-
-        <el-button size="small" :disabled="!mapJsonRaw" @click="downloadJson">下载 JSON</el-button>
-        <el-button size="small" :disabled="!mapJsonRaw" @click="openInRmp">RMP 编辑</el-button>
 
         <el-divider direction="vertical" />
 
@@ -127,6 +129,10 @@
           @dblclick="onDblClick"
           @contextmenu.prevent="onContextMenu"
           @click="onCanvasClick"
+          @touchstart.prevent="onTouchStart"
+          @touchmove.prevent="onTouchMove"
+          @touchend.prevent="onTouchEnd"
+          @touchcancel.prevent="onTouchEnd"
           :style="{ cursor: canvasCursor }"
         />
 
@@ -184,10 +190,12 @@
         <!-- HUD overlays -->
         <div class="wm-hud wm-coords">
           <template v-if="activeDim === 'nether'">
-            下界 {{ hoverCoord.x }}, {{ hoverCoord.z }} &nbsp;|&nbsp; 主世界 {{ hoverCoord.x * 8 }}, {{ hoverCoord.z * 8 }}
+            <span style="color:#ef4444">下界 {{ hoverCoord.x }}, {{ hoverCoord.z }}</span>
+            &nbsp;|&nbsp;
+            <span style="color:#22c55e">主世界 {{ hoverCoord.x * 8 }}, {{ hoverCoord.z * 8 }}</span>
           </template>
           <template v-else>
-            末地 {{ hoverCoord.x }}, {{ hoverCoord.z }}
+            <span style="color:#8b5cf6">末地 {{ hoverCoord.x }}, {{ hoverCoord.z }}</span>
           </template>
         </div>
 
@@ -201,8 +209,17 @@
         <!-- Trajectory playback panel -->
         <div class="wm-playback-bar" v-if="selectedPlayerName">
           <div class="wm-playback-title">
-            <el-icon><User /></el-icon>
-            <span>{{ selectedPlayerName }} 的轨迹</span>
+            <img v-if="selectedPlayerAvatar" :src="selectedPlayerAvatar" class="wm-playback-avatar" />
+            <el-icon v-else class="wm-playback-avatar-icon"><User /></el-icon>
+            <div class="wm-playback-name-block">
+              <span>{{ selectedPlayerName }} 的轨迹</span>
+              <span v-if="playbackPosInfo" class="wm-playback-coord" :style="{ color: playbackPosInfo.color }">
+                {{ playbackPosInfo.dimLabel }} {{ playbackPosInfo.x }}, {{ playbackPosInfo.z }}
+                <template v-if="playbackPosInfo.nearestName">
+                  &nbsp;· 最近: {{ playbackPosInfo.nearestName }} {{ playbackPosInfo.nearestDist }}格
+                </template>
+              </span>
+            </div>
             <span class="wm-playback-time" v-if="trajectory.length > 1">{{ playbackTimeDisplay }}</span>
             <el-button text size="small" class="wm-playback-close" @click="clearTrajectory">×</el-button>
           </div>
@@ -215,15 +232,20 @@
               style="margin: 0 4px 2px"
             />
             <div class="wm-playback-controls">
-              <el-button text size="small" @click="playbackRewind" title="跳到起点">⏮</el-button>
+              <el-button text size="small" @click="playbackRewind" title="跳到起点">
+                <el-icon><DArrowLeft /></el-icon>
+              </el-button>
               <el-button
-                text
-                size="small"
+                text size="small"
                 class="wm-playback-play-btn"
                 :class="{ 'is-pausing': playbackPlaying }"
                 @click="playbackToggle"
-              >{{ playbackPlaying ? '⏸' : '▶' }}</el-button>
-              <el-button text size="small" @click="playbackForward" title="跳到终点">⏭</el-button>
+              >
+                <el-icon><VideoPause v-if="playbackPlaying" /><VideoPlay v-else /></el-icon>
+              </el-button>
+              <el-button text size="small" @click="playbackForward" title="跳到终点">
+                <el-icon><DArrowRight /></el-icon>
+              </el-button>
               <el-select v-model="playbackSpeed" size="small" style="width:68px" title="速度">
                 <el-option :value="1"   label="1×" />
                 <el-option :value="5"   label="5×" />
@@ -247,15 +269,6 @@
         <!-- Empty state: no server selected -->
         <div class="wm-canvas-empty" v-if="!selectedServerId && !mapLoading">
           <el-empty description="请选择一个服务器" />
-        </div>
-
-        <!-- Empty state: server selected but no map data -->
-        <div class="wm-canvas-empty" v-if="selectedServerId && !mapLoading && !mapJsonRaw">
-          <el-empty description="此服务器暂无地图">
-            <template #extra>
-              <el-button type="primary" size="small" @click="createBlankMap">新建空白地图</el-button>
-            </template>
-          </el-empty>
         </div>
       </div>
 
@@ -283,8 +296,10 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Grid, MapLocation, User, Loading } from '@element-plus/icons-vue'
+import { Grid, MapLocation, User, Loading, VideoPlay, VideoPause, DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
 import apiClient from '@/api'
+import { activeGroupId, hasRole } from '@/store/user'
+import { settings } from '@/store/settings'
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -296,7 +311,7 @@ const layout = ref('left')       // 'left' | 'split' | 'right'
 const editMode = ref(false)
 const connectMode = ref(false)
 const connectSourceKey = ref(null)
-const showOfflinePlayers = ref(true)
+const showOfflinePlayers = ref(false)
 const saving = ref(false)
 const mapLoading = ref(false)
 const dirty = ref(false)
@@ -327,11 +342,13 @@ const hoverCoord = reactive({ x: 0, z: 0 })
 const players = ref([])
 const selectedPlayerName = ref(null)
 const trajectory = ref([])
+const playerSessions = ref([])         // [{login: ms, logout: ms|null}] sorted by login
 const trajectoryFromTime = ref(null)   // ISO string for 'since' query param
 const playerRefreshTimer = ref(null)
 
-// Avatars (uuid -> HTMLImageElement)
+// Avatars (uuid -> HTMLImageElement) and avatar URLs (uuid -> string for template)
 const avatarCache = reactive({})
+const avatarUrlCache = reactive({})
 
 // Playback
 const playbackPlaying = ref(false)
@@ -359,6 +376,24 @@ const mouse = reactive({
 
 // RAF scheduling
 let rafId = null
+
+// Cached canvas context (reset on each setupCanvas call)
+let canvasCtx = null
+
+// Cached timestamp formatter
+let _fmtTsFormatter = null
+let _fmtTsTz = null
+
+// Default RMP node type for new station nodes
+const DEFAULT_NODE_TYPE = 'shmetro-basic'
+
+// Touch state
+let touchLastDist = 0
+let touchLongPressTimer = null
+
+// Previous server/dim for cancel-restore on dirty prompt
+let _prevServerId = null
+let _prevDim = 'nether'
 
 // ─── Computed ─────────────────────────────────────────────────────────────────
 
@@ -461,17 +496,55 @@ const playbackPosition = computed(() => {
   return { x: p1.x + (p2.x - p1.x) * frac, z: p1.z + (p2.z - p1.z) * frac, dim: p1.dim }
 })
 
-/** Two-way writable: progress in [0, 100] ↔ playbackCurrentTs */
+/** Total online milliseconds across all sessions (for virtual timeline) */
+const totalOnlineMs = computed(() => {
+  const sessions = playerSessions.value
+  if (!sessions.length) return playbackEndTs.value - playbackStartTs.value
+  const endFallback = playbackEndTs.value
+  return sessions.reduce((acc, s) => acc + Math.max(0, (s.logout ?? endFallback) - s.login), 0)
+})
+
+/** Map a real timestamp → virtual ms offset (summing only online time before it) */
+function realToVirtual(realTs) {
+  const sessions = playerSessions.value
+  if (!sessions.length) return realTs - playbackStartTs.value
+  const endFallback = playbackEndTs.value
+  let acc = 0
+  for (const s of sessions) {
+    const hi = s.logout ?? endFallback
+    if (realTs <= s.login) return acc
+    if (realTs <= hi) return acc + (realTs - s.login)
+    acc += hi - s.login
+  }
+  return acc
+}
+
+/** Map a virtual ms offset → real timestamp */
+function virtualToReal(v) {
+  const sessions = playerSessions.value
+  if (!sessions.length) return playbackStartTs.value + v
+  const endFallback = playbackEndTs.value
+  let acc = 0
+  for (const s of sessions) {
+    const hi = s.logout ?? endFallback
+    const dur = Math.max(0, hi - s.login)
+    if (v <= acc + dur) return s.login + (v - acc)
+    acc += dur
+  }
+  const last = sessions[sessions.length - 1]
+  return last.logout ?? endFallback
+}
+
+/** Two-way writable: progress in [0, 100] ↔ playbackCurrentTs (via virtual timeline) */
 const playbackProgressModel = computed({
   get: () => {
-    const dur = playbackEndTs.value - playbackStartTs.value
-    if (!dur) return 0
-    return Math.max(0, Math.min(100,
-      (playbackCurrentTs.value - playbackStartTs.value) / dur * 100))
+    const total = totalOnlineMs.value
+    if (!total) return 0
+    return Math.max(0, Math.min(100, realToVirtual(playbackCurrentTs.value) / total * 100))
   },
   set: (pct) => {
-    const dur = playbackEndTs.value - playbackStartTs.value
-    playbackCurrentTs.value = playbackStartTs.value + dur * Math.max(0, Math.min(100, pct)) / 100
+    const total = totalOnlineMs.value
+    playbackCurrentTs.value = virtualToReal(total * Math.max(0, Math.min(100, pct)) / 100)
     if (playbackLockCamera.value && playbackPosition.value) {
       const { mx, mz } = playerToMap(playbackPosition.value.x, playbackPosition.value.z, playbackPosition.value.dim)
       view.cx = mx; view.cz = mz
@@ -482,19 +555,17 @@ const playbackProgressModel = computed({
 
 function fmtTs(ts) {
   if (!ts) return '--:--:--'
-  const d = new Date(ts)
-  const H = String(d.getHours()).padStart(2, '0')
-  const M = String(d.getMinutes()).padStart(2, '0')
-  const S = String(d.getSeconds()).padStart(2, '0')
-  const startDay = playbackStartTs.value ? new Date(playbackStartTs.value).toDateString() : null
-  const endDay   = playbackEndTs.value   ? new Date(playbackEndTs.value).toDateString()   : null
-  if (startDay && endDay && startDay !== endDay) {
-    // span multiple days: prefix with MM-DD
-    const mon = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    return `${mon}-${day} ${H}:${M}:${S}`
+  const tz = settings.timezone || 'Asia/Shanghai'
+  if (!_fmtTsFormatter || _fmtTsTz !== tz) {
+    _fmtTsFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, hourCycle: 'h23',
+      month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    })
+    _fmtTsTz = tz
   }
-  return `${H}:${M}:${S}`
+  const parts = Object.fromEntries(_fmtTsFormatter.formatToParts(new Date(ts)).map(p => [p.type, p.value]))
+  return `${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`
 }
 
 const playbackTimeDisplay = computed(() => {
@@ -502,7 +573,50 @@ const playbackTimeDisplay = computed(() => {
   return `${fmtTs(playbackCurrentTs.value)} / ${fmtTs(playbackEndTs.value)}`
 })
 
+const selectedPlayerUuid = computed(() =>
+  players.value.find(p => p.player_name === selectedPlayerName.value)?.uuid ?? null
+)
+
+const selectedPlayerAvatar = computed(() =>
+  selectedPlayerUuid.value ? (avatarUrlCache[selectedPlayerUuid.value] ?? null) : null
+)
+
+const playbackPosInfo = computed(() => {
+  const pos = playbackPosition.value
+  if (!pos) return null
+  const d = String(pos.dim ?? '')
+  const isNether = d === 'minecraft:the_nether' || d === '-1'
+  const isEnd = d === 'minecraft:the_end' || d === '1'
+  let dimLabel, color
+  if (isEnd)        { dimLabel = '末地'; color = '#8b5cf6' }
+  else if (isNether){ dimLabel = '下界'; color = '#ef4444' }
+  else              { dimLabel = '主世界'; color = '#22c55e' }
+  const { mx, mz } = playerToMap(pos.x, pos.z, pos.dim)
+  let nearestNode = null, minDist = Infinity
+  for (const node of parsedNodes.value) {
+    if (!node.visible || node.isVirtual) continue
+    const dist = Math.hypot(mx - node.x, mz - node.z)
+    if (dist < minDist) { minDist = dist; nearestNode = node }
+  }
+  return {
+    x: Math.round(pos.x), z: Math.round(pos.z),
+    dimLabel, color,
+    nearestName: nearestNode?.name ?? null,
+    nearestDist: nearestNode ? Math.round(minDist) : null,
+  }
+})
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Per-dimension trajectory color. alpha < 1 for faint background version. */
+function dimTrajectoryColor(dim, alpha = 1) {
+  const d = String(dim ?? '')
+  const isNether = d === 'minecraft:the_nether' || d === '-1'
+  const isEnd = d === 'minecraft:the_end' || d === '1'
+  if (isEnd)    return alpha < 1 ? `rgba(139,92,246,${alpha})` : '#8b5cf6'
+  if (isNether) return alpha < 1 ? `rgba(239,68,68,${alpha})`  : '#ef4444'
+  return alpha < 1 ? `rgba(34,197,94,${alpha})` : '#22c55e'  // overworld
+}
 
 function extractNodeName(rawNode) {
   const type = rawNode.attributes?.type
@@ -573,17 +687,16 @@ function setupCanvas() {
   canvas.style.height = `${h}px`
   view.cssW = w
   view.cssH = h
-  const ctx = canvas.getContext('2d')
-  ctx.scale(dpr, dpr)
+  canvasCtx = canvas.getContext('2d')
+  canvasCtx.scale(dpr, dpr)
   scheduleRender()
 }
 
 // ─── Canvas Rendering ─────────────────────────────────────────────────────────
 
 function render() {
-  const canvas = mapCanvas.value
-  if (!canvas) return
-  const ctx = canvas.getContext('2d')
+  const ctx = canvasCtx
+  if (!ctx) return
   ctx.clearRect(0, 0, view.cssW, view.cssH)
 
   drawGrid(ctx)
@@ -707,63 +820,61 @@ function drawNodes(ctx) {
 
 function drawTrajectory(ctx) {
   if (!trajectory.value.length) return
-  const currentMapDim = activeDim.value === 'end' ? 'end' : 'nether'
+  const pts = trajectory.value
   const hasPlayback = playbackEndTs.value > playbackStartTs.value
 
-  // Full path (faint background when playback is available)
-  ctx.lineWidth = 1.5
-  ctx.setLineDash([5, 4])
-  let lastDim = null, started = false
-  ctx.beginPath()
-  for (let i = 0; i < trajectory.value.length; i++) {
-    const pt = trajectory.value[i]
-    const { mx, mz, mapDim } = playerToMap(pt.x, pt.z, pt.dim)
-    if (mapDim !== currentMapDim) { started = false; continue }
-    const [sx, sy] = w2c(mx, mz)
-    if (!started || mapDim !== lastDim) { ctx.moveTo(sx, sy); started = true }
-    else ctx.lineTo(sx, sy)
-    lastDim = mapDim
+  // Helper: draw consecutive same-dim segments with dim-based colors
+  function drawTrajSegments(maxIdx, alpha, lw) {
+    const currentMapDim = activeDim.value === 'end' ? 'end' : 'nether'
+    let segDim = null, pathOpen = false
+    for (let i = 0; i <= maxIdx; i++) {
+      const pt = pts[i]
+      const { mx, mz, mapDim } = playerToMap(pt.x, pt.z, pt.dim)
+      if (mapDim !== currentMapDim) {
+        if (pathOpen) { ctx.strokeStyle = dimTrajectoryColor(segDim, alpha); ctx.lineWidth = lw; ctx.stroke(); pathOpen = false }
+        continue
+      }
+      const [sx, sy] = w2c(mx, mz)
+      if (!pathOpen || pt.dim !== segDim) {
+        if (pathOpen) { ctx.strokeStyle = dimTrajectoryColor(segDim, alpha); ctx.lineWidth = lw; ctx.stroke() }
+        ctx.beginPath(); ctx.moveTo(sx, sy); pathOpen = true; segDim = pt.dim
+      } else {
+        ctx.lineTo(sx, sy)
+      }
+    }
+    if (pathOpen) { ctx.strokeStyle = dimTrajectoryColor(segDim, alpha); ctx.lineWidth = lw; ctx.stroke() }
   }
-  ctx.strokeStyle = hasPlayback ? 'rgba(99,102,241,0.25)' : '#6366f1'
-  ctx.stroke()
+
+  // Full path (dashed, faint when playback active)
+  ctx.setLineDash([5, 4])
+  drawTrajSegments(pts.length - 1, hasPlayback ? 0.25 : 1, 1.5)
   ctx.setLineDash([])
 
   if (!hasPlayback) {
-    // Static: dot at last point
-    const last = trajectory.value[trajectory.value.length - 1]
+    // Static mode: dot at last point
+    const last = pts[pts.length - 1]
     const { mx, mz, mapDim } = playerToMap(last.x, last.z, last.dim)
+    const currentMapDim = activeDim.value === 'end' ? 'end' : 'nether'
     if (mapDim === currentMapDim) {
       const [sx, sy] = w2c(mx, mz)
       ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI * 2)
-      ctx.fillStyle = '#6366f1'; ctx.fill()
+      ctx.fillStyle = dimTrajectoryColor(last.dim); ctx.fill()
     }
     return
   }
 
-  // Played portion (solid, up to current playback index)
-  const upTo = playbackIdx.value
-  ctx.lineWidth = 2
-  started = false; lastDim = null
-  ctx.beginPath()
-  for (let i = 0; i <= upTo; i++) {
-    const pt = trajectory.value[i]
-    const { mx, mz, mapDim } = playerToMap(pt.x, pt.z, pt.dim)
-    if (mapDim !== currentMapDim) { started = false; continue }
-    const [sx, sy] = w2c(mx, mz)
-    if (!started || mapDim !== lastDim) { ctx.moveTo(sx, sy); started = true }
-    else ctx.lineTo(sx, sy)
-    lastDim = mapDim
-  }
-  ctx.strokeStyle = '#6366f1'; ctx.stroke()
+  // Played portion (solid, up to playback index)
+  drawTrajSegments(playbackIdx.value, 1, 2)
 
-  // Playback head marker at interpolated position
+  // Playback head marker
   const pos = playbackPosition.value
   if (pos) {
     const { mx, mz, mapDim } = playerToMap(pos.x, pos.z, pos.dim)
+    const currentMapDim = activeDim.value === 'end' ? 'end' : 'nether'
     if (mapDim === currentMapDim) {
       const [sx, sy] = w2c(mx, mz)
       ctx.beginPath(); ctx.arc(sx, sy, 7, 0, Math.PI * 2)
-      ctx.fillStyle = '#6366f1'; ctx.fill()
+      ctx.fillStyle = dimTrajectoryColor(pos.dim); ctx.fill()
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke()
     }
   }
@@ -1060,7 +1171,155 @@ function evCoords(e) {
   return { cx: e.clientX - rect.left, cy: e.clientY - rect.top }
 }
 
-// ─── Keyboard ─────────────────────────────────────────────────────────────────
+// ─── Touch Events ─────────────────────────────────────────────────────────────
+
+function evCoordsTouch(touch) {
+  const rect = mapCanvas.value.getBoundingClientRect()
+  return { cx: touch.clientX - rect.left, cy: touch.clientY - rect.top }
+}
+
+function touchDist(t1, t2) {
+  return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY)
+}
+
+function touchMid(t1, t2) {
+  const rect = mapCanvas.value.getBoundingClientRect()
+  return {
+    midX: (t1.clientX + t2.clientX) / 2 - rect.left,
+    midY: (t1.clientY + t2.clientY) / 2 - rect.top,
+  }
+}
+
+function clearTouchLongPress() {
+  if (touchLongPressTimer) { clearTimeout(touchLongPressTimer); touchLongPressTimer = null }
+}
+
+function onTouchStart(e) {
+  if (e.touches.length === 1) {
+    const { cx, cy } = evCoordsTouch(e.touches[0])
+    mouse.isDown = true
+    mouse.lastX = cx; mouse.lastY = cy
+    mouse.startX = cx; mouse.startY = cy; mouse.hasMoved = false
+    mouse.dragNodeKey = null
+
+    if (editMode.value && !connectMode.value) {
+      const node = hitTestNode(cx, cy)
+      if (node) mouse.dragNodeKey = node.key
+    }
+
+    // Long press (600 ms) replaces double-click for adding nodes on touch
+    touchLongPressTimer = setTimeout(() => {
+      if (!mouse.hasMoved && editMode.value && !connectMode.value) {
+        if (!hitTestNode(cx, cy)) {
+          const [wx, wz] = c2w(cx, cy)
+          addNode(wx, wz, addVirtualMode.value ? 'virtual' : 'station')
+        }
+      }
+    }, 600)
+
+  } else if (e.touches.length === 2) {
+    clearTouchLongPress()
+    mouse.isDown = false; mouse.dragNodeKey = null
+    touchLastDist = touchDist(e.touches[0], e.touches[1])
+    const { midX, midY } = touchMid(e.touches[0], e.touches[1])
+    mouse.lastX = midX; mouse.lastY = midY
+  }
+}
+
+function onTouchMove(e) {
+  if (e.touches.length === 1) {
+    const { cx, cy } = evCoordsTouch(e.touches[0])
+    if (Math.abs(cx - mouse.startX) > 5 || Math.abs(cy - mouse.startY) > 5) {
+      if (!mouse.hasMoved) { mouse.hasMoved = true; clearTouchLongPress() }
+    }
+    if (!mouse.isDown) return
+    const dx = cx - mouse.lastX, dy = cy - mouse.lastY
+
+    if (editMode.value && mouse.dragNodeKey) {
+      const rawNode = mapJsonRaw.value?.graph?.nodes?.find(n => n.key === mouse.dragNodeKey)
+      if (rawNode) {
+        rawNode.attributes.x += dx / view.scale
+        rawNode.attributes.y += dy / view.scale
+        dirty.value = true
+      }
+    } else {
+      view.cx -= dx / view.scale
+      view.cz -= dy / view.scale
+    }
+    mouse.lastX = cx; mouse.lastY = cy
+    scheduleRender()
+
+  } else if (e.touches.length === 2) {
+    const { midX, midY } = touchMid(e.touches[0], e.touches[1])
+    const dist = touchDist(e.touches[0], e.touches[1])
+
+    // Pinch-to-zoom around the midpoint
+    if (touchLastDist > 0) {
+      const factor = dist / touchLastDist
+      const [wx, wz] = c2w(midX, midY)
+      view.scale = Math.max(0.015, Math.min(80, view.scale * factor))
+      view.cx = wx - (midX - view.cssW / 2) / view.scale
+      view.cz = wz - (midY - view.cssH / 2) / view.scale
+    }
+    touchLastDist = dist
+
+    // Two-finger pan
+    const dmx = midX - mouse.lastX, dmy = midY - mouse.lastY
+    view.cx -= dmx / view.scale
+    view.cz -= dmy / view.scale
+    mouse.lastX = midX; mouse.lastY = midY
+    scheduleRender()
+  }
+}
+
+function onTouchEnd(e) {
+  clearTouchLongPress()
+  touchLastDist = 0
+
+  if (!mouse.hasMoved && e.changedTouches.length > 0) {
+    const { cx, cy } = evCoordsTouch(e.changedTouches[0])
+
+    if (connectMode.value) {
+      // Tap in connect mode (mirrors onCanvasClick)
+      const node = hitTestNode(cx, cy)
+      if (!connectSourceKey.value) {
+        if (node) { connectSourceKey.value = node.key; selectedNodeKey.value = node.key }
+      } else {
+        if (node && node.key !== connectSourceKey.value) {
+          addEdge(connectSourceKey.value, node.key)
+          connectSourceKey.value = null; connectMode.value = false; selectedNodeKey.value = null
+        } else if (!node) {
+          const edge = hitTestEdge(cx, cy, 12)
+          if (edge) connectToEdge(connectSourceKey.value, edge)
+        }
+      }
+    } else if (editMode.value) {
+      // Tap in edit mode (mirrors onMouseUp)
+      if (mouse.dragNodeKey) {
+        if (selectedNodeKey.value === mouse.dragNodeKey) {
+          startNodeEdit(mouse.dragNodeKey)
+        } else {
+          selectedNodeKey.value = mouse.dragNodeKey
+          selectedEdgeKey.value = null
+        }
+      } else {
+        const edge = hitTestEdge(cx, cy)
+        if (edge) {
+          selectedEdgeKey.value = edge.key; selectedNodeKey.value = null
+        } else {
+          selectedNodeKey.value = null; selectedEdgeKey.value = null
+        }
+      }
+    } else {
+      // View mode: tap on player
+      const player = hitTestPlayer(cx, cy)
+      if (player) onPlayerClick(player)
+    }
+  }
+
+  mouse.isDown = false; mouse.dragNodeKey = null
+  scheduleRender()
+}
 
 function onKeyDown(e) {
   if (e.key === 'Escape') {
@@ -1093,8 +1352,8 @@ function addNode(wx, wz, type = 'station') {
       key,
       attributes: {
         visible: true, zIndex: 0, x: wx, y: wz,
-        type: 'shmetro-basic',
-        'shmetro-basic': { names: ['新节点'], nameOffsetX: 'middle', nameOffsetY: 'top' },
+        type: DEFAULT_NODE_TYPE,
+        [DEFAULT_NODE_TYPE]: { names: ['新节点'], nameOffsetX: 'middle', nameOffsetY: 'top' },
       },
     })
     dirty.value = true
@@ -1204,8 +1463,16 @@ function onEditModeChange(val) {
 async function loadServers() {
   serversLoading.value = true
   try {
-    const { data } = await apiClient.get('/api/servers')
-    servers.value = data
+    const headers = activeGroupId.value ? { 'X-Active-Group-Id': activeGroupId.value } : {}
+    const { data } = await apiClient.get('/api/servers', { headers })
+    servers.value = data.map(s => {
+      let mapMeta = {}
+      try { mapMeta = typeof s.map === 'string' ? JSON.parse(s.map) : (s.map || {}) } catch {}
+      const available_dims = []
+      if (mapMeta.nether_json) available_dims.push('nether')
+      if (mapMeta.end_json)    available_dims.push('end')
+      return { ...s, available_dims }
+    })
   } catch (e) {
     ElMessage.error('加载服务器列表失败')
   } finally {
@@ -1267,17 +1534,24 @@ async function loadTrajectory(playerName) {
   try {
     const params = {}
     if (trajectoryFromTime.value) params.since = trajectoryFromTime.value
-    const { data } = await apiClient.get(
-      `/api/tools/world-map/${selectedServerId.value}/trajectory/${encodeURIComponent(playerName)}`,
-      { params }
-    )
+    const base = `/api/tools/world-map/${selectedServerId.value}`
+    const enc = encodeURIComponent(playerName)
+    const [{ data }, { data: sessData }] = await Promise.all([
+      apiClient.get(`${base}/trajectory/${enc}`, { params }),
+      apiClient.get(`${base}/sessions/${enc}`, { params }),
+    ])
     trajectory.value = data
+    playerSessions.value = (sessData || []).map(s => ({
+      login:  s.login  ? new Date(s.login).getTime()  : 0,
+      logout: s.logout ? new Date(s.logout).getTime() : null,
+    }))
     if (data.length > 0 && data[0].ts) {
       playbackCurrentTs.value = new Date(data[0].ts).getTime()
     }
     scheduleRender()
   } catch {
     trajectory.value = []
+    playerSessions.value = []
   }
 }
 
@@ -1289,14 +1563,18 @@ function onTrajectoryFromTimeChange() {
 }
 
 function loadAvatar(uuid) {
+  const url1 = `https://mc-heads.net/avatar/${uuid}/32`
+  avatarUrlCache[uuid] = url1
   const img = new Image()
   img.crossOrigin = 'anonymous'
-  img.src = `https://mc-heads.net/avatar/${uuid}/32`
+  img.src = url1
   img.onload = () => { avatarCache[uuid] = img; scheduleRender() }
   img.onerror = () => {
+    const url2 = `https://crafatar.com/avatars/${uuid}?size=32&overlay`
+    avatarUrlCache[uuid] = url2
     const img2 = new Image()
     img2.crossOrigin = 'anonymous'
-    img2.src = `https://crafatar.com/avatars/${uuid}?size=32&overlay`
+    img2.src = url2
     img2.onload = () => { avatarCache[uuid] = img2; scheduleRender() }
   }
 }
@@ -1314,34 +1592,16 @@ async function saveMap() {
     )
     dirty.value = false
     ElMessage.success('地图已保存')
+    // update local available_dims so dim toggle reflects new state immediately
+    const srv = servers.value.find(s => s.id === selectedServerId.value)
+    if (srv && !srv.available_dims.includes(activeDim.value)) {
+      srv.available_dims = [...srv.available_dims, activeDim.value]
+    }
   } catch (e) {
     ElMessage.error(`保存失败: ${e.response?.data?.detail || e.message}`)
   } finally {
     saving.value = false
   }
-}
-
-function downloadJson() {
-  if (!mapJsonRaw.value) return
-  const blob = new Blob([JSON.stringify(mapJsonRaw.value, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${activeDim.value === 'end' ? 'the_end' : 'the_nether'}.json`
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-async function openInRmp() {
-  if (!mapJsonRaw.value) return
-  const jsonStr = JSON.stringify(mapJsonRaw.value)
-  try {
-    await navigator.clipboard.writeText(jsonStr)
-    ElMessage.success('JSON 已复制到剪贴板，请在 RMP 中使用 Import → Paste JSON 导入', { duration: 5000 })
-  } catch {
-    ElMessage.warning('无法自动复制，请手动下载 JSON 后导入 RMP')
-  }
-  window.open('https://railmapgen.gitlab.io/?app=rmp', '_blank')
 }
 
 async function saveBluemapUrl() {
@@ -1375,10 +1635,25 @@ function clearTrajectory() {
   playbackStop()
   selectedPlayerName.value = null
   trajectory.value = []
+  playerSessions.value = []
   scheduleRender()
 }
 
 // ─── Playback Controls ────────────────────────────────────────────────────────
+
+/** Given a virtual timestamp, return the same ts if it falls within a session,
+ *  or jump to the start of the next session. Returns null if past all sessions. */
+function nextOnlineTs(ts) {
+  const sessions = playerSessions.value
+  if (!sessions.length) return ts   // no session data → don't skip
+  const now = Date.now()
+  for (const s of sessions) {
+    const hi = s.logout ?? now
+    if (ts >= s.login && ts <= hi) return ts  // inside this session
+    if (s.login > ts) return s.login          // jump to next session
+  }
+  return null  // past all sessions
+}
 
 function playbackToggle() {
   if (!trajectory.value.length || playbackEndTs.value <= playbackStartTs.value) return
@@ -1414,6 +1689,14 @@ function playbackTick(now) {
     scheduleRender()
     return
   }
+  const adjusted = nextOnlineTs(playbackCurrentTs.value)
+  if (adjusted === null) {
+    playbackCurrentTs.value = playbackEndTs.value
+    playbackStop()
+    scheduleRender()
+    return
+  }
+  playbackCurrentTs.value = adjusted
   if (playbackLockCamera.value && playbackPosition.value) {
     const { mx, mz } = playerToMap(playbackPosition.value.x, playbackPosition.value.z, playbackPosition.value.dim)
     view.cx = mx; view.cz = mz
@@ -1452,16 +1735,37 @@ function fitView() {
 
 // ─── Event Handlers ───────────────────────────────────────────────────────────
 
-function onServerChange() {
+async function onServerChange() {
+  if (dirty.value) {
+    try {
+      await ElMessageBox.confirm('有未保存的地图修改，切换服务器后将丢失，是否继续？', '未保存更改', {
+        confirmButtonText: '继续切换', cancelButtonText: '取消', type: 'warning',
+      })
+    } catch {
+      selectedServerId.value = _prevServerId
+      return
+    }
+  }
+  _prevServerId = selectedServerId.value
   mapJsonRaw.value = null; players.value = []; trajectory.value = []
   selectedPlayerName.value = null; selectedNodeKey.value = null
   selectedEdgeKey.value = null; editMode.value = false; dirty.value = false
-  if (!currentServer.value?.available_dims?.includes(activeDim.value)) activeDim.value = 'nether'
   loadMapData(); loadPlayers(); loadConfig()
   startPlayerRefresh()
 }
 
-function onDimChange() {
+async function onDimChange() {
+  if (dirty.value) {
+    try {
+      await ElMessageBox.confirm('有未保存的地图修改，切换维度后将丢失，是否继续？', '未保存更改', {
+        confirmButtonText: '继续切换', cancelButtonText: '取消', type: 'warning',
+      })
+    } catch {
+      activeDim.value = _prevDim
+      return
+    }
+  }
+  _prevDim = activeDim.value
   selectedNodeKey.value = null; selectedEdgeKey.value = null
   dirty.value = false
   loadMapData()
@@ -1495,6 +1799,12 @@ onUnmounted(() => {
 // re-render on data changes
 watch([parsedNodes, parsedEdges, players, trajectory, selectedNodeKey, selectedEdgeKey,
   connectSourceKey, showOfflinePlayers, selectedPlayerName], scheduleRender, { deep: false })
+
+watch(activeGroupId, () => {
+  selectedServerId.value = null
+  mapJsonRaw.value = null
+  loadServers()
+})
 </script>
 
 <style scoped>
@@ -1618,10 +1928,37 @@ watch([parsedNodes, parsedEdges, players, trajectory, selectedNodeKey, selectedE
 .wm-playback-title {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 13px;
   font-weight: 500;
   margin-bottom: 4px;
+}
+.wm-playback-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  image-rendering: pixelated;
+}
+.wm-playback-avatar-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+  color: var(--el-text-color-secondary);
+}
+.wm-playback-name-block {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.wm-playback-coord {
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .wm-playback-time {
   margin-left: auto;
@@ -1663,9 +2000,9 @@ watch([parsedNodes, parsedEdges, players, trajectory, selectedNodeKey, selectedE
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
   background: rgba(248,249,252,0.7);
-  pointer-events: none;
 }
-.wm-canvas-loading { font-size: 28px; color: var(--el-color-primary); }
+.wm-canvas-loading { font-size: 28px; color: var(--el-color-primary); pointer-events: none; }
+.wm-canvas-empty   { pointer-events: auto; }
 
 /* BlueMap panel */
 .wm-bluemap-wrap {

@@ -349,7 +349,12 @@
               <span>Quick Backup Multi</span>
             </el-menu-item>
           </el-sub-menu>
-
+          <el-menu-item index="/tools/world-map" v-if="hasRole('USER')">
+              <el-icon>
+                <MapLocation/>
+              </el-icon>
+              <span>世界地图</span>
+            </el-menu-item>
           <!-- 工具箱 -->
           <el-sub-menu index="tools" v-if="hasRole('HELPER')">
             <template #title>
@@ -385,12 +390,7 @@
               </el-icon>
               <span>QQ机器人</span>
             </el-menu-item>
-            <el-menu-item index="/tools/world-map" v-if="hasRole('USER')">
-              <el-icon>
-                <MapLocation/>
-              </el-icon>
-              <span>世界地图</span>
-            </el-menu-item>
+            
             <el-menu-item index="/tools/litematica" v-if="hasRole('USER')">
               <el-icon>
                 <Printer/>
