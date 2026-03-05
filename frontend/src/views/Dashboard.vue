@@ -260,9 +260,31 @@ const goToConsole = (serverId: number) => {
   router.push(`/console/${serverId}`);
 };
 
+const startPolling = () => {
+  if (refreshInterval) return;
+  refreshInterval = setInterval(fetchDashboardData, 5000);
+};
+
+const stopPolling = () => {
+  if (refreshInterval) {
+    clearInterval(refreshInterval);
+    refreshInterval = null;
+  }
+};
+
+const handleVisibilityChange = () => {
+  if (document.hidden) {
+    stopPolling();
+  } else {
+    fetchDashboardData();
+    startPolling();
+  }
+};
+
 onMounted(() => {
   fetchDashboardData();
-  refreshInterval = setInterval(fetchDashboardData, 5000);
+  startPolling();
+  document.addEventListener('visibilitychange', handleVisibilityChange);
 });
 
 watch(activeGroupIds, () => {
@@ -270,9 +292,8 @@ watch(activeGroupIds, () => {
 }, { deep: true });
 
 onUnmounted(() => {
-  if (refreshInterval) {
-    clearInterval(refreshInterval);
-  }
+  stopPolling();
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
 </script>
 

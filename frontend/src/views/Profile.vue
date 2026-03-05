@@ -198,7 +198,8 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { useUserStore } from '@/store/user'
 import { storeToRefs } from 'pinia'
 import AvatarUploader from '@/components/AvatarUploader.vue'
-import apiClient, { bindApi } from '@/api'
+import apiClient from '@/api'
+import { bindApi } from '@/api/bind'
 const userStore = useUserStore()
 const user = userStore.user
 const { fullAvatarUrl } = storeToRefs(userStore)

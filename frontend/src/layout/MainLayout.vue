@@ -1,5 +1,12 @@
 <template>
   <el-container class="main-layout">
+    <!-- 背景动态光球 -->
+    <div class="bg-orbs" aria-hidden="true">
+      <span class="orb orb-1"></span>
+      <span class="orb orb-2"></span>
+      <span class="orb orb-3"></span>
+      <span class="orb orb-4"></span>
+    </div>
     <!-- 顶栏（跨全宽） -->
     <el-header class="app-header">
       <div class="header-left">
@@ -74,241 +81,31 @@
             :router="true"
             @select="handleMenuSelect"
         >
-          <!-- 基础功能 -->
-          <el-menu-item index="/dashboard" v-if="hasRole('GUEST')">
-            <el-icon>
-              <DataAnalysis/>
-            </el-icon>
-            <span>仪表盘</span>
-          </el-menu-item>
-          <el-menu-item index="/chat" v-if="hasRole('USER')">
-            <el-icon>
-              <ChatDotRound/>
-            </el-icon>
-            <span>聊天室</span>
-          </el-menu-item>
-          <el-menu-item index="/servers" v-if="hasRole('USER')">
-            <el-icon>
-              <Tickets/>
-            </el-icon>
-            <span>服务器列表</span>
-          </el-menu-item>
-          <el-menu-item index="/server-groups" v-if="isPlatformAdmin">
-            <el-icon>
-              <Link/>
-            </el-icon>
-            <span>服务器组列表</span>
-          </el-menu-item>
-
-          <!-- 服务器配置（已移动至工具前，保留此占位空白） -->
-
-
-          <!-- 插件管理 -->
-          <el-sub-menu index="plugin-management" v-if="hasRole('HELPER')">
-            <template #title>
-              <el-icon>
-                <Management/>
-              </el-icon>
-              <span>插件管理</span>
-            </template>
-            <el-menu-item index="/server-plugins" v-if="hasRole('HELPER')">
-              <el-icon>
-                <Cpu/>
-              </el-icon>
-              <span>服务器插件</span>
+          <template v-for="entry in visibleMenu" :key="entry.type === 'item' ? entry.path : entry.key">
+            <el-menu-item
+              v-if="entry.type === 'item'"
+              :index="entry.path"
+              :disabled="entry.disabled ?? false"
+            >
+              <el-icon><component :is="entry.icon" /></el-icon>
+              <span>{{ entry.label }}</span>
             </el-menu-item>
-            <el-menu-item index="/mcdr-plugin-explorer" v-if="hasRole('HELPER')">
-              <el-icon>
-                <Shop/>
-              </el-icon>
-              <span>联网插件库</span>
-            </el-menu-item>
-            <el-menu-item index="/db-plugin-manager" v-if="isPlatformAdmin">
-              <el-icon>
-                <Coin/>
-              </el-icon>
-              <span>数据库插件库</span>
-            </el-menu-item>
-          </el-sub-menu>
-
-          <!-- Mods 管理 -->
-          <el-menu-item index="/tools/mods-manager" v-if="capabilities.canManageMods">
-            <el-icon>
-              <Grid/>
-            </el-icon>
-            <span>Mods管理</span>
-          </el-menu-item>
-
-
-          <!-- 插件配置（原“服务器配置”）移动至工具前 -->
-          <el-sub-menu index="server-config" v-if="hasRole('HELPER')">
-            <template #title>
-              <el-icon>
-                <SetUp/>
-              </el-icon>
-              <span>插件配置</span>
-            </template>
-            <el-menu-item index="/server-config/via-version-config" v-if="hasRole('ADMIN')">
-              <el-icon>
-                <Connection/>
-              </el-icon>
-              <span>Via Version</span>
-            </el-menu-item>
-            <el-menu-item index="/server-config/velocity-proxy-config" v-if="hasRole('ADMIN')">
-              <el-icon>
-                <Link/>
-              </el-icon>
-              <span>Velocity Proxy</span>
-            </el-menu-item>
-            <el-menu-item index="/server-config/prime-backup-config" v-if="hasRole('HELPER')">
-              <el-icon>
-                <Umbrella/>
-              </el-icon>
-              <span>Prime Backup</span>
-            </el-menu-item>
-            <el-menu-item index="/server-config/auto-plugin-reloader-config" v-if="hasRole('HELPER')">
-              <el-icon>
-                <Refresh/>
-              </el-icon>
-              <span>Auto Plugin Reloader</span>
-            </el-menu-item>
-            <el-menu-item index="/server-config/bili-live-helper-config" v-if="hasRole('HELPER')">
-              <el-icon>
-                <VideoPlay/>
-              </el-icon>
-              <span>Bili Live Helper</span>
-            </el-menu-item>
-            <el-menu-item index="/server-config/where-is-config" v-if="hasRole('HELPER')">
-              <el-icon>
-                <LocationInformation/>
-              </el-icon>
-              <span>Where Is</span>
-            </el-menu-item>
-            <el-menu-item index="/server-config/bot-loader" disabled v-if="hasRole('ADMIN')">
-              <el-icon>
-                <User/>
-              </el-icon>
-              <span>Bot Loader</span>
-            </el-menu-item>
-            <el-menu-item index="/server-config/command-set" disabled v-if="hasRole('ADMIN')">
-              <el-icon>
-                <List/>
-              </el-icon>
-              <span>Command Set</span>
-            </el-menu-item>
-            <el-menu-item index="/server-config/crash-restart-config" v-if="hasRole('HELPER')">
-              <el-icon>
-                <RefreshRight/>
-              </el-icon>
-              <span>Crash Restart</span>
-            </el-menu-item>
-            <el-menu-item index="/server-config/join-motd-config" v-if="hasRole('ADMIN')">
-              <el-icon>
-                <Comment/>
-              </el-icon>
-              <span>joinMOTD</span>
-            </el-menu-item>
-            <el-menu-item index="/server-config/quick-backup-multi-config" v-if="hasRole('HELPER')">
-              <el-icon>
-                <DocumentCopy/>
-              </el-icon>
-              <span>Quick Backup Multi</span>
-            </el-menu-item>
-          </el-sub-menu>
-          <el-menu-item index="/tools/world-map" v-if="hasRole('USER')">
-              <el-icon>
-                <MapLocation/>
-              </el-icon>
-              <span>世界地图</span>
-            </el-menu-item>
-          <!-- 工具箱 -->
-          <el-sub-menu index="tools" v-if="hasRole('HELPER')">
-            <template #title>
-              <el-icon>
-                <Operation/>
-              </el-icon>
-              <span>工具</span>
-            </template>
-            <el-menu-item index="/tools/prime-backup" v-if="hasRole('USER')">
-              <el-icon>
-                <Umbrella/>
-              </el-icon>
-              <span>Prime Backup</span>
-            </el-menu-item>
-
-            <!-- 存档管理 -->
-            <el-menu-item index="/tools/archives" v-if="hasRole('HELPER')">
-              <el-icon>
-                <Files/>
-              </el-icon>
-              <span>存档管理</span>
-            </el-menu-item>
-            <el-menu-item index="/tools/superflat" v-if="hasRole('USER')">
-              <el-icon>
-                <Grid/>
-              </el-icon>
-              <span>超平坦世界</span>
-            </el-menu-item>
-
-            <el-menu-item index="/tools/qq-bot" disabled v-if="hasRole('ADMIN')">
-              <el-icon>
-                <Promotion/>
-              </el-icon>
-              <span>QQ机器人</span>
-            </el-menu-item>
-            
-            <el-menu-item index="/tools/litematica" v-if="hasRole('USER')">
-              <el-icon>
-                <Printer/>
-              </el-icon>
-              <span>Litematica</span>
-            </el-menu-item>
-            <el-menu-item index="/tools/pcrc" disabled v-if="hasRole('USER')">
-              <el-icon>
-                <VideoCamera/>
-              </el-icon>
-              <span>PCRC</span>
-            </el-menu-item>
-          </el-sub-menu>
-
-          <!-- 系统功能 -->
-          <el-menu-item index="/statistics" v-if="hasRole('USER')">
-            <el-icon>
-              <TrendCharts/>
-            </el-icon>
-            <span>数据统计</span>
-          </el-menu-item>
-          <el-menu-item index="/players" v-if="isOwner">
-            <el-icon>
-              <User/>
-            </el-icon>
-            <span>玩家管理</span>
-          </el-menu-item>
-          <el-menu-item index="/users" v-if="isOwner">
-            <el-icon>
-              <User/>
-            </el-icon>
-            <span>用户管理</span>
-          </el-menu-item>
-          <el-menu-item index="/settings" v-if="isOwner">
-            <el-icon>
-              <Setting/>
-            </el-icon>
-            <span>设置</span>
-          </el-menu-item>
-          <el-menu-item index="/audit-log" v-if="isPlatformAdmin">
-            <el-icon>
-              <Tickets/>
-            </el-icon>
-            <span>审计日志</span>
-          </el-menu-item>
-          <el-menu-item index="/profile">
-            <el-icon>
-              <UserFilled/>
-            </el-icon>
-            <span>个人中心</span>
-          </el-menu-item>
-
+            <el-sub-menu v-else :index="entry.key">
+              <template #title>
+                <el-icon><component :is="entry.icon" /></el-icon>
+                <span>{{ entry.label }}</span>
+              </template>
+              <el-menu-item
+                v-for="child in entry.children"
+                :key="child.path"
+                :index="child.path"
+                :disabled="child.disabled ?? false"
+              >
+                <el-icon><component :is="child.icon" /></el-icon>
+                <span>{{ child.label }}</span>
+              </el-menu-item>
+            </el-sub-menu>
+          </template>
         </el-menu>
       </el-scrollbar>
     </el-aside>
@@ -340,16 +137,10 @@ import { isDark, toggleTheme } from '@/store/theme'
 import { useTasksStore } from '@/store/tasks'
 import { storeToRefs } from 'pinia'
 import type { Task } from '@/store/tasks'
-import {
-  UserFilled, Fold, Expand, DataAnalysis, Tickets, TrendCharts,
-  ChatDotRound, Setting, Files, Management, Shop, Coin, VideoCamera,
-  Cpu, Grid, Umbrella, Promotion, MapLocation, Connection, User, Printer,
-  SetUp, Link, Refresh, VideoPlay,
-  LocationInformation, List, RefreshRight, Comment, DocumentCopy,
-  Moon, Sunny
-} from '@element-plus/icons-vue';
+import { UserFilled, Fold, Expand, Moon, Sunny } from '@element-plus/icons-vue';
 import { ElNotification } from 'element-plus'
 import { cancelPendingRequests } from '@/api'
+import { SIDEBAR_MENU, type MenuLeaf, type MenuGroup } from '@/menu'
 import TasksDropdown from './TasksDropdown.vue'
 import TransfersDropdown from './TransfersDropdown.vue'
 
@@ -362,8 +153,25 @@ const toggleCollapse = uiStore.toggleAside
 
 const userStore = useUserStore()
 const user = userStore.user
-const { fullAvatarUrl, activeGroupIds, capabilities, isPlatformAdmin, isOwner } = storeToRefs(userStore)
+const { fullAvatarUrl, activeGroupIds, isPlatformAdmin, isOwner } = storeToRefs(userStore)
 const { fetchUser, clearUser, hasRole } = userStore
+
+const isItemVisible = (item: MenuLeaf): boolean => {
+  if (item.requiresOwner && !isOwner.value) return false
+  if (item.requiresPlatformAdmin && !isPlatformAdmin.value) return false
+  if (item.requiredRole && !hasRole(item.requiredRole)) return false
+  return true
+}
+
+const visibleMenu = computed(() => {
+  return SIDEBAR_MENU.flatMap((entry): Array<MenuLeaf | MenuGroup> => {
+    if (entry.type === 'item') return isItemVisible(entry) ? [entry] : []
+    const children = entry.children.filter(isItemVisible)
+    if (children.length === 0) return []
+    const groupVisible = !entry.requiredRole || hasRole(entry.requiredRole)
+    return groupVisible ? [{ ...entry, children }] : []
+  })
+})
 
 const tasksStore = useTasksStore()
 const { fetchTasks, connectTasksSocket, disconnectTasksSocket, onTaskEvent } = tasksStore
@@ -562,66 +370,354 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 浅色布局样式（搭配全局主题变量） */
+/* ─── 背景动态光球层 ─────────────────────────────────────── */
+.bg-orbs {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.45;
+  will-change: transform, opacity;
+}
+
+.orb-1 {
+  width: 520px; height: 520px;
+  background: radial-gradient(circle, rgba(119,181,254,0.7), rgba(119,181,254,0) 70%);
+  top: -160px; left: -100px;
+  animation: orb-drift-1 18s ease-in-out infinite;
+}
+.orb-2 {
+  width: 420px; height: 420px;
+  background: radial-gradient(circle, rgba(239,183,186,0.65), rgba(239,183,186,0) 70%);
+  top: -80px; right: -80px;
+  animation: orb-drift-2 22s ease-in-out infinite;
+}
+.orb-3 {
+  width: 340px; height: 340px;
+  background: radial-gradient(circle, rgba(149,117,205,0.4), rgba(149,117,205,0) 70%);
+  bottom: 10%; left: 8%;
+  animation: orb-drift-3 26s ease-in-out infinite;
+}
+.orb-4 {
+  width: 280px; height: 280px;
+  background: radial-gradient(circle, rgba(64,201,198,0.35), rgba(64,201,198,0) 70%);
+  bottom: 5%; right: 12%;
+  animation: orb-drift-4 20s ease-in-out infinite;
+}
+
+@keyframes orb-drift-1 {
+  0%,100% { transform: translate(0, 0) scale(1); opacity: 0.45; }
+  33%      { transform: translate(60px, 40px) scale(1.08); opacity: 0.55; }
+  66%      { transform: translate(-30px, 70px) scale(0.94); opacity: 0.38; }
+}
+@keyframes orb-drift-2 {
+  0%,100% { transform: translate(0, 0) scale(1); opacity: 0.4; }
+  40%      { transform: translate(-50px, 55px) scale(1.1); opacity: 0.52; }
+  70%      { transform: translate(20px, -30px) scale(0.96); opacity: 0.36; }
+}
+@keyframes orb-drift-3 {
+  0%,100% { transform: translate(0, 0) scale(1); opacity: 0.3; }
+  45%      { transform: translate(40px, -45px) scale(1.12); opacity: 0.42; }
+  80%      { transform: translate(-20px, 25px) scale(0.92); opacity: 0.25; }
+}
+@keyframes orb-drift-4 {
+  0%,100% { transform: translate(0, 0) scale(1); opacity: 0.28; }
+  30%      { transform: translate(-35px, -40px) scale(1.06); opacity: 0.38; }
+  65%      { transform: translate(30px, 20px) scale(0.95); opacity: 0.22; }
+}
+
+/* ─── 布局骨架 ─────────────────────────────────────────── */
 .main-layout {
   height: 100vh;
+  position: relative;
 }
 
-.el-aside {
-  transition: width 0.28s var(--ease-standard);
-  overflow: hidden; /* 隐藏原生滚动条 */
-  display: flex;
-  flex-direction: column;
-  border-right: none; /* 去掉侧边分割线，更一体 */
+.content-wrapper {
+  background-color: transparent;
+  height: calc(100vh - var(--el-header-height));
+  position: relative;
+  z-index: 1;
 }
 
-.sidebar-logo {
-  height: 16px; /* 再次缩小顶部空白 */
-  flex-shrink: 0;
+/* ─── 顶栏 ─────────────────────────────────────────────── */
+.el-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  height: var(--el-header-height);
+  background: rgba(255,255,255,0.60) !important;
+  -webkit-backdrop-filter: saturate(200%) blur(20px);
+  backdrop-filter: saturate(200%) blur(20px);
+  border-bottom: none !important;
+  box-shadow:
+    0 1px 0 0 rgba(119,181,254,0.30),
+    0 4px 24px rgba(119,181,254,0.10),
+    inset 0 -1px 0 rgba(255,255,255,0.8);
+}
+
+:global(.dark) .el-header {
+  background: rgba(15,23,42,0.72) !important;
+  box-shadow:
+    0 1px 0 0 rgba(119,181,254,0.20),
+    0 4px 32px rgba(0,0,0,0.40),
+    inset 0 -1px 0 rgba(119,181,254,0.08);
+}
+
+/* 顶栏底部动态扫光线 */
+.el-header::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(119,181,254,0.6) 30%,
+    rgba(239,183,186,0.7) 55%,
+    rgba(149,117,205,0.5) 75%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: header-shimmer 6s linear infinite;
+}
+
+@keyframes header-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ─── Brand 品牌标题 ────────────────────────────────────── */
+.header-left { display: flex; align-items: center; height: var(--el-header-height); }
+.header-right { display: flex; align-items: center; }
+
+.brand {
+  margin-left: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: var(--el-header-height);
+  height: var(--el-header-height);
+  display: inline-flex;
+  align-items: center;
+  background: linear-gradient(135deg, #77B5FE 0%, #a78bfa 40%, #EFB7BA 80%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-size: 200% 200%;
+  animation: brand-gradient-shift 8s ease-in-out infinite;
+  filter: drop-shadow(0 0 8px rgba(119,181,254,0.45));
+  transition: filter 0.3s ease;
+}
+.brand:hover {
+  filter: drop-shadow(0 0 14px rgba(119,181,254,0.80));
+}
+
+@keyframes brand-gradient-shift {
+  0%,100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
+/* ─── 折叠按钮 ──────────────────────────────────────────── */
+.collapse-icon {
+  font-size: 22px;
+  cursor: pointer;
+  height: var(--el-header-height);
+  width: 40px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-text);
-  font-size: 14px;
-  font-weight: 600;
-  background: transparent;
-  border-bottom: none;
+  line-height: var(--el-header-height);
+  border-radius: 10px;
+  color: var(--color-text-secondary);
+  transition:
+    color 0.25s ease,
+    background 0.25s ease,
+    box-shadow 0.25s ease,
+    transform 0.3s cubic-bezier(.34,1.56,.64,1);
+}
+.collapse-icon:hover {
+  color: var(--brand-primary);
+  background: rgba(119,181,254,0.10);
+  box-shadow: 0 0 0 1px rgba(119,181,254,0.25), 0 0 12px rgba(119,181,254,0.20);
+  transform: scale(1.10);
+}
+.collapse-icon :deep(svg) { display: block; }
+
+/* ─── 主题切换按钮 ──────────────────────────────────────── */
+.theme-toggle {
+  margin-right: 8px;
+  border-radius: 50% !important;
+  transition: box-shadow 0.25s ease, transform 0.25s cubic-bezier(.34,1.56,.64,1) !important;
+}
+.theme-toggle:hover {
+  box-shadow: 0 0 0 1px rgba(119,181,254,0.3), 0 0 16px rgba(119,181,254,0.35) !important;
+  transform: rotate(20deg) scale(1.1) !important;
 }
 
-.sidebar-logo img {
-  width: 32px;
-  height: 32px;
-  margin-right: 12px;
+/* ─── 用户信息区 ────────────────────────────────────────── */
+.header-right .user-info {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 4px 10px 4px 4px;
+  border-radius: 24px;
+  transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+.header-right .user-info:hover {
+  background: rgba(119,181,254,0.08);
+  box-shadow: 0 0 0 1px rgba(119,181,254,0.20);
+}
+/* 头像辉光环 */
+.header-right .user-info :deep(.el-avatar) {
+  box-shadow: 0 0 0 2px rgba(119,181,254,0.4), 0 0 10px rgba(119,181,254,0.22);
+  transition: box-shadow 0.3s ease;
+}
+.header-right .user-info:hover :deep(.el-avatar) {
+  box-shadow: 0 0 0 2px rgba(119,181,254,0.7), 0 0 18px rgba(119,181,254,0.45);
+}
+.header-right .username {
+  margin-left: 10px;
+  font-weight: 500;
 }
 
+/* ─── 侧边栏 ────────────────────────────────────────────── */
+.el-aside {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-right: none;
+  position: relative;
+  z-index: 1;
+  background: rgba(255,255,255,0.42) !important;
+  -webkit-backdrop-filter: saturate(160%) blur(16px);
+  backdrop-filter: saturate(160%) blur(16px);
+  box-shadow:
+    1px 0 0 rgba(119,181,254,0.18),
+    4px 0 20px rgba(119,181,254,0.06);
+}
 
-/* 折叠动效：aside 宽度与文案淡入淡出（更Q弹） */
+:global(.dark) .el-aside {
+  background: rgba(15,23,42,0.55) !important;
+  box-shadow:
+    1px 0 0 rgba(119,181,254,0.12),
+    4px 0 24px rgba(0,0,0,0.35);
+}
+
+/* 侧边栏右侧动态辉光分割线 */
+.app-aside::after {
+  content: '';
+  position: absolute;
+  top: 0; right: 0;
+  width: 1px;
+  height: 100%;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(119,181,254,0.5) 30%,
+    rgba(239,183,186,0.45) 65%,
+    transparent 100%
+  );
+  background-size: 100% 300%;
+  animation: sidebar-shimmer 8s ease-in-out infinite;
+}
+
+@keyframes sidebar-shimmer {
+  0%,100% { background-position: 0 -200%; opacity: 0.6; }
+  50%      { background-position: 0 200%; opacity: 1; }
+}
+
 .app-aside {
   will-change: width;
   transform: translateZ(0);
   transition: width 0.32s cubic-bezier(.34,1.56,.64,1), box-shadow 0.32s var(--ease-standard);
 }
-.app-aside.is-collapsed .sidebar-logo span { opacity: 0; transform: translateY(-2px); pointer-events: none; }
 
-/* 菜单文本淡入淡出与位移（配合 Element Plus 折叠） */
-:deep(.el-sub-menu__title span),
-:deep(.el-menu-item span) {
-  transition: opacity 0.26s cubic-bezier(.34,1.56,.64,1) 0.04s, transform 0.26s cubic-bezier(.34,1.56,.64,1) 0.04s;
-  will-change: opacity, transform;
-}
-:deep(.el-menu--collapse .el-sub-menu__title span),
-:deep(.el-menu--collapse .el-menu-item span) {
-  /* 折叠态下文字应瞬间隐藏 */
-  display: none !important;
+/* ─── Logo区域 ──────────────────────────────────────────── */
+.sidebar-logo {
+  height: 16px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
 }
 
-/* 折叠触发瞬间隐藏文字（先隐藏，再执行宽度动画） */
-.app-aside.is-collapsing :deep(.el-sub-menu__title span),
-.app-aside.is-collapsing :deep(.el-menu-item span) {
-  display: none !important;
+/* ─── 菜单 ──────────────────────────────────────────────── */
+.el-menu { border-right: none; padding: 8px; }
+.el-scrollbar { height: 100%; }
+.app-aside :deep(.el-scrollbar__bar) { opacity: 0.9; }
+
+.el-menu-item,
+:deep(.el-sub-menu__title) {
+  height: 40px;
+  line-height: 40px;
+  border-radius: 10px !important;
+  margin-bottom: 2px;
+  transition:
+    background 0.22s ease,
+    color 0.22s ease,
+    box-shadow 0.22s ease,
+    transform 0.2s cubic-bezier(.34,1.56,.64,1) !important;
 }
 
-/* 展开中的子菜单在折叠时做“向上回收”动画（Q弹） */
+/* hover：左移 + 辉光描边 */
+:deep(.el-menu-item:hover),
+:deep(.el-sub-menu__title:hover) {
+  background: rgba(119,181,254,0.10) !important;
+  box-shadow: 0 0 0 1px rgba(119,181,254,0.15), inset 2px 0 0 rgba(119,181,254,0.4) !important;
+  transform: translateX(2px);
+}
+
+/* 激活：辉光光晕 + 渐变背景 + 左侧高亮条 */
+:deep(.el-menu-item.is-active) {
+  color: var(--brand-primary) !important;
+  background: linear-gradient(
+    90deg,
+    rgba(119,181,254,0.18) 0%,
+    rgba(119,181,254,0.06) 100%
+  ) !important;
+  box-shadow:
+    0 0 0 1px rgba(119,181,254,0.25),
+    inset 3px 0 0 var(--brand-primary),
+    0 4px 16px rgba(119,181,254,0.20) !important;
+}
+
+/* 激活图标脉冲辉光 */
+:deep(.el-menu-item.is-active .el-icon) {
+  color: var(--brand-primary);
+  animation: icon-pulse 3s ease-in-out infinite;
+}
+
+@keyframes icon-pulse {
+  0%,100% { filter: drop-shadow(0 0 4px rgba(119,181,254,0.5)); }
+  50%      { filter: drop-shadow(0 0 10px rgba(119,181,254,0.9)); }
+}
+
+/* 暗色激活态 */
+:global(.dark) :deep(.el-menu-item.is-active) {
+  background: linear-gradient(
+    90deg,
+    rgba(119,181,254,0.22) 0%,
+    rgba(119,181,254,0.06) 100%
+  ) !important;
+  box-shadow:
+    0 0 0 1px rgba(119,181,254,0.30),
+    inset 3px 0 0 var(--brand-primary),
+    0 4px 24px rgba(119,181,254,0.28) !important;
+}
+
+/* 子菜单折叠动画 */
 .app-aside :deep(.el-sub-menu.is-opened > .el-menu) {
   max-height: 800px;
   overflow: hidden;
@@ -629,133 +725,64 @@ onUnmounted(() => {
   will-change: max-height, transform, opacity;
 }
 .app-aside.is-collapsing :deep(.el-sub-menu.is-opened > .el-menu) {
-  /* 使用关键帧实现“向上回收 + 轻微回弹”效果 */
   animation: submenu-collapse-bounce 380ms cubic-bezier(.34,1.56,.64,1) forwards;
 }
 
 @keyframes submenu-collapse-bounce {
-  0% {
-    max-height: 800px;
-    opacity: 1;
-    transform: translateY(0) scaleY(1);
-  }
-  55% {
-    transform: translateY(-4px) scaleY(.98);
-  }
-  85% {
-    opacity: 0.12;
-    transform: translateY(-9px) scaleY(.94);
-  }
-  100% {
-    max-height: 0;
-    opacity: 0;
-    transform: translateY(-12px) scaleY(.92);
-  }
+  0%   { max-height: 800px; opacity: 1; transform: translateY(0) scaleY(1); }
+  55%  { transform: translateY(-4px) scaleY(.98); }
+  85%  { opacity: 0.12; transform: translateY(-9px) scaleY(.94); }
+  100% { max-height: 0; opacity: 0; transform: translateY(-12px) scaleY(.92); }
 }
 
-/* 展开动画：菜单与Logo轻微Q弹 */
+/* 菜单文字展开/折叠 */
+:deep(.el-sub-menu__title span),
+:deep(.el-menu-item span) {
+  transition: opacity 0.26s cubic-bezier(.34,1.56,.64,1) 0.04s, transform 0.26s cubic-bezier(.34,1.56,.64,1) 0.04s;
+  will-change: opacity, transform;
+}
+:deep(.el-menu--collapse .el-sub-menu__title span),
+:deep(.el-menu--collapse .el-menu-item span),
+.app-aside.is-collapsing :deep(.el-sub-menu__title span),
+.app-aside.is-collapsing :deep(.el-menu-item span) {
+  display: none !important;
+}
+
+/* 展开弹入动画 */
 @keyframes pop-in {
-  0% { transform: translateX(-8px) scale(.98); opacity: 0; }
-  60% { transform: translateX(3px) scale(1.02); opacity: 1; }
+  0%   { transform: translateX(-8px) scale(.98); opacity: 0; }
+  60%  { transform: translateX(3px) scale(1.02); opacity: 1; }
   100% { transform: translateX(0) scale(1); opacity: 1; }
 }
 .app-aside:not(.is-collapsed) .sidebar-logo span { animation: pop-in 360ms cubic-bezier(.34,1.56,.64,1); }
 :deep(.el-menu:not(.el-menu--collapse) .el-sub-menu__title span),
 :deep(.el-menu:not(.el-menu--collapse) .el-menu-item span) { animation: pop-in 360ms cubic-bezier(.34,1.56,.64,1); }
+.app-aside.is-collapsed .sidebar-logo span { opacity: 0; transform: translateY(-2px); pointer-events: none; }
 
-/* 折叠按钮轻微动效 */
-.collapse-icon { transition: transform 0.2s var(--ease-standard), color 0.2s var(--ease-standard); }
-.app-aside.is-collapsed ~ .content-wrapper .collapse-icon { transform: rotate(0deg); }
-
-.el-menu { border-right: none; padding: 8px; }
-
-/* Ensure scrollbar fills remaining space */
-.el-scrollbar {
-  height: 100%;
-}
-
-/* 侧边栏滚动条保持可见（便于定位当前位置） */
-.app-aside :deep(.el-scrollbar__bar) { opacity: 0.9; }
-
-.content-wrapper {
-  /* 让父级(main-layout)的统一渐变贯穿到主区域，避免与侧边栏分割处突兀 */
-  background-color: transparent;
-  height: calc(100vh - var(--el-header-height));
-}
-
-.el-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 20px;
-  height: var(--el-header-height);
-  background: transparent !important; /* 让渐变透过顶栏 */
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  border-bottom: none !important; /* 更一体 */
-}
-
-.header-left { display: flex; align-items: center; height: var(--el-header-height); }
-.header-right { display: flex; align-items: center; }
-.brand { margin-left: 8px; font-size: 18px; font-weight: 600; color: var(--color-text); line-height: var(--el-header-height); height: var(--el-header-height); display: inline-flex; align-items: center; transition: none; }
-
-.collapse-icon {
-  font-size: 22px;
-  cursor: pointer;
-  height: var(--el-header-height);
-  width: 40px; /* 稍加宽，保证图标在折叠后仍居中 */
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: var(--el-header-height);
-}
-.collapse-icon :deep(svg) { display: block; }
-
-/* 任务/传输按钮留给子组件自身处理，此处只保留 theme-toggle 间距 */
-.theme-toggle { margin-right: 8px; }
-
-.header-right .user-info {
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-}
-
-.header-right .username {
-  margin-left: 10px;
-}
-
+/* ─── 主内容区 ──────────────────────────────────────────── */
 .el-main {
   padding: 20px 24px 24px 24px;
   position: relative;
   overflow: hidden;
 }
 
-.fade-transform-leave-active,
+/* ─── 路由切换过渡（blur + scale） ─────────────────────── */
 .fade-transform-enter-active {
-  transition: opacity 0.15s ease-out, transform 0.15s ease-out;
+  transition: opacity 0.22s ease-out, transform 0.22s cubic-bezier(.34,1.56,.64,1), filter 0.22s ease-out;
 }
-
 .fade-transform-leave-active {
+  transition: opacity 0.18s ease-in, transform 0.18s ease-in, filter 0.18s ease-in;
   position: absolute;
   width: 100%;
 }
-
 .fade-transform-enter-from {
   opacity: 0;
-  transform: translateY(6px);
+  transform: translateY(10px) scale(0.99);
+  filter: blur(4px);
 }
-
 .fade-transform-leave-to {
   opacity: 0;
-}
-
-/* 降低侧边栏菜单项的高度 */
-.el-menu-item,
-:deep(.el-sub-menu__title) {
-  height: 40px;
-  line-height: 40px;
+  transform: translateY(-6px) scale(1.005);
+  filter: blur(3px);
 }
 </style>

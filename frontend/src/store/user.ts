@@ -1,8 +1,7 @@
 import { computed, reactive, ref, watch } from 'vue'
-import { defineStore } from 'pinia'
+import { defineStore, storeToRefs } from 'pinia'
 import apiClient, { isRequestCanceled } from '@/api'
-
-const ACTIVE_GROUP_STORAGE_KEY = 'asPanel_activeGroupIds'
+import { useActiveGroupStore } from '@/store/activeGroup'
 
 export type GroupRole = 'USER' | 'HELPER' | 'ADMIN'
 
@@ -54,8 +53,10 @@ export const useUserStore = defineStore('user', () => {
     group_permissions: [],
   })
 
-  const activeGroupIds = ref<number[]>([])
   const avatarVersion = ref(0)
+
+  const activeGroupStore = useActiveGroupStore()
+  const { activeGroupIds } = storeToRefs(activeGroupStore)
 
   const activeGroupId = computed(() => activeGroupIds.value[0] ?? null)
 
@@ -67,10 +68,6 @@ export const useUserStore = defineStore('user', () => {
 
   const isOwner = computed(() => user.is_owner)
   const isPlatformAdmin = computed(() => user.is_owner || user.is_admin)
-  /** @deprecated use isPlatformAdmin */
-  const isSuperUser = computed(() => isPlatformAdmin.value)
-  /** @deprecated use isPlatformAdmin */
-  const isAdmin = computed(() => isPlatformAdmin.value)
 
   const currentGroupRoleLevel = computed(() => {
     if (activeGroupIds.value.length === 0) return 0
@@ -145,23 +142,8 @@ export const useUserStore = defineStore('user', () => {
 
   const can = (capability: keyof Capabilities): boolean => capabilities.value[capability]
 
-  const loadSavedGroupIds = (): number[] => {
-    try {
-      const saved = localStorage.getItem(ACTIVE_GROUP_STORAGE_KEY)
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (Array.isArray(parsed) && parsed.every((id) => typeof id === 'number')) return parsed
-      }
-    } catch { /* ignore */ }
-    return []
-  }
-
-  const saveGroupIds = (ids: number[]) => {
-    try { localStorage.setItem(ACTIVE_GROUP_STORAGE_KEY, JSON.stringify(ids)) } catch { /* ignore */ }
-  }
-
   watch(activeGroupIds, (newIds) => {
-    if (!isPlatformAdmin.value && newIds.length > 0) saveGroupIds(newIds)
+    if (!isPlatformAdmin.value && newIds.length > 0) activeGroupStore.saveGroupIds(newIds)
   }, { deep: true })
 
   const fetchUser = async () => {
@@ -170,7 +152,7 @@ export const useUserStore = defineStore('user', () => {
       Object.assign(user, response.data)
       if (isPlatformAdmin.value) { activeGroupIds.value = []; return }
       if (activeGroupIds.value.length === 0 && user.group_permissions.length > 0) {
-        const savedIds = loadSavedGroupIds()
+        const savedIds = activeGroupStore.loadSavedGroupIds()
         const validIds = savedIds.filter((id) => user.group_permissions.some((p) => p.group_id === id))
         activeGroupIds.value = validIds.length > 0 ? validIds : [user.group_permissions[0].group_id]
       }
@@ -191,9 +173,8 @@ export const useUserStore = defineStore('user', () => {
     user.is_owner = false
     user.is_admin = false
     user.group_permissions = []
-    activeGroupIds.value = []
     avatarVersion.value = 0
-    try { localStorage.removeItem(ACTIVE_GROUP_STORAGE_KEY) } catch { /* ignore */ }
+    activeGroupStore.clearGroupIds()
   }
 
   return {
@@ -203,8 +184,6 @@ export const useUserStore = defineStore('user', () => {
     fullAvatarUrl,
     isOwner,
     isPlatformAdmin,
-    isSuperUser,
-    isAdmin,
     currentGroupRoleLevel,
     effectiveRoleLevel,
     accessibleGroups,

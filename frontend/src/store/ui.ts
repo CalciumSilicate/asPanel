@@ -1,6 +1,9 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 
+/** Must match the CSS sidebar collapse transition duration. */
+export const ASIDE_COLLAPSE_MS = 380
+
 export const useUiStore = defineStore('ui', () => {
   const asideCollapsed = ref(false)
   const asideCollapsing = ref(false)
@@ -12,7 +15,7 @@ export const useUiStore = defineStore('ui', () => {
         asideCollapsed.value = true
         setTimeout(() => {
           asideCollapsing.value = false
-        }, 380)
+        }, ASIDE_COLLAPSE_MS)
       })
     } else {
       asideCollapsed.value = false

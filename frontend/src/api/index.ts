@@ -1,6 +1,7 @@
-import axios from 'axios';
+import axios, { type InternalAxiosRequestConfig } from 'axios';
 import {ElMessage} from 'element-plus';
 import router from '@/router'; // 引入 router
+import { useActiveGroupStore } from '@/store/activeGroup';
 
 let isRedirectingToLogin = false;
 
@@ -67,27 +68,19 @@ apiClient.interceptors.request.use(
 
         // 注入组上下文 header（非平台管理员且有选中组时）
         // 动态导入避免循环依赖
-        const skipGroupContext = (config as any)?.skipGroupContext === true;
+        const skipGroupContext = config?.skipGroupContext === true;
         if (!skipGroupContext && !shouldSkipGroupContext(config.url)) {
-            try {
-                // 从 localStorage 读取保存的组选择（避免循环依赖）
-                const savedGroupIds = localStorage.getItem('asPanel_activeGroupIds');
-                if (savedGroupIds) {
-                    const parsed = JSON.parse(savedGroupIds);
-                    if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'number') {
-                        config.headers['X-Active-Group-Id'] = String(parsed[0]);
-                    }
-                }
-            } catch {
-                // ignore
+            const groupId = useActiveGroupStore().getActiveGroupId()
+            if (groupId !== null) {
+                config.headers['X-Active-Group-Id'] = String(groupId)
             }
         }
 
         // 默认：在路由切换时中断未完成的请求，避免切换栏目时被旧请求拖住
-        const cancelOnRouteChange = (config as any)?.cancelOnRouteChange;
+        const cancelOnRouteChange = config?.cancelOnRouteChange;
         if (cancelOnRouteChange !== false && !config.signal) {
             const controller = new AbortController();
-            (config as any).__routeCancelController = controller;
+            config.__routeCancelController = controller;
             config.signal = controller.signal;
             pendingRouteRequests.add(controller);
         }
@@ -103,13 +96,13 @@ apiClient.interceptors.request.use(
 // 响应拦截器 (Response Interceptor)
 apiClient.interceptors.response.use(
     response => {
-        const controller = (response.config as any)?.__routeCancelController;
+        const controller = response.config?.__routeCancelController;
         if (controller) pendingRouteRequests.delete(controller);
         // 对响应数据做点什么 (例如，如果所有响应都包裹在 'data' 字段中，可以在此解包)
         return response;
     },
     error => {
-        const controller = (error?.config as any)?.__routeCancelController;
+        const controller = (error?.config as InternalAxiosRequestConfig)?.__routeCancelController;
         if (controller) pendingRouteRequests.delete(controller);
 
         if (isRequestCanceled(error)) {
@@ -164,15 +157,5 @@ apiClient.interceptors.response.use(
         return Promise.reject(error);
     }
 );
-
-// 绑定验证 API
-export const bindApi = {
-  requestBind: (playerName: string) =>
-    apiClient.post('/api/users/me/bind-request', { player_name: playerName }),
-  getPending: () =>
-    apiClient.get('/api/users/me/bind-pending'),
-  cancelBind: () =>
-    apiClient.delete('/api/users/me/bind-request'),
-}
 
 export default apiClient;

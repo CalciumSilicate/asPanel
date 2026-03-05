@@ -6,7 +6,6 @@ import ElementPlus from 'element-plus';
 import 'element-plus/dist/index.css';
 import 'element-plus/theme-chalk/dark/css-vars.css';
 import './styles/theme.css'
-import { registerIcons } from './icons'
 import { initTheme } from './store/theme'
 
 import App from './App.vue';
@@ -18,8 +17,6 @@ const pinia = createPinia();
 initTheme()
 
 import('./store/settings').then(m => m.useSettingsStore().loadSettings()).catch(() => {})
-
-registerIcons(app)
 
 app.use(pinia);
 app.use(router);
