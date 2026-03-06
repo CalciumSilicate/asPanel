@@ -1,121 +1,49 @@
 <template>
   <div class="world-map-page">
     <!-- Toolbar -->
-    <div class="wm-toolbar">
-      <div class="wm-toolbar-left">
-        <el-select
-          v-model="selectedServerId"
-          placeholder="选择服务器"
-          style="width: 160px"
-          @change="onServerChange"
-          :loading="serversLoading"
-        >
-          <el-option
-            v-for="s in servers"
-            :key="s.id"
-            :label="s.name"
-            :value="s.id"
-          />
-        </el-select>
+    <WorldMapToolbar
+      :servers="servers"
+      :servers-loading="serversLoading"
+      :selected-server-id="selectedServerId"
+      :active-dim="activeDim"
+      :layout="layout"
+      :map-loading="mapLoading"
+      :has-map-data="!!mapJsonRaw"
+      :show-offline-players="showOfflinePlayers"
+      :trajectory-from-time="trajectoryFromTime"
+      :edit-mode="editMode"
+      :connect-mode="connectMode"
+      :connect-source-key="connectSourceKey"
+      :add-virtual-mode="addVirtualMode"
+      :can-delete="!!(selectedNodeKey || selectedEdgeKey)"
+      :dirty="dirty"
+      :saving="saving"
+      :bluemap-url-input="bluemapUrlInput"
+      @update:selected-server-id="selectedServerId = $event"
+      @server-change="onServerChange"
+      @update:active-dim="activeDim = $event"
+      @dim-change="onDimChange"
+      @update:layout="layout = $event"
+      @create-blank-map="createBlankMap"
+      @update:show-offline-players="showOfflinePlayers = $event"
+      @update:trajectory-from-time="trajectoryFromTime = $event"
+      @trajectory-from-time-change="onTrajectoryFromTimeChange"
+      @update:edit-mode="editMode = $event"
+      @edit-mode-change="onEditModeChange"
+      @toggle-connect-mode="toggleConnectMode"
+      @toggle-add-virtual-mode="toggleAddVirtualMode"
+      @delete-selected="deleteSelected"
+      @save-map="saveMap"
+      @update:bluemap-url-input="bluemapUrlInput = $event"
+      @save-bluemap-url="saveBluemapUrl"
+    />
 
-        <el-radio-group v-model="activeDim" size="small" @change="onDimChange" :disabled="!selectedServerId">
-          <el-radio-button value="nether">下界/主世界</el-radio-button>
-          <el-radio-button value="end">末地</el-radio-button>
-        </el-radio-group>
+    <!-- Main content: glass card -->
+    <div class="wm-glass-card">
+      <!-- Shimmer accent line -->
+      <div class="shimmer-line" aria-hidden="true" />
 
-        <el-divider direction="vertical" />
-
-        <el-button
-          v-if="selectedServerId && !mapLoading && !mapJsonRaw"
-          size="small"
-          type="primary"
-          @click="createBlankMap"
-        >新建空白地图</el-button>
-
-        <el-button-group size="small">
-          <el-button :type="layout === 'left' ? 'primary' : ''" @click="layout = 'left'" title="仅显示地图">
-            <el-icon><Grid /></el-icon>
-          </el-button>
-          <el-button :type="layout === 'split' ? 'primary' : ''" @click="layout = 'split'" title="双栏">
-            双栏
-          </el-button>
-          <el-button :type="layout === 'right' ? 'primary' : ''" @click="layout = 'right'" title="仅显示 BlueMap">
-            BlueMap
-          </el-button>
-        </el-button-group>
-      </div>
-
-      <div class="wm-toolbar-right">
-        <el-checkbox v-model="showOfflinePlayers" label="离线玩家" size="small" />
-
-        <el-divider direction="vertical" />
-
-        <el-date-picker
-          v-model="trajectoryFromTime"
-          type="datetime"
-          placeholder="轨迹起始时间"
-          size="small"
-          style="width: 168px"
-          clearable
-          format="MM-DD HH:mm"
-          value-format="YYYY-MM-DDTHH:mm:ss"
-          :disabled="!selectedServerId"
-          @change="onTrajectoryFromTimeChange"
-        />
-
-        <el-divider direction="vertical" />
-
-        <el-switch
-          v-model="editMode"
-          active-text="编辑"
-          inactive-text="查看"
-          size="small"
-          :disabled="!selectedServerId"
-          @change="onEditModeChange"
-        />
-
-        <template v-if="editMode">
-          <el-button
-            size="small"
-            :type="connectMode ? 'warning' : ''"
-            @click="toggleConnectMode"
-            title="连线模式：起点→终点节点，或终点→已有线段（垂直插入）"
-          >
-            {{ connectMode ? (connectSourceKey ? '点击终点/线段…' : '点击起点…') : '连线' }}
-          </el-button>
-          <el-button
-            size="small"
-            :type="addVirtualMode ? 'info' : ''"
-            @click="toggleAddVirtualMode"
-            title="切换后双击放置虚拟节点（也可 Shift+双击）"
-          >
-            虚拟节点
-          </el-button>
-          <el-button size="small" type="danger" :disabled="!selectedNodeKey && !selectedEdgeKey" @click="deleteSelected">
-            删除
-          </el-button>
-          <el-button size="small" type="primary" :disabled="!dirty" :loading="saving" @click="saveMap">
-            保存
-          </el-button>
-        </template>
-
-        <el-divider direction="vertical" />
-
-        <el-input
-          v-model="bluemapUrlInput"
-          placeholder="BlueMap 地址（如 http://localhost:8100）"
-          size="small"
-          style="width: 260px"
-          clearable
-          @change="saveBluemapUrl"
-        >
-          <template #prefix><el-icon><MapLocation /></el-icon></template>
-        </el-input>
-      </div>
-    </div>
-
-    <!-- Main content area -->
-    <div class="wm-content" :class="layout">
+      <div class="wm-content" :class="layout">
       <!-- Left: Canvas map -->
       <div class="wm-canvas-wrap" v-show="layout !== 'right'" ref="canvasWrap">
         <canvas
@@ -289,18 +217,20 @@
           </el-empty>
         </div>
       </div>
-    </div>
+    </div><!-- end wm-content -->
+    </div><!-- end wm-glass-card -->
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Grid, MapLocation, User, Loading, VideoPlay, VideoPause, DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
+import { User, Loading, VideoPlay, VideoPause, DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
 import apiClient from '@/api'
 import { useUserStore } from '@/store/user'
 import { useSettingsStore } from '@/store/settings'
 import { storeToRefs } from 'pinia'
+import WorldMapToolbar from './worldmap/WorldMapToolbar.vue'
 const userStore = useUserStore()
 const { activeGroupId } = storeToRefs(userStore)
 const { hasRole } = userStore
@@ -1870,50 +1800,96 @@ watch(activeGroupId, () => {
 </script>
 
 <style scoped>
+/* ─── Page layout ──────────────────────────────────────── */
 .world-map-page {
+  height: 100%;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--el-header-height) - 24px);
-  min-height: 400px;
+  gap: 12px;
+  overflow: hidden;
+  min-height: 0;
 }
 
-/* Toolbar */
-.wm-toolbar {
+/* ─── Glass card (main content) ────────────────────────── */
+.wm-glass-card {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--el-bg-color);
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  flex-shrink: 0;
-  flex-wrap: wrap;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.62);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119, 181, 254, 0.18);
+  border-radius: 20px;
+  box-shadow:
+    0 4px 24px rgba(119, 181, 254, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
 }
-.wm-toolbar-left,
-.wm-toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+.wm-glass-card:hover {
+  border-color: rgba(119, 181, 254, 0.28);
+  box-shadow: 0 8px 40px rgba(119, 181, 254, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+:global(.dark) .wm-glass-card {
+  background: rgba(15, 23, 42, 0.68);
+  border-color: rgba(119, 181, 254, 0.12);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+:global(.dark) .wm-glass-card:hover {
+  border-color: rgba(119, 181, 254, 0.22);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
-/* Content */
+/* ─── Top shimmer accent line ───────────────────────────── */
+.shimmer-line {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(119, 181, 254, 0.55) 30%,
+    rgba(167, 139, 250, 0.65) 60%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-shift 4s ease-in-out infinite;
+  z-index: 2;
+}
+@keyframes shimmer-shift {
+  0%, 100% { background-position: 0% 0%; }
+  50%       { background-position: 100% 0%; }
+}
+
+/* ─── Content split layout ─────────────────────────────── */
 .wm-content {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
 }
 .wm-content.left  .wm-canvas-wrap  { flex: 1; }
 .wm-content.right .wm-bluemap-wrap { flex: 1; }
 .wm-content.split .wm-canvas-wrap  { flex: 1; }
-.wm-content.split .wm-bluemap-wrap { flex: 1; border-left: 1px solid var(--el-border-color-lighter); }
+.wm-content.split .wm-bluemap-wrap {
+  flex: 1;
+  border-left: 1px solid rgba(119, 181, 254, 0.12);
+}
+:global(.dark) .wm-content.split .wm-bluemap-wrap {
+  border-left-color: rgba(119, 181, 254, 0.10);
+}
 
-/* Canvas panel */
+/* ─── Canvas panel ─────────────────────────────────────── */
 .wm-canvas-wrap {
   position: relative;
-  background: #f8f9fc;
+  background: rgba(248, 249, 252, 0.85);
   overflow: hidden;
   min-width: 0;
+}
+:global(.dark) .wm-canvas-wrap {
+  background: rgba(10, 16, 32, 0.70);
 }
 .wm-canvas {
   display: block;
@@ -1921,19 +1897,26 @@ watch(activeGroupId, () => {
   height: 100%;
 }
 
-/* Node editor overlay */
+/* ─── Node editor overlay ──────────────────────────────── */
 .wm-node-editor {
   pointer-events: auto;
 }
 .wm-node-editor-inner {
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  padding: 8px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  background: rgba(255, 255, 255, 0.92);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(119, 181, 254, 0.22);
+  border-radius: 14px;
+  padding: 10px;
+  box-shadow: 0 8px 28px rgba(119, 181, 254, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.90);
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+:global(.dark) .wm-node-editor-inner {
+  background: rgba(15, 23, 42, 0.90);
+  border-color: rgba(119, 181, 254, 0.18);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.40);
 }
 .wm-node-editor-row {
   display: flex;
@@ -1954,38 +1937,56 @@ watch(activeGroupId, () => {
   font-weight: 600;
 }
 
-/* HUD overlays */
+/* ─── HUD overlays ─────────────────────────────────────── */
 .wm-hud {
   position: absolute;
   pointer-events: none;
   font-size: 11px;
   color: var(--el-text-color-secondary);
-  background: rgba(255,255,255,0.82);
-  backdrop-filter: blur(4px);
-  padding: 3px 8px;
-  border-radius: 4px;
-  border: 1px solid var(--el-border-color-lighter);
+  background: rgba(255, 255, 255, 0.82);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  padding: 3px 10px;
+  border-radius: 20px;
+  border: 1px solid rgba(119, 181, 254, 0.15);
+  box-shadow: 0 2px 8px rgba(119, 181, 254, 0.08);
+}
+:global(.dark) .wm-hud {
+  background: rgba(15, 23, 42, 0.80);
+  border-color: rgba(119, 181, 254, 0.12);
 }
 .wm-coords { bottom: 8px; left: 8px; }
 .wm-edit-hint { bottom: 8px; right: 8px; pointer-events: none; }
-.wm-connect-hint { background: rgba(245,158,11,0.15); border-color: #f59e0b; color: #92400e; }
-.wm-traj-info { top: 8px; left: 50%; transform: translateX(-50%); pointer-events: auto;
-  display: flex; align-items: center; gap: 4px; }
+.wm-connect-hint {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #92400e;
+}
+:global(.dark) .wm-connect-hint { color: #fbbf24; }
 
-/* Playback bar */
+/* ─── Playback bar ─────────────────────────────────────── */
 .wm-playback-bar {
   position: absolute;
-  bottom: 32px;
+  bottom: 36px;
   left: 50%;
   transform: translateX(-50%);
   width: min(480px, calc(100% - 24px));
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-  padding: 8px 10px 6px;
+  background: rgba(255, 255, 255, 0.88);
+  -webkit-backdrop-filter: saturate(160%) blur(16px);
+  backdrop-filter: saturate(160%) blur(16px);
+  border: 1px solid rgba(119, 181, 254, 0.20);
+  border-radius: 16px;
+  box-shadow:
+    0 8px 28px rgba(119, 181, 254, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.90);
+  padding: 10px 12px 8px;
   pointer-events: auto;
   z-index: 10;
+}
+:global(.dark) .wm-playback-bar {
+  background: rgba(15, 23, 42, 0.90);
+  border-color: rgba(119, 181, 254, 0.15);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 .wm-playback-title {
   display: flex;
@@ -1998,9 +1999,10 @@ watch(activeGroupId, () => {
 .wm-playback-avatar {
   width: 24px;
   height: 24px;
-  border-radius: 4px;
+  border-radius: 6px;
   flex-shrink: 0;
   image-rendering: pixelated;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.14);
 }
 .wm-playback-avatar-icon {
   font-size: 20px;
@@ -2056,23 +2058,32 @@ watch(activeGroupId, () => {
   color: var(--el-color-warning) !important;
 }
 
-/* Loading & empty */
+/* ─── Loading & empty states ───────────────────────────── */
 .wm-canvas-loading,
 .wm-canvas-empty {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(248,249,252,0.7);
+  background: rgba(248, 249, 252, 0.60);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+:global(.dark) .wm-canvas-loading,
+:global(.dark) .wm-canvas-empty {
+  background: rgba(10, 16, 32, 0.55);
 }
 .wm-canvas-loading { font-size: 28px; color: var(--el-color-primary); pointer-events: none; }
 .wm-canvas-empty   { pointer-events: auto; }
 
-/* BlueMap panel */
+/* ─── BlueMap panel ────────────────────────────────────── */
 .wm-bluemap-wrap {
   position: relative;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: #f0f2f5;
+  background: rgba(240, 242, 245, 0.70);
+}
+:global(.dark) .wm-bluemap-wrap {
+  background: rgba(10, 14, 26, 0.60);
 }
 .wm-bluemap-iframe {
   flex: 1;

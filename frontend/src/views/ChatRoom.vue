@@ -10,13 +10,41 @@
       @alert="sendAlert"
     />
 
-    <!-- Placeholder: group picker -->
-    <div v-if="!activeGroup" class="chat-placeholder">
-      <ChatGroupPicker :groups="groups" :online-count="onlineCount" @select="selectGroup" />
-    </div>
+    <!-- Main area: grid container lets skeleton & content overlap cleanly -->
+    <div class="chat-main-wrap">
 
-    <!-- Main chat panel -->
-    <div v-else class="chat-glass-card">
+      <!-- Skeleton while loading -->
+      <Transition name="pg-skeleton">
+        <div v-if="!loaded" class="sk-chat-panel" aria-hidden="true">
+          <div class="sk-messages">
+            <div v-for="i in 7" :key="i" class="sk-msg-row" :class="{ 'sk-compact': i % 3 !== 1 }">
+              <div class="sk-avatar-col">
+                <div v-if="i % 3 === 1" class="sk-avatar shimmer"></div>
+              </div>
+              <div class="sk-bubble-col">
+                <div v-if="i % 3 === 1" class="sk-meta shimmer"></div>
+                <div class="sk-text shimmer" :style="{ width: ['72%','52%','83%','61%','44%','78%','57%'][i-1] }"></div>
+              </div>
+            </div>
+          </div>
+          <div class="sk-chat-input">
+            <div class="sk-input-box shimmer"></div>
+            <div class="sk-send-btn shimmer"></div>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- Real content once loaded -->
+      <Transition name="pg-content">
+        <div v-if="loaded" class="chat-content-wrap">
+
+          <!-- Placeholder: group picker -->
+          <div v-if="!activeGroup" class="chat-placeholder">
+            <ChatGroupPicker :groups="groups" :online-count="onlineCount" @select="selectGroup" />
+          </div>
+
+          <!-- Main chat panel -->
+          <div v-else class="chat-glass-card">
       <!-- Shimmer line (like WelcomeCard) -->
       <div class="shimmer-line" aria-hidden="true" />
 
@@ -128,6 +156,9 @@
         <ChatOnlineUsers :users="users" />
       </div>
     </div>
+        </div><!-- end chat-content-wrap -->
+      </Transition>
+    </div><!-- end chat-main-wrap -->
   </div>
 </template>
 
@@ -151,6 +182,7 @@ const {
   hasMoreOlder,
   noMoreOlder,
   loadingOlder,
+  loaded,
   canSendAlert,
   onlineCount,
   selectGroup,
@@ -556,5 +588,108 @@ const {
   opacity: 0.45;
   cursor: not-allowed;
   box-shadow: none;
+}
+
+/* ─── Main wrap: grid lets skeleton & content overlap ─── */
+.chat-main-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+}
+.sk-chat-panel,
+.chat-content-wrap {
+  grid-area: 1 / 1;
+  min-height: 0;
+}
+.chat-content-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Page transitions ───────────────────────────────── */
+.pg-skeleton-leave-active {
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  pointer-events: none;
+  z-index: 1;
+}
+.pg-skeleton-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+.pg-content-enter-active {
+  animation: pg-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes pg-rise {
+  from { opacity: 0; transform: translateY(24px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ─── Chat skeleton ─────────────────────────────────── */
+.sk-chat-panel {
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.62);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119, 181, 254, 0.18);
+  box-shadow: 0 4px 24px rgba(119, 181, 254, 0.10);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+:global(.dark) .sk-chat-panel {
+  background: rgba(15, 23, 42, 0.68);
+  border-color: rgba(119, 181, 254, 0.12);
+}
+.sk-messages {
+  flex: 1 1 auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.sk-msg-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.sk-msg-row.sk-compact { padding-left: 48px; }
+.sk-avatar-col { width: 38px; flex-shrink: 0; }
+.sk-avatar { width: 34px; height: 34px; border-radius: 50%; }
+.sk-bubble-col { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+.sk-meta { height: 10px; width: 120px; border-radius: 6px; }
+.sk-text { height: 14px; border-radius: 8px; }
+.sk-chat-input {
+  padding: 12px 16px;
+  border-top: 1px solid rgba(119, 181, 254, 0.10);
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.sk-input-box { flex: 1; height: 36px; border-radius: 22px; }
+.sk-send-btn { width: 76px; height: 36px; border-radius: 22px; flex-shrink: 0; }
+
+/* ─── Shimmer ────────────────────────────────────────── */
+@keyframes shimmer-move {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg,
+    rgba(128,128,128,0.08) 25%,
+    rgba(128,128,128,0.18) 50%,
+    rgba(128,128,128,0.08) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer-move 1.5s linear infinite;
+}
+:global(.dark) .shimmer {
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0.04) 25%,
+    rgba(255,255,255,0.10) 50%,
+    rgba(255,255,255,0.04) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer-move 1.5s linear infinite;
 }
 </style>

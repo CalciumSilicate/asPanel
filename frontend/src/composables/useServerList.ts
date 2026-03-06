@@ -117,6 +117,7 @@ export function useServerList() {
   // ── Core server list state ────────────────────────────────────
   const serverList = ref<Server[]>([])
   const loading = ref(true)
+  const loaded = ref(false)
   const selectedServers = ref<Server[]>([])
   const isBatchProcessing = ref(false)
   const autoStartSaving = reactive<Record<number, boolean>>({})
@@ -432,6 +433,7 @@ export function useServerList() {
       fetchServerSizes(requestId)
     } finally {
       loading.value = false
+      if (!loaded.value) loaded.value = true
     }
   }
 
@@ -1148,7 +1150,7 @@ export function useServerList() {
     // View
     viewMode, searchQuery, statusFilter,
     // Core list
-    serverList, filteredServerList, loading, selectedServers, isBatchProcessing, autoStartSaving,
+    serverList, filteredServerList, loading, loaded, selectedServers, isBatchProcessing, autoStartSaving,
     tableRef,
     // Pagination
     currentPage, pageSize, pagedServerList, sortedFilteredList,

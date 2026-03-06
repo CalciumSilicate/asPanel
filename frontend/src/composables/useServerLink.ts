@@ -48,6 +48,7 @@ export function useServerLink() {
   const servers = ref<ServerItem[]>([])
   const serversLoading = ref(false)
   const saving = ref(false)
+  const loaded = ref(false)
   let saveVersion = 0
   let saveTimer: ReturnType<typeof setTimeout> | null = null
   let pendingGroupToSave: ServerLinkGroup | null = null
@@ -202,9 +203,9 @@ export function useServerLink() {
     }
   }
 
-  onMounted(() => {
-    loadServers()
-    loadGroups()
+  onMounted(async () => {
+    await Promise.all([loadServers(), loadGroups()])
+    loaded.value = true
   })
 
   onUnmounted(() => {
@@ -218,6 +219,7 @@ export function useServerLink() {
     servers,
     serversLoading,
     saving,
+    loaded,
     selectedServersCount,
     connectedChatsCount,
     dataSourceOptions,

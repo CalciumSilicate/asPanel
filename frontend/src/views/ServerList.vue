@@ -26,50 +26,66 @@
     <div class="sl-glass-card">
       <div class="shimmer-line" aria-hidden="true" />
 
-      <!-- Card view -->
-      <ServerCardView
-        v-if="viewMode === 'card'"
-        :servers="pagedServerList"
-        :loading="loading"
-        :has-admin="hasRole('ADMIN')"
-        :has-helper="hasRole('HELPER')"
-        :copy-path="copyPath"
-        @start="startServer"
-        @stop="stopServer"
-        @restart="restartServer"
-        @config="openConfigDialog"
-        @console="goToConsole"
-        @archive="handleCreateArchive"
-        @copy="openCopyDialog"
-        @rename="openRenameDialog"
-        @force-kill="forceKillServer"
-        @delete="handleDeleteServer"
-      />
+      <!-- Grid: skeleton & views share same cell, no height jump -->
+      <div class="sl-view-grid">
 
-      <!-- Table view -->
-      <ServerTableView
-        v-else
-        ref="tableViewRef"
-        :servers="pagedServerList"
-        :loading="loading"
-        :auto-start-saving="autoStartSaving"
-        :has-admin="hasRole('ADMIN')"
-        :has-helper="hasRole('HELPER')"
-        :has-user="hasRole('USER')"
-        @selection-change="handleSelectionChange"
-        @start="startServer"
-        @stop="stopServer"
-        @restart="restartServer"
-        @config="openConfigDialog"
-        @console="goToConsole"
-        @archive="handleCreateArchive"
-        @copy="openCopyDialog"
-        @rename="openRenameDialog"
-        @force-kill="forceKillServer"
-        @delete="handleDeleteServer"
-        @auto-start="setAutoStart"
-        @copy-path="copyPath"
-      />
+        <!-- Skeleton while loading -->
+        <Transition name="pg-skeleton">
+          <div v-if="!loaded" class="sk-servers" aria-hidden="true">
+            <div v-for="i in 8" :key="i" class="sk-server-card shimmer"></div>
+          </div>
+        </Transition>
+
+        <!-- Real views once loaded -->
+        <Transition name="pg-content">
+          <div v-if="loaded" class="sl-views-wrap">
+            <!-- Card view -->
+            <ServerCardView
+              v-if="viewMode === 'card'"
+              :servers="pagedServerList"
+              :loading="loading"
+              :has-admin="hasRole('ADMIN')"
+              :has-helper="hasRole('HELPER')"
+              :copy-path="copyPath"
+              @start="startServer"
+              @stop="stopServer"
+              @restart="restartServer"
+              @config="openConfigDialog"
+              @console="goToConsole"
+              @archive="handleCreateArchive"
+              @copy="openCopyDialog"
+              @rename="openRenameDialog"
+              @force-kill="forceKillServer"
+              @delete="handleDeleteServer"
+            />
+            <!-- Table view -->
+            <ServerTableView
+              v-else
+              ref="tableViewRef"
+              :servers="pagedServerList"
+              :loading="loading"
+              :auto-start-saving="autoStartSaving"
+              :has-admin="hasRole('ADMIN')"
+              :has-helper="hasRole('HELPER')"
+              :has-user="hasRole('USER')"
+              @selection-change="handleSelectionChange"
+              @start="startServer"
+              @stop="stopServer"
+              @restart="restartServer"
+              @config="openConfigDialog"
+              @console="goToConsole"
+              @archive="handleCreateArchive"
+              @copy="openCopyDialog"
+              @rename="openRenameDialog"
+              @force-kill="forceKillServer"
+              @delete="handleDeleteServer"
+              @auto-start="setAutoStart"
+              @copy-path="copyPath"
+            />
+          </div>
+        </Transition>
+
+      </div>
     </div>
 
     <!-- ───────────────────────── Dialogs ───────────────────────── -->
@@ -865,7 +881,7 @@ import ServerTableView from './server-list/ServerTableView.vue'
 
 const {
   viewMode, searchQuery, statusFilter,
-  serverList, filteredServerList, loading, selectedServers, isBatchProcessing, autoStartSaving,
+  serverList, filteredServerList, loading, loaded, selectedServers, isBatchProcessing, autoStartSaving,
   tableRef, subServerSelectionTable, netherMapUploaderRef, endMapUploaderRef,
   currentPage, pageSize, pagedServerList, sortedFilteredList,
   serverLinkGroups, serverLinkGroupsLoading, selectableGroups,
@@ -1145,4 +1161,80 @@ watch(tableViewRef, (v) => { tableRef.value = v?.tableEl ?? null }, { immediate:
 .dlg-btn-primary:hover:not(:disabled) { box-shadow: 0 6px 22px rgba(119, 181, 254, 0.55); transform: translateY(-1px); }
 .dlg-btn-primary:active:not(:disabled) { transform: scale(0.97); }
 .dlg-btn-primary:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; }
+
+/* ─── View grid: skeleton & content share same cell ──────── */
+.sl-view-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+}
+.sk-servers,
+.sl-views-wrap {
+  grid-area: 1 / 1;
+  min-height: 0;
+}
+.sl-views-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Page transitions ───────────────────────────────────── */
+.pg-skeleton-leave-active {
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  pointer-events: none;
+  z-index: 1;
+}
+.pg-skeleton-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+.pg-content-enter-active {
+  animation: pg-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes pg-rise {
+  from { opacity: 0; transform: translateY(24px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ─── Server list skeleton ───────────────────────────────── */
+.sk-servers {
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  align-content: start;
+  overflow: hidden;
+}
+@media (max-width: 1199px) { .sk-servers { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 899px)  { .sk-servers { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 599px)  { .sk-servers { grid-template-columns: 1fr; } }
+
+.sk-server-card {
+  height: 162px;
+  border-radius: 16px;
+}
+
+/* ─── Shimmer ────────────────────────────────────────────── */
+@keyframes shimmer-move {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg,
+    rgba(128,128,128,0.08) 25%,
+    rgba(128,128,128,0.18) 50%,
+    rgba(128,128,128,0.08) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer-move 1.5s linear infinite;
+}
+:global(.dark) .shimmer {
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0.04) 25%,
+    rgba(255,255,255,0.10) 50%,
+    rgba(255,255,255,0.04) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer-move 1.5s linear infinite;
+}
 </style>

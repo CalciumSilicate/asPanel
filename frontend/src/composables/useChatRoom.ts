@@ -74,6 +74,7 @@ export function useChatRoom(chatMainRef: Ref<HTMLElement | null>) {
   const hasMoreOlder = ref(false)
   const noMoreOlder = ref(false)
   const loadingOlder = ref(false)
+  const loaded = ref(false)
 
   const canSendAlert = computed(() => capabilities.value.canSendAlert)
 
@@ -344,6 +345,7 @@ export function useChatRoom(chatMainRef: Ref<HTMLElement | null>) {
   onMounted(async () => {
     await loadMe()
     await Promise.all([loadGroups(), loadServers()])
+    loaded.value = true
   })
 
   onUnmounted(() => {
@@ -367,6 +369,7 @@ export function useChatRoom(chatMainRef: Ref<HTMLElement | null>) {
     hasMoreOlder,
     noMoreOlder,
     loadingOlder,
+    loaded,
     canSendAlert,
     onlineCount,
     selectGroup,

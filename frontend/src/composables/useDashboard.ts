@@ -45,6 +45,7 @@ export function useDashboard(activeGroupIds: Ref<number[]>) {
     disk_total_gb: 0,
   })
   const runningServersUsage = ref<ServerUsage[]>([])
+  const loaded = ref(false)
 
   const serverPercent = computed(() => {
     const { total_servers: total, running_servers: running } = stats.value
@@ -81,6 +82,7 @@ export function useDashboard(activeGroupIds: Ref<number[]>) {
       const runningIds = new Set(servers.filter(sv => sv.status === 'running').map(sv => sv.id))
       const usageList: ServerUsage[] = Array.isArray(usageRes.data) ? usageRes.data : []
       runningServersUsage.value = usageList.filter(u => runningIds.has(u?.id))
+      loaded.value = true
     } catch (err) {
       if (isRequestCanceled(err)) return
       ElMessage.error('获取仪表盘数据失败，请检查后端服务。')
@@ -120,5 +122,5 @@ export function useDashboard(activeGroupIds: Ref<number[]>) {
 
   watch(activeGroupIds, () => fetchData(), { deep: true })
 
-  return { stats, systemStatus, runningServersUsage, serverPercent, hostMemoryTotalMb }
+  return { stats, systemStatus, runningServersUsage, serverPercent, hostMemoryTotalMb, loaded }
 }

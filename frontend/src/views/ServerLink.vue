@@ -8,35 +8,62 @@
       @create="handleCreateGroup"
     />
 
-    <!-- Non-admin placeholder -->
-    <div v-if="!isPlatformAdmin" class="sl-glass-card">
-      <div class="shimmer-line" aria-hidden="true" />
-      <div class="sl-empty">
-        <el-empty description="此页面仅对平台管理员开放" />
-      </div>
-    </div>
+    <!-- Main area: grid lets skeleton & content overlap -->
+    <div class="sl-main-wrap">
 
-    <!-- Group picker (no selection) -->
-    <div v-else-if="!activeGroup" class="sl-placeholder">
-      <LinkGroupPicker :groups="groups" @select="selectGroup" />
-    </div>
+      <!-- Skeleton while loading -->
+      <Transition name="pg-skeleton">
+        <div v-if="!loaded" class="sk-sl-panel" aria-hidden="true">
+          <div class="sk-sl-list">
+            <div v-for="i in 5" :key="i" class="sk-sl-item">
+              <div class="sk-sl-icon shimmer"></div>
+              <div class="sk-sl-info">
+                <div class="sk-line shimmer" :style="{ width: ['90px','110px','80px','120px','95px'][i-1], height: '14px' }"></div>
+                <div class="sk-line shimmer" style="width:140px;height:10px;margin-top:6px"></div>
+              </div>
+              <div class="sk-sl-arrow shimmer"></div>
+            </div>
+          </div>
+        </div>
+      </Transition>
 
-    <!-- Group editor -->
-    <div v-else class="sl-glass-card is-editor">
-      <div class="shimmer-line" aria-hidden="true" />
-      <LinkGroupEditor
-        :group="activeGroup"
-        :servers="servers"
-        :servers-loading="serversLoading"
-        :data-source-options="dataSourceOptions"
-        @delete="deleteGroup"
-        @update:name="activeGroup.name = $event"
-        @update:server-ids="activeGroup.serverIds = $event"
-        @update:data-source-ids="activeGroup.dataSourceIds = $event"
-        @qq-input="onQQInput"
-        @qq-blur="onQQBlur"
-      />
-    </div>
+      <!-- Real content once loaded -->
+      <Transition name="pg-content">
+        <div v-if="loaded" class="sl-content-wrap">
+
+          <!-- Non-admin placeholder -->
+          <div v-if="!isPlatformAdmin" class="sl-glass-card">
+            <div class="shimmer-line" aria-hidden="true" />
+            <div class="sl-empty">
+              <el-empty description="此页面仅对平台管理员开放" />
+            </div>
+          </div>
+
+          <!-- Group picker (no selection) -->
+          <div v-else-if="!activeGroup" class="sl-placeholder">
+            <LinkGroupPicker :groups="groups" @select="selectGroup" />
+          </div>
+
+          <!-- Group editor -->
+          <div v-else class="sl-glass-card is-editor">
+            <div class="shimmer-line" aria-hidden="true" />
+            <LinkGroupEditor
+              :group="activeGroup"
+              :servers="servers"
+              :servers-loading="serversLoading"
+              :data-source-options="dataSourceOptions"
+              @delete="deleteGroup"
+              @update:name="activeGroup.name = $event"
+              @update:server-ids="activeGroup.serverIds = $event"
+              @update:data-source-ids="activeGroup.dataSourceIds = $event"
+              @qq-input="onQQInput"
+              @qq-blur="onQQBlur"
+            />
+          </div>
+
+        </div><!-- end sl-content-wrap -->
+      </Transition>
+    </div><!-- end sl-main-wrap -->
   </div>
 </template>
 
@@ -53,6 +80,7 @@ const {
   servers,
   serversLoading,
   dataSourceOptions,
+  loaded,
   selectGroup,
   handleCreateGroup,
   deleteGroup,
@@ -154,5 +182,111 @@ const {
   max-width: 900px;
   width: 100%;
   align-self: center;
+}
+
+/* ─── Main wrap: grid lets skeleton & content overlap ─── */
+.sl-main-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+}
+.sk-sl-panel,
+.sl-content-wrap {
+  grid-area: 1 / 1;
+  min-height: 0;
+}
+.sl-content-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Page transitions ───────────────────────────────── */
+.pg-skeleton-leave-active {
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  pointer-events: none;
+  z-index: 1;
+}
+.pg-skeleton-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+.pg-content-enter-active {
+  animation: pg-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes pg-rise {
+  from { opacity: 0; transform: translateY(24px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ─── ServerLink skeleton ────────────────────────────── */
+.sk-sl-panel {
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.62);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119, 181, 254, 0.18);
+  box-shadow: 0 4px 24px rgba(119, 181, 254, 0.10);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+:global(.dark) .sk-sl-panel {
+  background: rgba(15, 23, 42, 0.68);
+  border-color: rgba(119, 181, 254, 0.12);
+}
+.sk-sl-list {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sk-sl-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(119, 181, 254, 0.04);
+  border: 1px solid rgba(119, 181, 254, 0.08);
+}
+.sk-sl-icon {
+  width: 40px; height: 40px;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+.sk-sl-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.sk-sl-arrow {
+  width: 20px; height: 20px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.sk-line { display: block; border-radius: 6px; }
+
+/* ─── Shimmer ────────────────────────────────────────── */
+@keyframes shimmer-move {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg,
+    rgba(128,128,128,0.08) 25%,
+    rgba(128,128,128,0.18) 50%,
+    rgba(128,128,128,0.08) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer-move 1.5s linear infinite;
+}
+:global(.dark) .shimmer {
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0.04) 25%,
+    rgba(255,255,255,0.10) 50%,
+    rgba(255,255,255,0.04) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer-move 1.5s linear infinite;
 }
 </style>
