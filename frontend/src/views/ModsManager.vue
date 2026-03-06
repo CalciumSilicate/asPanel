@@ -47,79 +47,94 @@
 
       <!-- Mods table -->
       <div class="mm-table-wrap" v-loading="modsLoading" element-loading-background="transparent">
-        <el-table :data="pagedMods" stripe size="small" style="width: 100%;">
-          <el-table-column label="模组" min-width="240">
-            <template #default="{ row }">
-              <PluginNameCell
-                :id="row.meta.slug || row.meta.id"
-                :name="row.meta.name"
-                :description="row.meta.description"
-                :filename="row.file_name"
-              />
-            </template>
-          </el-table-column>
-          <el-table-column label="来源" width="120" align="center">
-            <template #default="{ row }">
-              <el-tag v-if="row.meta.source" size="small">{{ row.meta.source }}</el-tag>
-              <el-tag v-else size="small" type="info">未知</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="模组版本" width="160" align="center">
-            <template #default="{ row }">
-              <div class="version-cell">
-                <el-tag size="small" type="success">{{ row.meta.version || '-' }}</el-tag>
-                <el-tooltip v-if="updatesMap.get(row.file_name)" :content="`有新版：${updatesMap.get(row.file_name)?.version || ''}`" placement="top-start" effect="light">
-                  <el-button size="small" type="warning" circle plain :icon="Refresh" @click="installUpdateForMod(row)" />
-                </el-tooltip>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="支持的MC版本" min-width="140">
-            <template #default="{ row }">
-              <template v-if="(row.meta.game_versions || []).length >= 3">
-                <div class="ellipsis-tags">
-                  <el-tag v-for="v in (row.meta.game_versions || []).slice(0,2)" :key="v" size="small" style="margin-right:4px;">{{ v }}</el-tag>
-                  <el-tooltip placement="top-start" effect="light">
-                    <template #content>
-                      <div>
-                        <el-tag v-for="v in (row.meta.game_versions || [])" :key="v" size="small" style="margin:2px;">{{ v }}</el-tag>
-                      </div>
-                    </template>
-                    <el-tag size="small" type="info">+{{ (row.meta.game_versions || []).length - 2 }}</el-tag>
+        <table class="native-table">
+          <colgroup>
+            <col style="min-width:240px" />
+            <col style="width:120px" />
+            <col style="width:160px" />
+            <col style="min-width:140px" />
+            <col style="width:120px" />
+            <col style="width:250px" />
+          </colgroup>
+          <thead>
+            <tr class="thead-row">
+              <th class="th-cell">模组</th>
+              <th class="th-cell th-center">来源</th>
+              <th class="th-cell th-center">模组版本</th>
+              <th class="th-cell">支持的MC版本</th>
+              <th class="th-cell th-center">状态</th>
+              <th class="th-cell th-right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!modsLoading && pagedMods.length === 0">
+              <td colspan="6" class="td-empty">
+                <el-empty description="暂无模组" :image-size="80" />
+              </td>
+            </tr>
+            <tr v-for="row in pagedMods" :key="row.file_name" class="tbl-row">
+              <td class="td-cell">
+                <PluginNameCell
+                  :id="row.meta.slug || row.meta.id"
+                  :name="row.meta.name"
+                  :description="row.meta.description"
+                  :filename="row.file_name"
+                />
+              </td>
+              <td class="td-cell td-center">
+                <el-tag v-if="row.meta.source" size="small">{{ row.meta.source }}</el-tag>
+                <el-tag v-else size="small" type="info">未知</el-tag>
+              </td>
+              <td class="td-cell td-center">
+                <div class="version-cell">
+                  <el-tag size="small" type="success">{{ row.meta.version || '-' }}</el-tag>
+                  <el-tooltip v-if="updatesMap.get(row.file_name)" :content="`有新版：${updatesMap.get(row.file_name)?.version || ''}`" placement="top-start" effect="light">
+                    <el-button size="small" type="warning" circle plain :icon="Refresh" @click="installUpdateForMod(row)" />
                   </el-tooltip>
                 </div>
-              </template>
-              <template v-else>
-                <el-space wrap>
-                  <el-tag v-for="v in (row.meta.game_versions || [])" :key="v" size="small">{{ v }}</el-tag>
-                  <span v-if="!(row.meta.game_versions || []).length"><el-tag size="small" type="info">未知</el-tag></span>
-                </el-space>
-              </template>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="120" align="center">
-            <template #default="{ row }">
-              <el-switch v-model="row.enabled" @change="toggleMod(row)" :loading="row.loading" :disabled="isServerRunning"/>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="250" align="center">
-            <template #default="{ row }">
-              <div class="row-actions">
-                <button class="act-btn act-dl" :disabled="row.loading" @click="downloadMod(row)">
-                  <el-icon :size="12"><Download /></el-icon>下载
-                </button>
-                <button class="act-btn act-detail" @click="openChangeVersion(row)">更改版本</button>
-                <el-popconfirm title="确定删除这个模组吗？" width="220" @confirm="deleteMod(row)">
-                  <template #reference>
-                    <button class="act-btn act-danger" :disabled="row.loading || isServerRunning">
-                      <el-icon :size="12"><Delete /></el-icon>删除
-                    </button>
-                  </template>
-                </el-popconfirm>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
+              </td>
+              <td class="td-cell">
+                <template v-if="(row.meta.game_versions || []).length >= 3">
+                  <div class="ellipsis-tags">
+                    <el-tag v-for="v in (row.meta.game_versions || []).slice(0,2)" :key="v" size="small" style="margin-right:4px;">{{ v }}</el-tag>
+                    <el-tooltip placement="top-start" effect="light">
+                      <template #content>
+                        <div>
+                          <el-tag v-for="v in (row.meta.game_versions || [])" :key="v" size="small" style="margin:2px;">{{ v }}</el-tag>
+                        </div>
+                      </template>
+                      <el-tag size="small" type="info">+{{ (row.meta.game_versions || []).length - 2 }}</el-tag>
+                    </el-tooltip>
+                  </div>
+                </template>
+                <template v-else>
+                  <el-space wrap>
+                    <el-tag v-for="v in (row.meta.game_versions || [])" :key="v" size="small">{{ v }}</el-tag>
+                    <span v-if="!(row.meta.game_versions || []).length"><el-tag size="small" type="info">未知</el-tag></span>
+                  </el-space>
+                </template>
+              </td>
+              <td class="td-cell td-center">
+                <el-switch v-model="row.enabled" @change="toggleMod(row)" :loading="row.loading" :disabled="isServerRunning"/>
+              </td>
+              <td class="td-cell td-right">
+                <div class="row-actions">
+                  <button class="act-btn act-dl" :disabled="row.loading" @click="downloadMod(row)">
+                    <el-icon :size="12"><Download /></el-icon>下载
+                  </button>
+                  <button class="act-btn act-detail" @click="openChangeVersion(row)">更改版本</button>
+                  <el-popconfirm title="确定删除这个模组吗？" width="220" @confirm="deleteMod(row)">
+                    <template #reference>
+                      <button class="act-btn act-danger" :disabled="row.loading || isServerRunning">
+                        <el-icon :size="12"><Delete /></el-icon>删除
+                      </button>
+                    </template>
+                  </el-popconfirm>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- Footer: pagination -->
@@ -143,56 +158,73 @@
         <el-input v-model="modrinthDialog.query" placeholder="搜索：名称 / 描述" clearable style="width: 360px;" @keyup.enter="searchModrinth"/>
         <el-button type="primary" :icon="Search" @click="searchModrinth">搜索</el-button>
       </div>
-      <el-table :data="modrinthDialog.items" v-loading="modrinthDialog.loading" height="50vh" stripe border row-key="project_id">
-        <el-table-column label="模组" min-width="320">
-          <template #default="{ row }">
-            <PluginNameCell
-              :id="row.slug"
-              :name="row.title"
-              :description="row.description"
-            />
-          </template>
-        </el-table-column>
-        <el-table-column label="当前安装" width="140">
-          <template #default="{ row }">
-            <el-tag v-if="isInstalledSlug(row.slug)" size="small" type="success">已安装</el-tag>
-            <el-tag v-else size="small" type="info">未安装</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="统计" width="160" align="center">
-          <template #default="{ row }">
-            <div class="stats-cell">
-              <span class="stat-chip stat-dl-chip">
-                <el-icon :size="11"><Download /></el-icon>
-                {{ abbrNumber(row.downloads) }}
-              </span>
-              <span class="stat-chip stat-star">
-                ★ {{ abbrNumber(row.follows) }}
-              </span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="240" align="center">
-          <template #default="{ row }">
-            <el-button-group>
-              <el-button
-                v-if="!isInstalledSlug(row.slug)"
-                size="small"
-                type="primary"
-                :loading="row.installing"
-                @click="installFromModrinth(row)"
-              >安装</el-button>
-              <el-button
-                v-else
-                size="small"
-                type="primary"
-                @click="openChangeVersionForSlug(row)"
-              >版本</el-button>
-              <el-button size="small" type="success" @click="openModrinthDetail(row)">跳转详情</el-button>
-            </el-button-group>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div v-loading="modrinthDialog.loading" element-loading-background="transparent" style="max-height:50vh;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;">
+        <table class="native-table">
+          <colgroup>
+            <col style="min-width:320px" />
+            <col style="width:140px" />
+            <col style="width:160px" />
+            <col style="width:240px" />
+          </colgroup>
+          <thead>
+            <tr class="thead-row">
+              <th class="th-cell">模组</th>
+              <th class="th-cell th-center">当前安装</th>
+              <th class="th-cell th-center">统计</th>
+              <th class="th-cell th-right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!modrinthDialog.loading && modrinthDialog.items.length === 0">
+              <td colspan="4" class="td-empty">
+                <el-empty description="暂无结果" :image-size="80" />
+              </td>
+            </tr>
+            <tr v-for="row in modrinthDialog.items" :key="row.project_id" class="tbl-row">
+              <td class="td-cell">
+                <PluginNameCell
+                  :id="row.slug"
+                  :name="row.title"
+                  :description="row.description"
+                />
+              </td>
+              <td class="td-cell td-center">
+                <el-tag v-if="isInstalledSlug(row.slug)" size="small" type="success">已安装</el-tag>
+                <el-tag v-else size="small" type="info">未安装</el-tag>
+              </td>
+              <td class="td-cell td-center">
+                <div class="stats-cell">
+                  <span class="stat-chip stat-dl-chip">
+                    <el-icon :size="11"><Download /></el-icon>
+                    {{ abbrNumber(row.downloads) }}
+                  </span>
+                  <span class="stat-chip stat-star">
+                    ★ {{ abbrNumber(row.follows) }}
+                  </span>
+                </div>
+              </td>
+              <td class="td-cell td-right">
+                <el-button-group>
+                  <el-button
+                    v-if="!isInstalledSlug(row.slug)"
+                    size="small"
+                    type="primary"
+                    :loading="row.installing"
+                    @click="installFromModrinth(row)"
+                  >安装</el-button>
+                  <el-button
+                    v-else
+                    size="small"
+                    type="primary"
+                    @click="openChangeVersionForSlug(row)"
+                  >版本</el-button>
+                  <el-button size="small" type="success" @click="openModrinthDetail(row)">跳转详情</el-button>
+                </el-button-group>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <template #footer>
         <div class="dialog-footer-flex">
           <div class="left">
@@ -885,33 +917,52 @@ onMounted(initialLoad)
   border-top: 1px solid rgba(167, 139, 250, 0.12);
 }
 
-/* ── Shared cell styles ───────────────────────────────────── */
-.muted { font-size: 12px; color: var(--el-text-color-secondary); }
-
-.version-cell { display: flex; align-items: center; gap: 8px; }
-.version-cell .el-button.is-circle .el-icon { display: inline-flex; align-items: center; justify-content: center; }
-
-.ellipsis-tags { display: inline-flex; align-items: center; }
-
-/* ── Table deep overrides (glass card) ───────────────────── */
-.mm-glass-card :deep(.el-table) { background: transparent !important; }
-.mm-glass-card :deep(.el-table tr) { background: transparent !important; }
-.mm-glass-card :deep(.el-table th.el-table__cell) {
-  background: rgba(167, 139, 250, 0.05) !important;
+/* ── Native table ────────────────────────────────────────── */
+.native-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+thead { position: sticky; top: 0; z-index: 10; }
+.thead-row {
+  background: rgba(248, 250, 255, 0.96);
+  -webkit-backdrop-filter: saturate(140%) blur(8px);
+  backdrop-filter: saturate(140%) blur(8px);
+  border-bottom: 1px solid rgba(167, 139, 250, 0.12);
+}
+:global(.dark) .thead-row { background: rgba(15, 23, 42, 0.96); }
+.th-cell {
+  padding: 10px 12px;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--el-text-color-secondary);
+  opacity: 0.72;
+  white-space: nowrap;
+  text-align: left;
 }
-.mm-glass-card :deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
-  background: rgba(167, 139, 250, 0.03) !important;
+.th-center { text-align: center; }
+.th-right  { text-align: right; padding-right: 16px; }
+.tbl-row {
+  border-bottom: 1px solid rgba(167, 139, 250, 0.07);
+  transition: background 0.12s ease;
 }
-.mm-glass-card :deep(.el-table__body tr.hover-row > td.el-table__cell) {
-  background: rgba(167, 139, 250, 0.07) !important;
+.tbl-row:last-child { border-bottom: none; }
+.tbl-row:hover { background: rgba(167, 139, 250, 0.05); }
+.td-cell {
+  padding: 12px 12px;
+  vertical-align: middle;
 }
-.mm-glass-card :deep(.el-table__inner-wrapper::before) { display: none; }
-.mm-glass-card :deep(.el-table__body-wrapper) { background: transparent !important; }
+.td-center { text-align: center; }
+.td-right  { text-align: right; padding-right: 16px; }
+.td-empty  { text-align: center; padding: 48px 0; }
+
+/* ── Shared cell styles ───────────────────────────────────── */
+.muted { font-size: 12px; color: var(--el-text-color-secondary); }
+.version-cell { display: flex; align-items: center; gap: 8px; }
+.version-cell .el-button.is-circle .el-icon { display: inline-flex; align-items: center; justify-content: center; }
+.ellipsis-tags { display: inline-flex; align-items: center; }
 
 /* ── Stat chips ──────────────────────────────────────────── */
 .stats-cell { display: inline-flex; align-items: center; gap: 6px; }

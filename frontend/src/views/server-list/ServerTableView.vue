@@ -423,6 +423,7 @@ defineExpose({
 /* ── Table skeleton ───────────────────────────────────────────── */
 .srv-table {
   width: 100%;
+  min-width: 980px;
   border-collapse: collapse;
   table-layout: fixed;
 }

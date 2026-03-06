@@ -120,7 +120,10 @@ export function useDashboard(activeGroupIds: Ref<number[]>) {
     document.removeEventListener('visibilitychange', onVisibilityChange)
   })
 
-  watch(activeGroupIds, () => fetchData(), { deep: true })
+  watch(activeGroupIds, () => {
+    loaded.value = false
+    fetchData()
+  }, { deep: true })
 
   return { stats, systemStatus, runningServersUsage, serverPercent, hostMemoryTotalMb, loaded }
 }

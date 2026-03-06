@@ -91,7 +91,7 @@
     <!-- ───────────────────────── Dialogs ───────────────────────── -->
 
     <!-- Create server -->
-    <el-dialog v-model="createDialogVisible" width="460px" align-center class="srv-action-dialog" :show-close="false" destroy-on-close>
+    <el-dialog v-model="createDialogVisible" width="460px" align-center append-to-body class="srv-action-dialog" :show-close="false" destroy-on-close>
       <template #header>
         <div class="dlg-head">
           <div class="dlg-icon dlg-icon--create">
@@ -130,7 +130,7 @@
     </el-dialog>
 
     <!-- Import server -->
-    <el-dialog v-model="importDialogVisible" width="520px" align-center class="srv-action-dialog" :show-close="false" destroy-on-close>
+    <el-dialog v-model="importDialogVisible" width="520px" align-center append-to-body class="srv-action-dialog" :show-close="false" destroy-on-close>
       <template #header>
         <div class="dlg-head">
           <div class="dlg-icon dlg-icon--import">
@@ -173,7 +173,7 @@
     </el-dialog>
 
     <!-- Copy server -->
-    <el-dialog v-model="copyDialogVisible" width="500px" align-center class="srv-action-dialog" :show-close="false" destroy-on-close>
+    <el-dialog v-model="copyDialogVisible" width="500px" align-center append-to-body class="srv-action-dialog" :show-close="false" destroy-on-close>
       <template #header>
         <div class="dlg-head">
           <div class="dlg-icon dlg-icon--copy">
@@ -212,7 +212,7 @@
     </el-dialog>
 
     <!-- Rename server -->
-    <el-dialog v-model="renameDialogVisible" width="400px" align-center class="srv-action-dialog" :show-close="false" destroy-on-close>
+    <el-dialog v-model="renameDialogVisible" width="400px" align-center append-to-body class="srv-action-dialog" :show-close="false" destroy-on-close>
       <template #header>
         <div class="dlg-head">
           <div class="dlg-icon dlg-icon--rename">
@@ -244,7 +244,7 @@
     </el-dialog>
 
     <!-- Batch command -->
-    <el-dialog v-model="commandDialogVisible" width="500px" align-center class="srv-action-dialog" :show-close="false" destroy-on-close>
+    <el-dialog v-model="commandDialogVisible" width="500px" align-center append-to-body class="srv-action-dialog" :show-close="false" destroy-on-close>
       <template #header>
         <div class="dlg-head">
           <div class="dlg-icon dlg-icon--cmd">
@@ -276,6 +276,7 @@
       width="800px"
       top="8vh"
       align-center
+      append-to-body
       destroy-on-close
       class="config-dialog srv-action-dialog"
       :show-close="false"

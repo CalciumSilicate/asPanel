@@ -43,6 +43,19 @@
         <span class="count-badge" v-if="totalCount >= 0">
           共 <strong>{{ totalCount }}</strong> 个插件
         </span>
+
+        <template v-if="totalPages > 1">
+          <div class="toolbar-divider" />
+          <div class="page-nav" role="group" aria-label="分页">
+            <button class="page-btn" :disabled="currentPage <= 1" title="上一页" @click="$emit('prev-page')">
+              <el-icon :size="13"><ArrowLeft /></el-icon>
+            </button>
+            <span class="page-indicator">{{ currentPage }}<span class="page-sep">/</span>{{ totalPages }}</span>
+            <button class="page-btn" :disabled="currentPage >= totalPages" title="下一页" @click="$emit('next-page')">
+              <el-icon :size="13"><ArrowRight /></el-icon>
+            </button>
+          </div>
+        </template>
       </template>
 
       <!-- No server: page title + total -->
@@ -70,14 +83,18 @@
 </template>
 
 <script setup lang="ts">
-import { Search, Coin, Download, ArrowLeft } from '@element-plus/icons-vue'
+import { computed } from 'vue'
+import { Search, Coin, Download, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 
-defineProps<{
+const props = defineProps<{
   selectedServer: any | null
   totalCount: number
   totalPluginCount: number
   query: string
   filterStatus: string
+  currentPage: number
+  pageSize: number
+  totalFiltered: number
 }>()
 
 defineEmits<{
@@ -86,7 +103,11 @@ defineEmits<{
   'update:filterStatus': [string]
   'add-online': []
   'add-db': []
+  'prev-page': []
+  'next-page': []
 }>()
+
+const totalPages = computed(() => Math.ceil(props.totalFiltered / props.pageSize))
 </script>
 
 <style scoped>
@@ -280,4 +301,46 @@ defineEmits<{
 }
 .btn-create:hover { box-shadow: 0 6px 22px rgba(119, 181, 254, 0.65); transform: translateY(-1px) scale(1.04); }
 .btn-create:active { transform: scale(0.97); box-shadow: 0 2px 8px rgba(119, 181, 254, 0.30); }
+
+/* ── Pagination prev/next ─────────────────────────────────────── */
+.page-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.page-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px; height: 28px;
+  border-radius: 9px;
+  border: 1px solid rgba(119, 181, 254, 0.22);
+  background: rgba(119, 181, 254, 0.06);
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+  flex-shrink: 0;
+}
+.page-btn:not(:disabled):hover {
+  background: rgba(119, 181, 254, 0.14);
+  border-color: rgba(119, 181, 254, 0.45);
+  color: var(--brand-primary);
+  transform: scale(1.08);
+}
+.page-btn:disabled { opacity: 0.32; cursor: not-allowed; }
+:global(.dark) .page-btn {
+  border-color: rgba(119, 181, 254, 0.16);
+  background: rgba(119, 181, 254, 0.04);
+}
+.page-indicator {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-regular);
+  font-variant-numeric: tabular-nums;
+  min-width: 36px;
+  text-align: center;
+  user-select: none;
+}
+.page-sep { color: var(--el-text-color-placeholder); margin: 0 1px; font-weight: 400; }
 </style>

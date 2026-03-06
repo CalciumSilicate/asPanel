@@ -1,5 +1,6 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import type { Ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { io } from 'socket.io-client'
 import { storeToRefs } from 'pinia'
@@ -55,6 +56,7 @@ const mcAvatar = (name: string): string => {
 }
 
 export function useChatRoom(chatMainRef: Ref<HTMLElement | null>) {
+  const route = useRoute()
   const settings = useSettingsStore().settings
   const userStore = useUserStore()
   const { isPlatformAdmin, activeGroupId, capabilities } = storeToRefs(userStore)
@@ -199,8 +201,11 @@ export function useChatRoom(chatMainRef: Ref<HTMLElement | null>) {
   const loadGroups = async () => {
     const { data } = await apiClient.get('/api/tools/server-link/groups')
     groups.value = data || []
-    if (!isPlatformAdmin.value && activeGroupId.value) {
-      const target = groups.value.find((g) => g.id === activeGroupId.value)
+    // Priority: ?group=<id> query param > activeGroupId context
+    const queryGroupId = Number(route.query.group) || null
+    const targetId = queryGroupId ?? (!isPlatformAdmin.value ? activeGroupId.value : null)
+    if (targetId) {
+      const target = groups.value.find((g) => g.id === targetId)
       if (target && target.id !== activeGroup.value?.id) selectGroup(target)
     }
   }

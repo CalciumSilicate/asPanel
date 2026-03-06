@@ -791,7 +791,7 @@ onUnmounted(() => {
 .el-main {
   padding: 20px 24px 24px 24px;
   position: relative;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 /* ─── 路由切换过渡（blur + scale） ─────────────────────── */

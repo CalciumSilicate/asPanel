@@ -29,54 +29,65 @@
 
       <!-- Table -->
       <div class="db-table-wrap" v-loading="loading" element-loading-background="transparent">
-        <el-table :data="paged" stripe size="small" style="width:100%">
-          <el-table-column label="插件" min-width="280">
-            <template #default="{ row }">
-              <PluginNameCell
-                :id="row.meta.id"
-                :name="row.meta.name"
-                :filename="row.file_name"
-              />
-            </template>
-          </el-table-column>
-
-          <el-table-column label="版本" width="130">
-            <template #default="{ row }">
-              <el-tag v-if="row.meta.version" size="small" type="success">{{ row.meta.version }}</el-tag>
-              <el-tag v-else size="small" type="info">未知</el-tag>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="作者" min-width="160">
-            <template #default="{ row }">
-              <AuthorTagsCell :authors="getAuthorsArray(row.meta)" />
-            </template>
-          </el-table-column>
-
-          <el-table-column label="文件大小" width="110" align="center">
-            <template #default="{ row }">
-              <span class="size-cell">{{ (row.size / 1024).toFixed(1) }} KB</span>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="操作" width="260" align="center">
-            <template #default="{ row }">
-              <div class="row-actions">
-                <button class="act-btn act-install" @click="handleInstallClick(row)">
-                  <el-icon :size="11"><Download /></el-icon>安装
-                </button>
-                <button class="act-btn act-uninstall" @click="handleUninstallClick(row)">
-                  <el-icon :size="11"><Remove /></el-icon>卸载
-                </button>
-                <el-popconfirm title="确定要从数据库中永久删除这个插件吗？" width="250" @confirm="handleDelete(row)">
-                  <template #reference>
-                    <button class="act-btn act-delete"><el-icon :size="11"><Delete /></el-icon>删除</button>
-                  </template>
-                </el-popconfirm>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
+        <table class="native-table">
+          <colgroup>
+            <col style="min-width:280px" />
+            <col style="width:130px" />
+            <col style="min-width:160px" />
+            <col style="width:110px" />
+            <col style="width:260px" />
+          </colgroup>
+          <thead>
+            <tr class="thead-row">
+              <th class="th-cell">插件</th>
+              <th class="th-cell">版本</th>
+              <th class="th-cell">作者</th>
+              <th class="th-cell th-center">文件大小</th>
+              <th class="th-cell th-right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!loading && paged.length === 0">
+              <td colspan="5" class="td-empty">
+                <el-empty description="暂无插件" :image-size="80" />
+              </td>
+            </tr>
+            <tr v-for="row in paged" :key="row.id" class="tbl-row">
+              <td class="td-cell">
+                <PluginNameCell
+                  :id="row.meta.id"
+                  :name="row.meta.name"
+                  :filename="row.file_name"
+                />
+              </td>
+              <td class="td-cell">
+                <el-tag v-if="row.meta.version" size="small" type="success">{{ row.meta.version }}</el-tag>
+                <el-tag v-else size="small" type="info">未知</el-tag>
+              </td>
+              <td class="td-cell">
+                <AuthorTagsCell :authors="getAuthorsArray(row.meta)" />
+              </td>
+              <td class="td-cell td-center">
+                <span class="size-cell">{{ (row.size / 1024).toFixed(1) }} KB</span>
+              </td>
+              <td class="td-cell td-right">
+                <div class="row-actions">
+                  <button class="act-btn act-install" @click="handleInstallClick(row)">
+                    <el-icon :size="11"><Download /></el-icon>安装
+                  </button>
+                  <button class="act-btn act-uninstall" @click="handleUninstallClick(row)">
+                    <el-icon :size="11"><Remove /></el-icon>卸载
+                  </button>
+                  <el-popconfirm title="确定要从数据库中永久删除这个插件吗？" width="250" @confirm="handleDelete(row)">
+                    <template #reference>
+                      <button class="act-btn act-delete"><el-icon :size="11"><Delete /></el-icon>删除</button>
+                    </template>
+                  </el-popconfirm>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- Footer pagination -->
@@ -701,25 +712,46 @@ onMounted(() => {
   border-top: 1px solid rgba(119, 181, 254, 0.12);
 }
 
-/* ── Table deep overrides ────────────────────────────────── */
-:deep(.el-table) { background: transparent !important; }
-:deep(.el-table tr) { background: transparent !important; }
-:deep(.el-table th.el-table__cell) {
-  background: rgba(119, 181, 254, 0.04) !important;
+/* ── Native table ────────────────────────────────────────── */
+.native-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+thead { position: sticky; top: 0; z-index: 10; }
+.thead-row {
+  background: rgba(248, 250, 255, 0.96);
+  -webkit-backdrop-filter: saturate(140%) blur(8px);
+  backdrop-filter: saturate(140%) blur(8px);
+  border-bottom: 1px solid rgba(119, 181, 254, 0.12);
+}
+:global(.dark) .thead-row { background: rgba(15, 23, 42, 0.96); }
+.th-cell {
+  padding: 10px 12px;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--el-text-color-secondary);
+  opacity: 0.72;
+  white-space: nowrap;
+  text-align: left;
 }
-:deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
-  background: rgba(119, 181, 254, 0.025) !important;
+.th-center { text-align: center; }
+.th-right  { text-align: right; padding-right: 16px; }
+.tbl-row {
+  border-bottom: 1px solid rgba(119, 181, 254, 0.07);
+  transition: background 0.12s ease;
 }
-:deep(.el-table__body tr.hover-row > td.el-table__cell) {
-  background: rgba(119, 181, 254, 0.06) !important;
+.tbl-row:last-child { border-bottom: none; }
+.tbl-row:hover { background: rgba(119, 181, 254, 0.05); }
+.td-cell {
+  padding: 12px 12px;
+  vertical-align: middle;
 }
-:deep(.el-table__inner-wrapper::before) { display: none; }
-:deep(.el-table__body-wrapper) { background: transparent !important; }
+.td-center { text-align: center; }
+.td-right  { text-align: right; padding-right: 16px; }
+.td-empty  { text-align: center; padding: 48px 0; }
 
 /* ── Cell styles ─────────────────────────────────────────── */
 .size-cell {

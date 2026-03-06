@@ -102,4 +102,26 @@ const emit = defineEmits<{ console: [id: number] }>()
 @media (max-width: 1199px) { .server-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 899px)  { .server-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 599px)  { .server-grid { grid-template-columns: 1fr; } }
+
+.server-grid > :deep(*) {
+  animation: server-card-in 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.server-grid > :deep(*:nth-child(1))  { animation-delay: 0ms; }
+.server-grid > :deep(*:nth-child(2))  { animation-delay: 55ms; }
+.server-grid > :deep(*:nth-child(3))  { animation-delay: 110ms; }
+.server-grid > :deep(*:nth-child(4))  { animation-delay: 165ms; }
+.server-grid > :deep(*:nth-child(5))  { animation-delay: 220ms; }
+.server-grid > :deep(*:nth-child(6))  { animation-delay: 275ms; }
+.server-grid > :deep(*:nth-child(7))  { animation-delay: 330ms; }
+.server-grid > :deep(*:nth-child(8))  { animation-delay: 385ms; }
+@keyframes server-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.93);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
 </style>

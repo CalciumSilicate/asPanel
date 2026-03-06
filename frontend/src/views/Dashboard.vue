@@ -37,10 +37,10 @@
         <div class="db-item" style="--delay: 0ms">
           <WelcomeCard :username="user.username || 'admin'" :avatar-url="fullAvatarUrl" />
         </div>
-        <div class="db-item" style="--delay: 120ms">
+        <div class="db-item" style="--delay: 160ms">
           <StatsCards :stats="stats" :system-status="systemStatus" :server-percent="serverPercent" />
         </div>
-        <div class="db-item" style="--delay: 240ms">
+        <div class="db-item" style="--delay: 320ms">
           <ResourceMonitor
             :servers="runningServersUsage"
             :host-memory-total-mb="hostMemoryTotalMb"
@@ -89,30 +89,36 @@ const goToConsole = (serverId: number) => router.push(`/console/${serverId}`)
   width: 100%;
 }
 
-/* ─── 骨架过渡：淡出 + 轻微上移 ────────────────────────── */
+/* ─── 骨架过渡：模糊淡出 + 上移缩小 ────────────────────── */
 .db-skeleton-leave-active {
-  transition: opacity 0.38s ease, transform 0.38s ease;
+  transition: opacity 0.42s ease, transform 0.42s ease, filter 0.42s ease;
   pointer-events: none;
   z-index: 1;
 }
 .db-skeleton-leave-to {
   opacity: 0;
-  transform: translateY(-10px);
+  transform: translateY(-14px) scale(0.98);
+  filter: blur(6px);
 }
 
-/* ─── 内容入场：每个区块错开浮现 ────────────────────────── */
+/* ─── 内容入场：弹簧 + 模糊焦入，逐块错开 ──────────────── */
 .db-content-enter-active .db-item {
-  animation: db-rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: db-rise 0.72s cubic-bezier(0.34, 1.56, 0.64, 1) both;
   animation-delay: var(--delay, 0ms);
 }
 @keyframes db-rise {
   from {
     opacity: 0;
-    transform: translateY(28px) scale(0.98);
+    transform: translateY(36px) scale(0.95);
+    filter: blur(10px);
+  }
+  60% {
+    filter: blur(0px);
   }
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+    filter: blur(0px);
   }
 }
 

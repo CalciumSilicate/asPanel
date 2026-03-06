@@ -116,6 +116,21 @@ defineProps<{
     transform 0.28s cubic-bezier(.34,1.56,.64,1),
     box-shadow 0.28s ease,
     border-color 0.28s ease;
+  animation: stat-card-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.stat-card:nth-child(1) { animation-delay: 0ms; }
+.stat-card:nth-child(2) { animation-delay: 75ms; }
+.stat-card:nth-child(3) { animation-delay: 150ms; }
+.stat-card:nth-child(4) { animation-delay: 225ms; }
+@keyframes stat-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(22px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 .stat-card:hover {
   transform: translateY(-5px);

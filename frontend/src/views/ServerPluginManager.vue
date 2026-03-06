@@ -8,11 +8,16 @@
       :total-plugin-count="totalPluginCount"
       :query="query"
       :filter-status="filterStatus"
+      :current-page="page"
+      :page-size="pageSize"
+      :total-filtered="filteredPlugins.length"
       @select-server="selectServer"
       @update:query="query = $event; page = 1"
       @update:filter-status="filterStatus = $event; page = 1"
       @add-online="openAddOnlinePluginDialog"
       @add-db="openAddDbPluginDialog"
+      @prev-page="page > 1 && page--"
+      @next-page="page < Math.ceil(filteredPlugins.length / pageSize) && page++"
     />
 
     <!-- No server selected: Picker -->
@@ -31,80 +36,77 @@
 
       <!-- Plugin table -->
       <div class="pm-table-wrap" v-loading="pluginsLoading" element-loading-background="transparent">
-        <el-table
-          :data="pagedPlugins"
-          stripe
-          size="small"
-          :row-class-name="pluginRowClassName"
-          style="width: 100%"
-        >
-          <el-table-column label="插件" min-width="280">
-            <template #default="{ row }">
-              <PluginNameCell
-                :id="row.meta.id"
-                :name="row.meta.name"
-                :description="row.meta.description?.zh_cn || row.meta.description?.en_us"
-                :filename="row.file_name"
-              />
-            </template>
-          </el-table-column>
-          <el-table-column label="作者" min-width="160">
-            <template #default="{ row }">
-              <AuthorTagsCell :authors="getAuthorsArray(row.meta)" />
-            </template>
-          </el-table-column>
-          <el-table-column label="版本" width="180">
-            <template #default="{ row }">
-              <div class="version-cell">
-                <el-tag size="small" :type="row.meta.version ? 'success' : 'info'">{{ row.meta.version || '未知' }}</el-tag>
-                <el-tooltip v-if="isUpdateAvailable(row)" :content="`有新版：${onlinePluginsMap.get(row.meta.id)?.release?.latest_version || ''}`" placement="top-start" effect="light">
-                  <el-button size="small" type="warning" circle plain :icon="Refresh" :loading="row.loading" @click="handleUpdatePlugin(row)" />
-                </el-tooltip>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="文件大小" width="100" align="center">
-            <template #default="{ row }">
-              <span>{{ (row.size / 1024).toFixed(1) }} KB</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="100" align="center">
-            <template #default="{ row }">
-              <el-switch v-model="row.enabled" @change="handlePluginSwitch(row)" :loading="row.loading" />
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="200" align="center">
-            <template #default="{ row }">
-              <div class="row-actions">
-                <button class="act-btn act-dl" :disabled="row.loading" @click="handlePluginDownload(row)">
-                  <el-icon :size="12"><Download /></el-icon>下载
-                </button>
-                <el-popconfirm title="确定删除这个插件吗？" width="220" @confirm="handlePluginDelete(row)">
-                  <template #reference>
-                    <button class="act-btn act-danger" :disabled="row.loading">
-                      <el-icon :size="12"><Delete /></el-icon>删除
-                    </button>
-                  </template>
-                </el-popconfirm>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
+        <table class="native-table">
+          <colgroup>
+            <col style="min-width:280px" />
+            <col style="min-width:160px" />
+            <col style="width:180px" />
+            <col style="width:100px" />
+            <col style="width:100px" />
+            <col style="width:200px" />
+          </colgroup>
+          <thead>
+            <tr class="thead-row">
+              <th class="th-cell">插件</th>
+              <th class="th-cell">作者</th>
+              <th class="th-cell">版本</th>
+              <th class="th-cell th-center">文件大小</th>
+              <th class="th-cell th-center">状态</th>
+              <th class="th-cell th-right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!pluginsLoading && pagedPlugins.length === 0">
+              <td colspan="6" class="td-empty">
+                <el-empty description="暂无插件" :image-size="80" />
+              </td>
+            </tr>
+            <tr v-for="row in pagedPlugins" :key="row.file_name"
+                :class="['tbl-row', { 'row-disabled': !row.enabled }]">
+              <td class="td-cell">
+                <PluginNameCell
+                  :id="row.meta.id"
+                  :name="row.meta.name"
+                  :description="row.meta.description?.zh_cn || row.meta.description?.en_us"
+                  :filename="row.file_name"
+                />
+              </td>
+              <td class="td-cell">
+                <AuthorTagsCell :authors="getAuthorsArray(row.meta)" />
+              </td>
+              <td class="td-cell">
+                <div class="version-cell">
+                  <el-tag size="small" :type="row.meta.version ? 'success' : 'info'">{{ row.meta.version || '未知' }}</el-tag>
+                  <el-tooltip v-if="isUpdateAvailable(row)" :content="`有新版：${onlinePluginsMap.get(row.meta.id)?.release?.latest_version || ''}`" placement="top-start" effect="light">
+                    <el-button size="small" type="warning" circle plain :icon="Refresh" :loading="row.loading" @click="handleUpdatePlugin(row)" />
+                  </el-tooltip>
+                </div>
+              </td>
+              <td class="td-cell td-center">
+                <span class="size-cell">{{ (row.size / 1024).toFixed(1) }} KB</span>
+              </td>
+              <td class="td-cell td-center">
+                <el-switch v-model="row.enabled" @change="handlePluginSwitch(row)" :loading="row.loading" />
+              </td>
+              <td class="td-cell td-right">
+                <div class="row-actions">
+                  <button class="act-btn act-dl" :disabled="row.loading" @click="handlePluginDownload(row)">
+                    <el-icon :size="12"><Download /></el-icon>下载
+                  </button>
+                  <el-popconfirm title="确定删除这个插件吗？" width="220" @confirm="handlePluginDelete(row)">
+                    <template #reference>
+                      <button class="act-btn act-danger" :disabled="row.loading">
+                        <el-icon :size="12"><Delete /></el-icon>删除
+                      </button>
+                    </template>
+                  </el-popconfirm>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
-      <!-- Footer: pagination -->
-      <div class="pm-footer">
-        <el-pagination
-          background
-          layout="prev, pager, next, sizes, total"
-          :page-sizes="[10, 20, 50, 100]"
-          :page-size="pageSize"
-          :current-page="page"
-          :total="filteredPlugins.length"
-          @current-change="(p: number) => page = p"
-          @size-change="(s: number) => { pageSize = s; page = 1; }"
-        />
-      </div>
     </div>
 
     <!-- ───────────────────────── Dialogs ───────────────────────── -->
@@ -164,71 +166,83 @@
 
       <!-- Table -->
       <div class="table-card">
-        <el-table :data="onlinePaged" v-loading="onlinePluginsLoading" stripe size="small" @row-dblclick="openOnlineDetail">
-          <el-table-column label="插件" min-width="260">
-            <template #default="{ row }">
-              <PluginNameCell
-                :id="row.meta.id"
-                :name="row.meta.name"
-                :description="row.meta.description?.zh_cn || row.meta.description?.en_us"
-              />
-            </template>
-          </el-table-column>
-
-          <el-table-column prop="release.latest_version" label="最新版本" width="130">
-            <template #default="{ row }">
-              <el-tag size="small" :type="row.latest?.prerelease ? 'warning' : 'success'">
-                {{ row.release?.latest_version || '-' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="当前版本" width="130">
-            <template #default="{ row }">
-              <el-tag v-if="getPluginInstallStatus(row.meta.id)" type="success" size="small">
-                {{ getPluginInstallStatus(row.meta.id) }}
-              </el-tag>
-              <el-tag v-else type="info" size="small" effect="plain">未安装</el-tag>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="作者" min-width="160">
-            <template #default="{ row }">
-              <AuthorTagsCell :authors="row.meta?.authors" />
-            </template>
-          </el-table-column>
-
-          <el-table-column label="统计" width="160" align="center">
-            <template #default="{ row }">
-              <div class="stats-cell">
-                <el-tooltip content="Repo Stars">
-                  <span class="stat-chip stat-star">
-                    <el-icon :size="11"><Star/></el-icon>
-                    {{ row.repository?.stargazers_count ?? 0 }}
-                  </span>
-                </el-tooltip>
-                <el-tooltip content="下载量">
-                  <span class="stat-chip stat-dl-chip">
-                    <el-icon :size="11"><Download/></el-icon>
-                    {{ row.latest?.asset?.download_count ?? 0 }}
-                  </span>
-                </el-tooltip>
-              </div>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="操作" width="210" align="center">
-            <template #default="{ row }">
-              <div class="row-actions">
-                <button class="act-btn act-detail" @click="openOnlineDetail(row)">详情</button>
-                <button class="act-btn act-dl" :disabled="!row.latest?.asset?.browser_download_url" @click="go(row.latest?.asset?.browser_download_url)">下载</button>
-                <button class="act-btn act-install" @click="handleInstallOnlineRow(row)">
-                  <el-icon :size="12"><Upload /></el-icon>安装
-                </button>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
+        <div v-loading="onlinePluginsLoading" element-loading-background="transparent">
+          <table class="native-table">
+            <colgroup>
+              <col style="min-width:260px" />
+              <col style="width:130px" />
+              <col style="width:130px" />
+              <col style="min-width:160px" />
+              <col style="width:160px" />
+              <col style="width:210px" />
+            </colgroup>
+            <thead>
+              <tr class="thead-row">
+                <th class="th-cell">插件</th>
+                <th class="th-cell">最新版本</th>
+                <th class="th-cell">当前版本</th>
+                <th class="th-cell">作者</th>
+                <th class="th-cell th-center">统计</th>
+                <th class="th-cell th-right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="!onlinePluginsLoading && onlinePaged.length === 0">
+                <td colspan="6" class="td-empty">
+                  <el-empty description="暂无插件" :image-size="80" />
+                </td>
+              </tr>
+              <tr v-for="row in onlinePaged" :key="row.meta.id" class="tbl-row" @dblclick="openOnlineDetail(row)">
+                <td class="td-cell">
+                  <PluginNameCell
+                    :id="row.meta.id"
+                    :name="row.meta.name"
+                    :description="row.meta.description?.zh_cn || row.meta.description?.en_us"
+                  />
+                </td>
+                <td class="td-cell">
+                  <el-tag size="small" :type="row.latest?.prerelease ? 'warning' : 'success'">
+                    {{ row.release?.latest_version || '-' }}
+                  </el-tag>
+                </td>
+                <td class="td-cell">
+                  <el-tag v-if="getPluginInstallStatus(row.meta.id)" type="success" size="small">
+                    {{ getPluginInstallStatus(row.meta.id) }}
+                  </el-tag>
+                  <el-tag v-else type="info" size="small" effect="plain">未安装</el-tag>
+                </td>
+                <td class="td-cell">
+                  <AuthorTagsCell :authors="row.meta?.authors" />
+                </td>
+                <td class="td-cell td-center">
+                  <div class="stats-cell">
+                    <el-tooltip content="Repo Stars">
+                      <span class="stat-chip stat-star">
+                        <el-icon :size="11"><Star/></el-icon>
+                        {{ row.repository?.stargazers_count ?? 0 }}
+                      </span>
+                    </el-tooltip>
+                    <el-tooltip content="下载量">
+                      <span class="stat-chip stat-dl-chip">
+                        <el-icon :size="11"><Download/></el-icon>
+                        {{ row.latest?.asset?.download_count ?? 0 }}
+                      </span>
+                    </el-tooltip>
+                  </div>
+                </td>
+                <td class="td-cell td-right">
+                  <div class="row-actions">
+                    <button class="act-btn act-detail" @click="openOnlineDetail(row)">详情</button>
+                    <button class="act-btn act-dl" :disabled="!row.latest?.asset?.browser_download_url" @click="go(row.latest?.asset?.browser_download_url)">下载</button>
+                    <button class="act-btn act-install" @click="handleInstallOnlineRow(row)">
+                      <el-icon :size="12"><Upload /></el-icon>安装
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <!-- Pagination -->
@@ -1175,38 +1189,52 @@ onMounted(() => {
   padding: 0 4px;
 }
 
-.pm-footer {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 10px 20px;
-  border-top: 1px solid rgba(119, 181, 254, 0.12);
+/* ── Native table ────────────────────────────────────────── */
+.native-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
 }
+thead { position: sticky; top: 0; z-index: 10; }
+.thead-row {
+  background: rgba(248, 250, 255, 0.96);
+  -webkit-backdrop-filter: saturate(140%) blur(8px);
+  backdrop-filter: saturate(140%) blur(8px);
+  border-bottom: 1px solid rgba(119, 181, 254, 0.12);
+}
+:global(.dark) .thead-row { background: rgba(15, 23, 42, 0.96); }
+.th-cell {
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--el-text-color-secondary);
+  opacity: 0.72;
+  white-space: nowrap;
+  text-align: left;
+}
+.th-center { text-align: center; }
+.th-right  { text-align: right; padding-right: 16px; }
+.tbl-row {
+  border-bottom: 1px solid rgba(119, 181, 254, 0.07);
+  transition: background 0.12s ease;
+}
+.tbl-row:last-child { border-bottom: none; }
+.tbl-row:hover { background: rgba(119, 181, 254, 0.05); }
+.tbl-row.row-disabled { opacity: 0.55; }
+.td-cell {
+  padding: 12px 12px;
+  vertical-align: middle;
+}
+.td-center { text-align: center; }
+.td-right  { text-align: right; padding-right: 16px; }
+.td-empty  { text-align: center; padding: 48px 0; }
 
 /* ── Shared cell styles ───────────────────────────────────── */
 .version-cell { display: flex; align-items: center; gap: 8px; }
 .version-cell .el-button.is-circle .el-icon { display: inline-flex; align-items: center; justify-content: center; }
-
-/* ── Table deep overrides (glass card) ───────────────────── */
-.pm-glass-card :deep(.el-table) { background: transparent !important; }
-.pm-glass-card :deep(.el-table tr) { background: transparent !important; }
-.pm-glass-card :deep(.el-table th.el-table__cell) {
-  background: rgba(119, 181, 254, 0.04) !important;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--el-text-color-secondary);
-}
-.pm-glass-card :deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
-  background: rgba(119, 181, 254, 0.025) !important;
-}
-.pm-glass-card :deep(.el-table__body tr.hover-row > td.el-table__cell) {
-  background: rgba(119, 181, 254, 0.06) !important;
-}
-.pm-glass-card :deep(.el-table__inner-wrapper::before) { display: none; }
-.pm-glass-card :deep(.el-table__body-wrapper) { background: transparent !important; }
+.size-cell { font-family: 'Maple Mono', ui-monospace, monospace; font-size: 12px; color: var(--el-text-color-secondary); }
 
 /* ── Stat chips ──────────────────────────────────────────── */
 .stats-cell { display: inline-flex; align-items: center; gap: 6px; }
@@ -1262,6 +1290,5 @@ onMounted(() => {
 .leading-6 { line-height: 24px; }
 .whitespace-pre-wrap { white-space: pre-wrap; }
 
-:deep(.disabled-plugin-row) { color: #a8abb2; }
-:deep(.disabled-plugin-row:hover > td) { background-color: rgba(119, 181, 254, 0.04) !important; }
+
 </style>
