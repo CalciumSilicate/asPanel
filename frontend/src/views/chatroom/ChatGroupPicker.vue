@@ -52,17 +52,6 @@
             <div class="card-id">ID {{ g.id }}</div>
           </div>
 
-          <div class="card-stats">
-            <div class="stat-chip">
-              <span class="stat-label">频道热度</span>
-              <strong>{{ onlineCount(g) }}</strong>
-            </div>
-            <div class="stat-chip muted">
-              <span class="stat-label">服务器数</span>
-              <strong>{{ g.server_ids.length }}</strong>
-            </div>
-          </div>
-
           <div class="card-footer">
             <div class="bar-track">
               <div class="bar-fill" :style="{ width: barWidth(g) }" />

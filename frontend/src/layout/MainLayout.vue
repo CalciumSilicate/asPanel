@@ -113,11 +113,15 @@
     <el-container class="content-wrapper">
       <!-- 主内容区域 -->
       <el-main>
-        <router-view v-slot="{ Component, route }">
-          <transition name="fade-transform">
-            <component :is="Component" :key="route.fullPath"/>
-          </transition>
-        </router-view>
+        <div class="route-stage">
+          <router-view v-slot="{ Component, route }">
+            <transition name="fade-transform" mode="out-in">
+              <div :key="route.fullPath" class="route-page">
+                <component :is="Component" />
+              </div>
+            </transition>
+          </router-view>
+        </div>
       </el-main>
     </el-container>
 
@@ -464,6 +468,7 @@ onUnmounted(() => {
 .main-layout {
   height: 100vh;
   position: relative;
+  overflow: hidden;
 }
 
 .content-wrapper {
@@ -471,6 +476,9 @@ onUnmounted(() => {
   height: calc(100vh - var(--el-header-height));
   position: relative;
   z-index: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* ─── 顶栏 ─────────────────────────────────────────────── */
@@ -813,7 +821,29 @@ onUnmounted(() => {
 .el-main {
   padding: 20px 24px 24px 24px;
   position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.route-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 100%;
+  isolation: isolate;
+  overflow: hidden;
+  overflow: clip;
+}
+
+.route-page {
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+  transform-origin: center top;
+  backface-visibility: hidden;
+  will-change: transform, opacity, filter;
 }
 
 /* ─── 路由切换过渡（blur + scale） ─────────────────────── */
@@ -822,8 +852,6 @@ onUnmounted(() => {
 }
 .fade-transform-leave-active {
   transition: opacity 0.18s ease-in, transform 0.18s ease-in, filter 0.18s ease-in;
-  position: absolute;
-  width: 100%;
 }
 .fade-transform-enter-from {
   opacity: 0;

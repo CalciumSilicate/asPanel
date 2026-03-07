@@ -63,15 +63,7 @@
             </div>
           </div>
 
-          <div class="card-footer">
-            <div class="bar-track">
-              <div class="bar-fill" :style="{ width: barWidth(g) }" />
-            </div>
-            <div class="footer-row">
-              <span class="bar-label">{{ serverCount(g) }} 台服务器</span>
-              <span class="qq-label">{{ g.qqGroup ? `QQ ${g.qqGroup}` : '等待绑定' }}</span>
-            </div>
-          </div>
+
         </div>
       </div>
     </div>

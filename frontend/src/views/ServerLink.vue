@@ -98,7 +98,8 @@ const {
 /* ─── Page layout ─────────────────────────────────────────── */
 .sl-page {
   position: relative;
-  height: 100%;
+  height: calc(100vh - var(--el-header-height) - 44px);
+  height: calc(100dvh - var(--el-header-height) - 44px);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -246,6 +247,7 @@ const {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
+  overflow: hidden;
 }
 .sk-sl-panel,
 .sl-content-wrap {
@@ -255,6 +257,8 @@ const {
 .sl-content-wrap {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* ─── Page transitions ───────────────────────────────── */
