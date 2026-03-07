@@ -18,7 +18,7 @@
       </div>
       <div class="header-right">
         <!-- Group Context Selector: 只对非平台管理员显示 -->
-        <div class="group-selector" v-if="user.id && !isPlatformAdmin && user.group_permissions.length > 0" style="margin-right: 12px;">
+        <div class="group-selector" v-if="user.id && !isPlatformAdmin && user.group_permissions.length > 0">
           <el-select
             :model-value="activeGroupIds[0]"
             @update:model-value="(val: number | undefined) => activeGroupIds = val ? [val] : []"
@@ -484,8 +484,6 @@ onUnmounted(() => {
   padding: 0 20px;
   height: var(--el-header-height);
   background: rgba(255,255,255,0.60) !important;
-  -webkit-backdrop-filter: saturate(200%) blur(20px);
-  backdrop-filter: saturate(200%) blur(20px);
   border-bottom: none !important;
   box-shadow:
     0 1px 0 0 rgba(119,181,254,0.30),
@@ -526,7 +524,33 @@ onUnmounted(() => {
 
 /* ─── Brand 品牌标题 ────────────────────────────────────── */
 .header-left { display: flex; align-items: center; height: var(--el-header-height); }
-.header-right { display: flex; align-items: center; }
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.group-selector {
+  margin-right: 6px;
+}
+
+.group-selector :deep(.el-select__wrapper) {
+  min-height: 42px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.46);
+  border: 1px solid rgba(119,181,254,0.16);
+  box-shadow:
+    0 10px 24px rgba(119,181,254,0.08),
+    inset 0 1px 0 rgba(255,255,255,0.82);
+}
+
+:global(.dark) .group-selector :deep(.el-select__wrapper) {
+  background: rgba(15,23,42,0.56);
+  border-color: rgba(119,181,254,0.12);
+  box-shadow:
+    0 14px 28px rgba(0,0,0,0.30),
+    inset 0 1px 0 rgba(255,255,255,0.04);
+}
 
 .brand {
   margin-left: 8px;
@@ -626,8 +650,6 @@ onUnmounted(() => {
   position: relative;
   z-index: 1;
   background: rgba(255,255,255,0.42) !important;
-  -webkit-backdrop-filter: saturate(160%) blur(16px);
-  backdrop-filter: saturate(160%) blur(16px);
   box-shadow:
     1px 0 0 rgba(119,181,254,0.18),
     4px 0 20px rgba(119,181,254,0.06);

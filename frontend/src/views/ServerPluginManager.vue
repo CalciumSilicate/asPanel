@@ -93,13 +93,9 @@
                   <button class="act-btn act-dl" :disabled="row.loading" @click="handlePluginDownload(row)">
                     <el-icon :size="12"><Download /></el-icon>下载
                   </button>
-                  <el-popconfirm title="确定删除这个插件吗？" width="220" @confirm="handlePluginDelete(row)">
-                    <template #reference>
-                      <button class="act-btn act-danger" :disabled="row.loading">
-                        <el-icon :size="12"><Delete /></el-icon>删除
-                      </button>
-                    </template>
-                  </el-popconfirm>
+                  <button class="act-btn act-danger" :disabled="row.loading" @click="openDeleteConfirm(row)">
+                    <el-icon :size="12"><Delete /></el-icon>删除
+                  </button>
                 </div>
               </td>
             </tr>
@@ -112,353 +108,506 @@
     <!-- ───────────────────────── Dialogs ───────────────────────── -->
 
     <!-- Online Plugin Explorer -->
-    <el-dialog v-if="addOnlinePluginDialogVisible" v-model="addOnlinePluginDialogVisible" title="MCDR 插件市场"
-               width="85%" top="5vh" destroy-on-close>
-      <!-- Toolbar -->
-      <el-card shadow="never" class="mb-3">
-        <template #header>
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <span class="text-base font-medium">浏览插件</span>
-              <el-tag type="info" v-if="onlineStats.total">共 {{ onlineStats.total }} 个插件</el-tag>
-              <el-tag type="success" v-if="onlineStats.updatedAt">更新于：{{ onlineStats.updatedAt }}</el-tag>
+    <el-dialog
+      v-if="addOnlinePluginDialogVisible"
+      v-model="addOnlinePluginDialogVisible"
+      width="88%"
+      top="4vh"
+      destroy-on-close
+      append-to-body
+      class="pm-online-dialog"
+      :show-close="false"
+    >
+      <template #header>
+        <div class="dlg-head">
+          <div class="dlg-icon dlg-icon--market">
+            <el-icon :size="18"><Coin /></el-icon>
+          </div>
+          <div class="dlg-title-group">
+            <span class="dlg-title">MCDR 插件市场</span>
+            <span class="dlg-subtitle">
+              <template v-if="onlineStats.total">共 {{ onlineStats.total }} 个插件</template>
+              <template v-if="onlineStats.updatedAt"> · 更新于 {{ onlineStats.updatedAt }}</template>
+            </span>
+          </div>
+          <!-- Page nav in header -->
+          <div v-if="onlineFiltered.length > onlinePageSize" class="dlg-page-nav">
+            <div class="toolbar-divider" />
+            <div class="page-nav">
+              <button class="page-btn" :disabled="onlinePage <= 1" @click="onlinePage--">
+                <el-icon :size="12"><ArrowLeft /></el-icon>
+              </button>
+              <span class="page-indicator">{{ onlinePage }}<span class="page-sep">/</span>{{ Math.ceil(onlineFiltered.length / onlinePageSize) }}</span>
+              <button class="page-btn" :disabled="onlinePage >= Math.ceil(onlineFiltered.length / onlinePageSize)" @click="onlinePage++">
+                <el-icon :size="12"><ArrowRight /></el-icon>
+              </button>
             </div>
-            <div class="flex items-center gap-2">
-              <el-button :loading="onlinePluginsLoading" type="primary" @click="fetchOnlinePlugins(true)">刷新</el-button>
+            <div class="toolbar-divider" />
+          </div>
+          <button class="dlg-btn-refresh" :disabled="onlinePluginsLoading" @click="fetchOnlinePlugins(true)">
+            <el-icon :size="12" :class="{ 'is-loading': onlinePluginsLoading }"><Refresh /></el-icon>刷新
+          </button>
+          <button class="dlg-close-btn" @click="addOnlinePluginDialogVisible = false">
+            <el-icon :size="13"><Close /></el-icon>
+          </button>
+        </div>
+      </template>
+
+      <!-- Filter bar -->
+      <div class="pm-filter-bar">
+        <el-input
+          v-model="onlineQuery"
+          placeholder="搜索：名称 / ID / 作者 / 标签"
+          clearable
+          class="pm-filter-search"
+          @input="onlinePage = 1"
+        >
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+        <el-select
+          v-model="onlineSelectedLabels"
+          multiple
+          collapse-tags
+          collapse-tags-tooltip
+          placeholder="标签筛选"
+          class="pm-filter-labels"
+        >
+          <el-option v-for="l in onlineAllLabels" :key="l" :label="l" :value="l" />
+        </el-select>
+        <el-select v-model="onlineSortBy" placeholder="排序" class="pm-filter-sort">
+          <el-option label="最新发布" value="latestDate" />
+          <el-option label="下载最多" value="downloads" />
+          <el-option label="Star 最多" value="stars" />
+          <el-option label="名称" value="name" />
+        </el-select>
+        <div class="pm-filter-checks">
+          <el-checkbox v-model="onlineShowPrerelease">包含预发布</el-checkbox>
+          <el-checkbox v-model="onlineHideArchived">隐藏已归档</el-checkbox>
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div class="pm-online-table-wrap" v-loading="onlinePluginsLoading" element-loading-background="transparent">
+        <table class="native-table">
+          <colgroup>
+            <col style="min-width:260px" />
+            <col style="width:130px" />
+            <col style="width:130px" />
+            <col style="min-width:160px" />
+            <col style="width:160px" />
+            <col style="width:210px" />
+          </colgroup>
+          <thead>
+            <tr class="thead-row">
+              <th class="th-cell">插件</th>
+              <th class="th-cell">最新版本</th>
+              <th class="th-cell">当前版本</th>
+              <th class="th-cell">作者</th>
+              <th class="th-cell th-center">统计</th>
+              <th class="th-cell th-right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!onlinePluginsLoading && onlinePaged.length === 0">
+              <td colspan="6" class="td-empty">
+                <el-empty description="暂无插件" :image-size="80" />
+              </td>
+            </tr>
+            <tr v-for="row in onlinePaged" :key="row.meta.id" class="tbl-row" @dblclick="openOnlineDetail(row)">
+              <td class="td-cell">
+                <PluginNameCell
+                  :id="row.meta.id"
+                  :name="row.meta.name"
+                  :description="row.meta.description?.zh_cn || row.meta.description?.en_us"
+                />
+              </td>
+              <td class="td-cell">
+                <el-tag size="small" :type="row.latest?.prerelease ? 'warning' : 'success'">
+                  {{ row.release?.latest_version || '-' }}
+                </el-tag>
+              </td>
+              <td class="td-cell">
+                <el-tag v-if="getPluginInstallStatus(row.meta.id)" type="success" size="small">
+                  {{ getPluginInstallStatus(row.meta.id) }}
+                </el-tag>
+                <el-tag v-else type="info" size="small" effect="plain">未安装</el-tag>
+              </td>
+              <td class="td-cell">
+                <AuthorTagsCell :authors="row.meta?.authors" />
+              </td>
+              <td class="td-cell td-center">
+                <div class="stats-cell">
+                  <el-tooltip content="Repo Stars">
+                    <span class="stat-chip stat-star">
+                      <el-icon :size="11"><Star /></el-icon>
+                      {{ row.repository?.stargazers_count ?? 0 }}
+                    </span>
+                  </el-tooltip>
+                  <el-tooltip content="下载量">
+                    <span class="stat-chip stat-dl-chip">
+                      <el-icon :size="11"><Download /></el-icon>
+                      {{ row.latest?.asset?.download_count ?? 0 }}
+                    </span>
+                  </el-tooltip>
+                </div>
+              </td>
+              <td class="td-cell td-right">
+                <div class="row-actions">
+                  <button class="act-btn act-detail" @click="openOnlineDetail(row)">详情</button>
+                  <button class="act-btn act-dl" :disabled="!row.latest?.asset?.browser_download_url" @click="go(row.latest?.asset?.browser_download_url)">
+                    <el-icon :size="12"><Download /></el-icon>下载
+                  </button>
+                  <button class="act-btn act-install" @click="handleInstallOnlineRow(row)">
+                    <el-icon :size="12"><Upload /></el-icon>安装
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </el-dialog>
+
+    <!-- Plugin Detail Drawer -->
+    <el-drawer v-model="detailVisible" size="50%" direction="rtl" :destroy-on-close="true" append-to-body class="pm-detail-drawer">
+      <template #header>
+        <div class="drw-header">
+          <div class="drw-header-shimmer" aria-hidden="true" />
+          <div class="drw-header-body">
+            <div class="drw-header-icon">
+              <el-icon :size="18"><Coin /></el-icon>
+            </div>
+            <div class="drw-title-group">
+              <div class="drw-title">{{ detail?.meta?.name }}</div>
+              <div class="drw-subtitle">
+                <span class="drw-id">{{ detail?.meta?.id }}</span>
+                <el-tag size="small" :type="detail?.latest?.prerelease ? 'warning' : 'success'" effect="light">
+                  {{ detail?.release?.latest_version }}
+                </el-tag>
+                <el-tag v-if="detail?.repository?.archived" size="small" type="danger" effect="light">Archived</el-tag>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <div class="drw-body">
+        <!-- Meta info card -->
+        <div class="drw-card">
+          <div class="drw-info-grid">
+            <div class="drw-info-row">
+              <span class="drw-info-label">Repo</span>
+              <span class="drw-info-value">
+                <a v-if="detail?.repository?.html_url" :href="detail?.repository?.html_url" target="_blank" class="drw-link">
+                  {{ detail?.repository?.full_name }}
+                </a>
+                <span v-else class="drw-none">—</span>
+              </span>
+            </div>
+            <div class="drw-info-row" v-if="(detail?.repository?.stargazers_count ?? 0) > 0 || (detail?.latest?.asset?.download_count ?? 0) > 0">
+              <span class="drw-info-label">统计</span>
+              <span class="drw-info-value drw-stats">
+                <span class="stat-chip stat-star">
+                  <el-icon :size="11"><Star /></el-icon>
+                  {{ detail?.repository?.stargazers_count ?? 0 }}
+                </span>
+                <span class="stat-chip stat-dl-chip">
+                  <el-icon :size="11"><Download /></el-icon>
+                  {{ detail?.latest?.asset?.download_count ?? 0 }}
+                </span>
+              </span>
+            </div>
+            <div class="drw-info-row" v-if="(detail?.plugin?.labels || []).length > 0">
+              <span class="drw-info-label">标签</span>
+              <span class="drw-info-value drw-tags">
+                <el-tag v-for="t in detail?.plugin?.labels || []" :key="t" size="small" effect="plain">{{ t }}</el-tag>
+              </span>
+            </div>
+            <div class="drw-info-row" v-if="(detail?.meta?.authors || []).length > 0">
+              <span class="drw-info-label">作者</span>
+              <span class="drw-info-value drw-tags">
+                <el-tag v-for="a in detail?.meta?.authors || []" :key="a" size="small" type="primary" effect="light">{{ a }}</el-tag>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Introduction -->
+        <div class="drw-section">
+          <div class="drw-section-title">
+            <span class="drw-section-dot" />简介
+          </div>
+          <div class="drw-intro">
+            {{ detail?.plugin?.introduction?.zh_cn || detail?.plugin?.introduction?.en_us || detail?.meta?.description?.zh_cn || detail?.meta?.description?.en_us || '暂无介绍' }}
+          </div>
+        </div>
+
+        <!-- Dependencies -->
+        <template v-if="hasDependenciesInDetail">
+          <div class="drw-section">
+            <div class="drw-section-title">
+              <span class="drw-section-dot drw-section-dot--purple" />依赖信息
+              <span class="drw-section-badge">最新版本</span>
+            </div>
+            <div class="drw-card drw-card--deps">
+              <div class="drw-info-row" v-if="detail?.latest?.meta?.dependencies">
+                <span class="drw-info-label">插件依赖</span>
+                <span class="drw-info-value drw-tags">
+                  <template v-if="Object.keys(detail?.latest?.meta?.dependencies || {}).length > 0">
+                    <el-tag v-for="(version, name) in (detail?.latest?.meta?.dependencies || {})" :key="name"
+                            size="small" type="primary" effect="dark">{{ name }}: {{ version }}</el-tag>
+                  </template>
+                  <span v-else class="drw-none">无</span>
+                </span>
+              </div>
+              <div class="drw-info-row" v-if="detail?.latest?.meta?.requirements">
+                <span class="drw-info-label">Python 库</span>
+                <span class="drw-info-value drw-tags">
+                  <template v-if="(detail?.latest?.meta?.requirements || []).length > 0">
+                    <el-tag v-for="req in (detail?.latest?.meta?.requirements || [])" :key="req"
+                            size="small" type="success" effect="plain">{{ req }}</el-tag>
+                  </template>
+                  <span v-else class="drw-none">无</span>
+                </span>
+              </div>
             </div>
           </div>
         </template>
 
-        <div class="grid grid-cols-1 md:grid-cols-12 gap-3" style="display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px;">
-          <el-input
-              v-model="onlineQuery"
-              placeholder="搜索：名称 / ID / 作者 / 标签"
-              clearable
-              class="md:col-span-4"
-              style="grid-column: span 4;"
-              @input="onlinePage = 1"
-          >
-            <template #prefix>
-              <el-icon>
-                <Search/>
-              </el-icon>
-            </template>
-          </el-input>
-
-          <el-select v-model="onlineSelectedLabels" class="md:col-span-3" style="grid-column: span 3;" multiple collapse-tags collapse-tags-tooltip
-                     placeholder="标签筛选">
-            <el-option v-for="l in onlineAllLabels" :key="l" :label="l" :value="l"/>
-          </el-select>
-
-          <el-select v-model="onlineSortBy" class="md:col-span-2" style="grid-column: span 2;" placeholder="排序">
-            <el-option label="最新发布" value="latestDate"/>
-            <el-option label="下载最多" value="downloads"/>
-            <el-option label="Star 最多" value="stars"/>
-            <el-option label="名称" value="name"/>
-          </el-select>
-
-          <div class="md:col-span-3 flex items-center gap-3" style="grid-column: span 3;">
-            <el-checkbox v-model="onlineShowPrerelease">包含预发布</el-checkbox>
-            <el-checkbox v-model="onlineHideArchived">隐藏已归档</el-checkbox>
+        <!-- Release history -->
+        <div class="drw-section">
+          <div class="drw-section-title">
+            <span class="drw-section-dot drw-section-dot--green" />发布历史
+            <span class="drw-section-badge">最多 10 条</span>
           </div>
-        </div>
-      </el-card>
-
-      <!-- Table -->
-      <div class="table-card">
-        <div v-loading="onlinePluginsLoading" element-loading-background="transparent">
-          <table class="native-table">
-            <colgroup>
-              <col style="min-width:260px" />
-              <col style="width:130px" />
-              <col style="width:130px" />
-              <col style="min-width:160px" />
-              <col style="width:160px" />
-              <col style="width:210px" />
-            </colgroup>
-            <thead>
-              <tr class="thead-row">
-                <th class="th-cell">插件</th>
-                <th class="th-cell">最新版本</th>
-                <th class="th-cell">当前版本</th>
-                <th class="th-cell">作者</th>
-                <th class="th-cell th-center">统计</th>
-                <th class="th-cell th-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="!onlinePluginsLoading && onlinePaged.length === 0">
-                <td colspan="6" class="td-empty">
-                  <el-empty description="暂无插件" :image-size="80" />
-                </td>
-              </tr>
-              <tr v-for="row in onlinePaged" :key="row.meta.id" class="tbl-row" @dblclick="openOnlineDetail(row)">
-                <td class="td-cell">
-                  <PluginNameCell
-                    :id="row.meta.id"
-                    :name="row.meta.name"
-                    :description="row.meta.description?.zh_cn || row.meta.description?.en_us"
-                  />
-                </td>
-                <td class="td-cell">
-                  <el-tag size="small" :type="row.latest?.prerelease ? 'warning' : 'success'">
-                    {{ row.release?.latest_version || '-' }}
-                  </el-tag>
-                </td>
-                <td class="td-cell">
-                  <el-tag v-if="getPluginInstallStatus(row.meta.id)" type="success" size="small">
-                    {{ getPluginInstallStatus(row.meta.id) }}
-                  </el-tag>
-                  <el-tag v-else type="info" size="small" effect="plain">未安装</el-tag>
-                </td>
-                <td class="td-cell">
-                  <AuthorTagsCell :authors="row.meta?.authors" />
-                </td>
-                <td class="td-cell td-center">
-                  <div class="stats-cell">
-                    <el-tooltip content="Repo Stars">
-                      <span class="stat-chip stat-star">
-                        <el-icon :size="11"><Star/></el-icon>
-                        {{ row.repository?.stargazers_count ?? 0 }}
-                      </span>
-                    </el-tooltip>
-                    <el-tooltip content="下载量">
-                      <span class="stat-chip stat-dl-chip">
-                        <el-icon :size="11"><Download/></el-icon>
-                        {{ row.latest?.asset?.download_count ?? 0 }}
-                      </span>
-                    </el-tooltip>
+          <div class="drw-timeline">
+            <div v-for="(r, idx) in (detail?.release?.releases || []).slice(0, 10)" :key="idx" class="drw-release-card">
+              <div class="drw-release-dot" :class="r.prerelease ? 'drw-release-dot--warn' : 'drw-release-dot--ok'" />
+              <div class="drw-release-body">
+                <div class="drw-release-head">
+                  <div class="drw-release-name">
+                    {{ r.name || r.tag_name }}
+                    <el-tag v-if="r.prerelease" size="small" type="warning" effect="plain" class="drw-pre-tag">预发布</el-tag>
                   </div>
-                </td>
-                <td class="td-cell td-right">
-                  <div class="row-actions">
-                    <button class="act-btn act-detail" @click="openOnlineDetail(row)">详情</button>
-                    <button class="act-btn act-dl" :disabled="!row.latest?.asset?.browser_download_url" @click="go(row.latest?.asset?.browser_download_url)">下载</button>
-                    <button class="act-btn act-install" @click="handleInstallOnlineRow(row)">
-                      <el-icon :size="12"><Upload /></el-icon>安装
+                  <div class="drw-release-actions">
+                    <button v-if="r.asset?.browser_download_url" class="act-btn act-dl" @click="go(r.asset?.browser_download_url)">
+                      <el-icon :size="11"><Download /></el-icon>下载
+                    </button>
+                    <button v-if="r.url" class="act-btn act-detail" @click="go(r.url)">发布页</button>
+                    <button class="act-btn act-install" @click="detail && handleInstallOnlineRow(detail, r)">
+                      <el-icon :size="11"><Upload /></el-icon>安装
                     </button>
                   </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Pagination -->
-      <div class="mt-3 flex items-center justify-end">
-        <el-pagination
-            background
-            layout="prev, pager, next, sizes, total"
-            :page-sizes="[10, 20, 50, 100]"
-            :page-size="onlinePageSize"
-            :current-page="onlinePage"
-            :total="onlineFiltered.length"
-            @current-change="(p: number)=>onlinePage=p"
-            @size-change="(s: number)=>{onlinePageSize=s; onlinePage=1}"
-        />
-      </div>
-    </el-dialog>
-
-    <!-- Plugin Detail Drawer (Nested or global) -->
-    <el-drawer v-model="detailVisible" size="40%" direction="rtl" :destroy-on-close="true" append-to-body>
-      <template #header>
-        <div class="flex items-center gap-2">
-          <div class="text-base font-medium">{{ detail?.meta?.name }}<span class="text-gray-500">（{{ detail?.meta?.id }}）</span></div>
-          <el-tag size="small" :type="detail?.latest?.prerelease ? 'warning' : 'success'">
-            {{ detail?.release?.latest_version }}
-          </el-tag>
-          <el-tag v-if="detail?.repository?.archived" size="small" type="danger">Archived</el-tag>
-        </div>
-      </template>
-
-      <div class="table-card">
-        <el-descriptions :column="2" border size="small">
-          <el-descriptions-item label="Repo">
-            <el-link v-if="detail?.repository?.html_url" :href="detail?.repository?.html_url" target="_blank"
-                     type="primary">{{ detail?.repository?.full_name }}
-            </el-link>
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="Labels">
-            <el-space wrap>
-              <el-tag v-for="t in detail?.plugin?.labels || []" :key="t" size="small" effect="plain">{{ t }}</el-tag>
-            </el-space>
-          </el-descriptions-item>
-          <el-descriptions-item label="Authors" :span="2">
-            <el-space wrap>
-              <el-tag v-for="a in detail?.meta?.authors || []" :key="a" size="small">{{ a }}</el-tag>
-            </el-space>
-          </el-descriptions-item>
-        </el-descriptions>
-      </div>
-
-      <el-divider>简介</el-divider>
-      <div class="text-sm leading-6 text-gray-700 whitespace-pre-wrap">
-        {{
-          detail?.plugin?.introduction?.zh_cn || detail?.plugin?.introduction?.en_us || detail?.meta?.description?.zh_cn || detail?.meta?.description?.en_us || '无'
-        }}
-      </div>
-
-      <template v-if="hasDependenciesInDetail">
-        <el-divider>依赖信息 (最新版本)</el-divider>
-        <div class="table-card" style="margin-bottom: 20px;">
-          <el-descriptions :column="1" border size="small">
-            <el-descriptions-item label="插件依赖" v-if="detail?.latest?.meta?.dependencies">
-              <el-space wrap v-if="Object.keys(detail?.latest?.meta?.dependencies || {}).length > 0">
-                <el-tag v-for="(version, name) in (detail?.latest?.meta?.dependencies || {})" :key="name" size="small"
-                        type="primary" effect="dark">
-                  {{ name }}: {{ version }}
-                </el-tag>
-              </el-space>
-              <span v-else>无</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="Python库依赖" v-if="detail?.latest?.meta?.requirements">
-              <el-space wrap v-if="(detail?.latest?.meta?.requirements || []).length > 0">
-                <el-tag v-for="req in (detail?.latest?.meta?.requirements || [])" :key="req" size="small" type="success"
-                        effect="plain">
-                  {{ req }}
-                </el-tag>
-              </el-space>
-              <span v-else>无</span>
-            </el-descriptions-item>
-          </el-descriptions>
-        </div>
-      </template>
-
-      <el-divider>发布历史（最多 10 条）</el-divider>
-      <el-timeline>
-        <el-timeline-item v-for="(r, idx) in (detail?.release?.releases || []).slice(0, 10)" :key="idx"
-                          :timestamp="formatDate(r.created_at)" :type="r.prerelease ? 'warning' : 'primary'">
-          <div class="flex items-center justify-between gap-2">
-            <div>
-              <div class="font-medium">{{ r.name || r.tag_name }}</div>
-              <div class="text-xs text-gray-500">{{ r.description || '——' }}</div>
+                </div>
+                <div class="drw-release-meta">
+                  <span class="drw-release-time">{{ formatDate(r.created_at) }}</span>
+                  <span v-if="r.description" class="drw-release-desc">{{ r.description }}</span>
+                </div>
+              </div>
             </div>
-            <div class="flex items-center gap-2">
-              <el-button-group>
-                <el-button v-if="r.asset?.browser_download_url" size="small" type="primary"
-                           @click="go(r.asset.browser_download_url)">下载
-                </el-button>
-                <el-button size="small" type="success" :icon="Upload" @click="detail && handleInstallOnlineRow(detail, r)">
-                  安装
-                </el-button>
-              </el-button-group>
-            </div>
+            <div v-if="!(detail?.release?.releases || []).length" class="drw-empty">暂无发布记录</div>
           </div>
-        </el-timeline-item>
-      </el-timeline>
+        </div>
+      </div>
     </el-drawer>
 
     <!-- Install Confirm Dialog -->
-    <el-dialog v-if="installConfirmDialogVisible" v-model="installConfirmDialogVisible" title="安装确认" width="70%"
-               top="8vh" append-to-body>
-      <el-table :data="pluginsToInstall" stripe border max-height="60vh">
-        <el-table-column label="插件" width="360">
-          <template #default="{ row }">
-            <div class="plugin-cell-layout">
-              <el-tag type="primary" effect="plain" size="small">{{ row.meta.id }}</el-tag>
-              <div>
-                <div class="plugin-name">{{ row.meta.name }}</div>
-                <div class="plugin-description">
-                  {{ (row.meta.description?.zh_cn || row.meta.description?.en_us || '-').substring(0, 50) }}
-                </div>
+    <el-dialog v-if="installConfirmDialogVisible" v-model="installConfirmDialogVisible"
+               width="600px" top="8vh" append-to-body destroy-on-close
+               class="pm-install-dialog" :show-close="false">
+      <template #header>
+        <div class="dlg-head">
+          <div class="dlg-icon dlg-icon--install">
+            <el-icon :size="18"><Upload /></el-icon>
+          </div>
+          <div class="dlg-title-group">
+            <span class="dlg-title">安装确认</span>
+            <span class="dlg-subtitle">共 {{ pluginsToInstall.length }} 个插件待安装至 {{ selectedServer?.name }}</span>
+          </div>
+          <button class="dlg-close-btn" @click="installConfirmDialogVisible = false">
+            <el-icon :size="13"><Close /></el-icon>
+          </button>
+        </div>
+      </template>
+
+      <div class="pm-install-list">
+        <div v-for="(row, idx) in pluginsToInstall" :key="row.meta.id || idx" class="pm-install-item">
+          <div class="pm-install-item-head">
+            <PluginNameCell
+              :id="row.meta.id"
+              :name="row.meta.name"
+              :description="(row.meta.description?.zh_cn || row.meta.description?.en_us || '').substring(0, 60)"
+            />
+            <div class="pm-install-status">
+              <el-tag v-if="getPluginInstallStatus(row.meta.id)" type="success" size="small" effect="light">
+                已装 {{ getPluginInstallStatus(row.meta.id) }}
+              </el-tag>
+              <el-tag v-else type="info" size="small" effect="plain">未安装</el-tag>
+            </div>
+          </div>
+          <div class="pm-install-item-meta">
+            <div class="pm-install-meta-row">
+              <span class="pm-install-meta-label">安装版本</span>
+              <el-select v-if="row.availableVersions?.length > 0" v-model="row.selectedVersion"
+                         placeholder="选择版本" size="small" class="pm-version-select">
+                <el-option v-for="v in row.availableVersions" :key="v" :label="v" :value="v" />
+              </el-select>
+              <span v-else class="pm-install-none">无可用版本</span>
+            </div>
+            <div class="pm-install-meta-row" v-if="row.meta.dependencies && Object.keys(row.meta.dependencies).length > 0">
+              <span class="pm-install-meta-label">插件依赖</span>
+              <div class="pm-install-tags">
+                <el-tooltip v-for="(ver, dep) in row.meta.dependencies" :key="dep" :content="`${dep}: ${ver}`">
+                  <el-tag size="small" type="primary" effect="dark">{{ dep }}</el-tag>
+                </el-tooltip>
               </div>
             </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="当前版本" width="120">
-          <template #default="{ row }">
-            <el-tag v-if="getPluginInstallStatus(row.meta.id)" type="success" size="small">
-              {{ getPluginInstallStatus(row.meta.id) }}
-            </el-tag>
-            <el-tag v-else type="info" size="small" effect="plain">未安装</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="安装版本" width="130">
-          <template #default="{ row }">
-            <el-select v-if="row.availableVersions && row.availableVersions.length > 0" v-model="row.selectedVersion"
-                       placeholder="选择版本" size="small" style="width: 100px;">
-              <el-option v-for="version in row.availableVersions" :key="version" :label="version" :value="version"/>
-            </el-select>
-            <span v-else>无可用版本</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="依赖" min-width="250">
-          <template #default="{ row }">
-            <el-space wrap>
-              <el-tooltip v-for="(version, dep) in row.meta.dependencies" :key="dep"
-                          :content="`插件依赖: ${dep} (版本: ${version})`">
-                <el-tag size="small" type="info">{{ dep }}</el-tag>
-              </el-tooltip>
-              <el-tooltip v-for="req in row.meta.requirements" :key="req" :content="`Python库: ${req}`">
-                <el-tag size="small" type="warning">{{ req }}</el-tag>
-              </el-tooltip>
-              <span v-if="!row.meta.dependencies && !row.meta.requirements">无</span>
-            </el-space>
-          </template>
-        </el-table-column>
-      </el-table>
+            <div class="pm-install-meta-row" v-if="(row.meta.requirements || []).length > 0">
+              <span class="pm-install-meta-label">Python 库</span>
+              <div class="pm-install-tags">
+                <el-tag v-for="req in row.meta.requirements" :key="req" size="small" type="success" effect="plain">{{ req }}</el-tag>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="installConfirmDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="executeInstallation" :loading="isInstallingPlugins">确认安装</el-button>
-        </span>
+        <div class="pm-install-footer">
+          <button class="dlg-btn-ghost" @click="installConfirmDialogVisible = false">取消</button>
+          <button class="dlg-btn-primary" :disabled="isInstallingPlugins" @click="executeInstallation">
+            <el-icon v-if="isInstallingPlugins" class="is-loading" :size="13"><Refresh /></el-icon>
+            <el-icon v-else :size="13"><Upload /></el-icon>
+            {{ isInstallingPlugins ? '安装中…' : '确认安装' }}
+          </button>
+        </div>
       </template>
     </el-dialog>
 
-    <el-dialog v-if="addDbPluginDialogVisible" v-model="addDbPluginDialogVisible" title="从数据库添加插件" width="60%"
-               top="8vh" destroy-on-close>
-      <div class="plugin-toolbar">
-        <el-input v-model="dbPluginsQuery" placeholder="搜索：名称 / 文件名" clearable style="width: 300px;"></el-input>
+    <!-- Add from DB Dialog -->
+    <el-dialog v-if="addDbPluginDialogVisible" v-model="addDbPluginDialogVisible"
+               width="76%" top="6vh" destroy-on-close append-to-body
+               class="pm-db-dialog" :show-close="false">
+      <template #header>
+        <div class="dlg-head">
+          <div class="dlg-icon dlg-icon--db">
+            <el-icon :size="18"><Box /></el-icon>
+          </div>
+          <div class="dlg-title-group">
+            <span class="dlg-title">从数据库添加插件</span>
+            <span class="dlg-subtitle">
+              <template v-if="filteredDbPlugins.length">共 {{ filteredDbPlugins.length }} 个</template>
+              <template v-if="dbPluginsSelected.length"> · 已选 {{ dbPluginsSelected.length }} 个</template>
+            </span>
+          </div>
+          <el-input v-model="dbPluginsQuery" placeholder="搜索名称 / 文件名" clearable class="dlg-search" style="width:220px">
+            <template #prefix><el-icon><Search /></el-icon></template>
+          </el-input>
+          <button class="dlg-close-btn" @click="addDbPluginDialogVisible = false">
+            <el-icon :size="13"><Close /></el-icon>
+          </button>
+        </div>
+      </template>
+
+      <div class="pm-db-table-wrap" v-loading="dbPluginsLoading" element-loading-background="transparent">
+        <table class="native-table">
+          <colgroup>
+            <col style="width:48px" />
+            <col style="min-width:260px" />
+            <col style="width:120px" />
+            <col style="width:130px" />
+            <col style="min-width:160px" />
+          </colgroup>
+          <thead>
+            <tr class="thead-row">
+              <th class="th-cell" style="text-align:center">
+                <input type="checkbox" class="pm-db-checkbox"
+                       :checked="isAllDbSelected"
+                       @change="toggleAllDb" />
+              </th>
+              <th class="th-cell">插件</th>
+              <th class="th-cell">版本</th>
+              <th class="th-cell">当前状态</th>
+              <th class="th-cell">作者</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!dbPluginsLoading && filteredDbPlugins.length === 0">
+              <td colspan="5" class="td-empty">
+                <el-empty description="暂无插件" :image-size="60" />
+              </td>
+            </tr>
+            <tr v-for="row in filteredDbPlugins" :key="row.id"
+                :class="['tbl-row', { 'tbl-row--checked': isDbRowSelected(row) }]"
+                @click="toggleDbRow(row)">
+              <td class="td-cell" style="text-align:center" @click.stop>
+                <input type="checkbox" class="pm-db-checkbox"
+                       :checked="isDbRowSelected(row)" @change="toggleDbRow(row)" />
+              </td>
+              <td class="td-cell">
+                <PluginNameCell :id="row.meta.id" :name="row.meta.name || row.file_name"
+                                :filename="row.file_name"
+                                :description="(row.meta.description?.zh_cn || row.meta.description?.en_us || '').substring(0,55)" />
+              </td>
+              <td class="td-cell">
+                <el-tag v-if="row.meta.version" type="success" size="small">{{ row.meta.version }}</el-tag>
+                <el-tag v-else type="info" size="small">未知</el-tag>
+              </td>
+              <td class="td-cell">
+                <el-tag v-if="getPluginInstallStatus(row.meta.id)" type="success" size="small">
+                  {{ getPluginInstallStatus(row.meta.id) }}
+                </el-tag>
+                <el-tag v-else type="info" size="small" effect="plain">未安装</el-tag>
+              </td>
+              <td class="td-cell">
+                <AuthorTagsCell :authors="getAuthorsArray(row.meta)" />
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-      <el-table :data="filteredDbPlugins" v-loading="dbPluginsLoading" @selection-change="handleDbSelectionChange"
-                stripe border height="50vh" row-key="id">
-        <el-table-column type="selection" width="55" reserve-selection/>
-        <el-table-column label="插件" min-width="260">
-          <template #default="{ row }">
-            <div class="plugin-cell-layout">
-              <el-tag v-if="row.meta.id" type="primary" effect="plain" size="small">{{ row.meta.id }}</el-tag>
-              <div>
-                <div class="plugin-name">{{ row.meta.name || row.file_name }}</div>
-                <div class="plugin-description">
-                  {{ (row.meta.description?.zh_cn || row.meta.description?.en_us || '').substring(0, 50) }}
-                </div>
-              </div>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="插件版本" width="130">
-          <template #default="{ row }">
-            <el-tag v-if="row.meta.version" type="success" size="small">{{ row.meta.version || "未知" }}</el-tag>
-            <el-tag v-else type="info" size="small">未知</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="当前版本" width="130">
-          <template #default="{ row }">
-            <el-tag v-if="getPluginInstallStatus(row.meta.id)" type="success" size="small">
-              {{ getPluginInstallStatus(row.meta.id) }}
-            </el-tag>
-            <el-tag v-else type="info" size="small" effect="plain">未安装</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="作者" min-width="160">
-          <template #default="{ row }">
-            <el-space wrap>
-              <el-tag v-for="a in getAuthorsArray(row.meta)" :key="a" size="small">{{ a }}</el-tag>
-              <span v-if="getAuthorsArray(row.meta).length === 0">未知</span>
-            </el-space>
-          </template>
-        </el-table-column>
-      </el-table>
+
       <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="addDbPluginDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleInstallDbPlugins" :loading="isInstallingPlugins"
-                     :disabled="dbPluginsSelected.length === 0">
+        <div class="dlg-footer">
+          <button class="dlg-btn-ghost" @click="addDbPluginDialogVisible = false">取消</button>
+          <button class="dlg-btn-primary" :disabled="isInstallingPlugins || dbPluginsSelected.length === 0" @click="handleInstallDbPlugins">
+            <el-icon v-if="isInstallingPlugins" class="is-loading" :size="13"><Refresh /></el-icon>
+            <el-icon v-else :size="13"><Upload /></el-icon>
             安装已选 ({{ dbPluginsSelected.length }})
-          </el-button>
-        </span>
+          </button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- Delete Confirm Dialog -->
+    <el-dialog v-if="deleteConfirmVisible" v-model="deleteConfirmVisible"
+               width="420px" top="30vh" destroy-on-close append-to-body
+               class="pm-delete-dialog" :show-close="false">
+      <template #header>
+        <div class="dlg-head">
+          <div class="dlg-icon dlg-icon--danger">
+            <el-icon :size="17"><Delete /></el-icon>
+          </div>
+          <div class="dlg-title-group">
+            <span class="dlg-title">确认删除插件</span>
+            <span class="dlg-subtitle">此操作将从服务器移除插件文件</span>
+          </div>
+          <button class="dlg-close-btn" @click="deleteConfirmVisible = false">
+            <el-icon :size="13"><Close /></el-icon>
+          </button>
+        </div>
+      </template>
+      <div class="dlg-delete-body">
+        <div class="dlg-delete-plugin-name">{{ pluginToDelete?.meta?.name || pluginToDelete?.file_name }}</div>
+        <div class="dlg-delete-hint">文件：<span class="dlg-delete-file">{{ pluginToDelete?.file_name }}</span></div>
+      </div>
+      <template #footer>
+        <div class="dlg-footer">
+          <button class="dlg-btn-ghost" @click="deleteConfirmVisible = false">取消</button>
+          <button class="dlg-btn-danger" @click="executePluginDelete">
+            <el-icon :size="13"><Delete /></el-icon>确认删除
+          </button>
+        </div>
       </template>
     </el-dialog>
   </div>
@@ -467,7 +616,7 @@
 <script setup lang="ts">
 import {ref, onMounted, computed, watch} from 'vue';
 import {ElMessage, ElNotification} from 'element-plus';
-import {Search, Refresh, Plus, Coin, Delete, Download, Star, Upload} from '@element-plus/icons-vue';
+import {Search, Refresh, Plus, Coin, Close, Delete, Download, Star, Upload, ArrowLeft, ArrowRight} from '@element-plus/icons-vue';
 import PluginNameCell from '@/components/PluginNameCell.vue';
 import AuthorTagsCell from '@/components/AuthorTagsCell.vue';
 import apiClient, { isRequestCanceled } from '@/api';
@@ -947,6 +1096,36 @@ const getPluginInstallStatus = (pluginId: string) => {
 
 const handleDbSelectionChange = (selection: any[]) => dbPluginsSelected.value = selection;
 
+// DB table selection helpers (for native table)
+function isDbRowSelected(row: any): boolean {
+  return dbPluginsSelected.value.some((p: any) => p.id === row.id);
+}
+function toggleDbRow(row: any) {
+  const idx = dbPluginsSelected.value.findIndex((p: any) => p.id === row.id);
+  if (idx >= 0) dbPluginsSelected.value.splice(idx, 1);
+  else dbPluginsSelected.value.push(row);
+}
+const isAllDbSelected = computed(() =>
+  filteredDbPlugins.value.length > 0 && filteredDbPlugins.value.every((r: any) => isDbRowSelected(r))
+);
+function toggleAllDb() {
+  if (isAllDbSelected.value) dbPluginsSelected.value = [];
+  else dbPluginsSelected.value = [...filteredDbPlugins.value];
+}
+
+// Delete confirm dialog
+const deleteConfirmVisible = ref(false);
+const pluginToDelete = ref<any>(null);
+function openDeleteConfirm(plugin: any) {
+  pluginToDelete.value = plugin;
+  deleteConfirmVisible.value = true;
+}
+async function executePluginDelete() {
+  if (!pluginToDelete.value) return;
+  deleteConfirmVisible.value = false;
+  await handlePluginDelete(pluginToDelete.value);
+}
+
 const compareVersions = (v1: string, v2: string) => {
   if (typeof v1 !== 'string' || typeof v2 !== 'string') return 0;
   const parts1 = v1.replace(/^v/, '').split('-')[0].split('.').map(part => parseInt(part, 10) || 0);
@@ -1290,5 +1469,419 @@ thead { position: sticky; top: 0; z-index: 10; }
 .leading-6 { line-height: 24px; }
 .whitespace-pre-wrap { white-space: pre-wrap; }
 
+/* ── Online plugin dialog: global overrides ──────────────── */
+:global(.pm-online-dialog) {
+  border-radius: 20px !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(119, 181, 254, 0.18) !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.14), 0 8px 32px rgba(119, 181, 254, 0.12) !important;
+}
+:global(.dark .pm-online-dialog) {
+  background: rgba(11, 17, 32, 0.94) !important;
+  border-color: rgba(119, 181, 254, 0.13) !important;
+}
+:global(.pm-online-dialog .el-dialog__header) { padding: 0 !important; margin-right: 0 !important; }
+:global(.pm-online-dialog .el-dialog__body)   { padding: 0 !important; }
+:global(.pm-online-dialog .el-dialog__footer) { padding: 0 !important; }
+
+/* ── Dialog header ───────────────────────────────────────── */
+.dlg-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(119, 181, 254, 0.10);
+}
+.dlg-icon {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+}
+.dlg-icon--market { background: linear-gradient(135deg, var(--brand-primary) 0%, #a78bfa 100%); }
+.dlg-title-group { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dlg-title    { font-size: 15px; font-weight: 700; color: var(--color-text); line-height: 1.2; }
+.dlg-subtitle { font-size: 12px; color: var(--el-text-color-secondary); }
+.dlg-close-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 8px;
+  border: 1px solid rgba(119, 181, 254, 0.18);
+  background: transparent; color: var(--el-text-color-secondary);
+  cursor: pointer; transition: all 0.15s ease; flex-shrink: 0;
+}
+.dlg-close-btn:hover { background: rgba(248, 113, 113, 0.10); border-color: rgba(248, 113, 113, 0.28); color: #ef4444; }
+
+/* Refresh button in header */
+.dlg-btn-refresh {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 30px; padding: 0 12px; border-radius: 9px;
+  border: 1px solid rgba(119, 181, 254, 0.22);
+  background: transparent; color: var(--el-text-color-regular);
+  font-size: 12px; font-weight: 500; font-family: inherit; cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  flex-shrink: 0;
+}
+.dlg-btn-refresh:not(:disabled):hover { background: rgba(119, 181, 254, 0.08); border-color: rgba(119, 181, 254, 0.40); }
+.dlg-btn-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Filter bar ──────────────────────────────────────────── */
+.pm-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(119, 181, 254, 0.08);
+  background: rgba(248, 250, 255, 0.60);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  flex-wrap: wrap;
+}
+:global(.dark) .pm-filter-bar {
+  background: rgba(15, 23, 42, 0.50);
+}
+.pm-filter-search { flex: 1 1 220px; min-width: 180px; }
+.pm-filter-labels { width: 180px; flex-shrink: 0; }
+.pm-filter-sort   { width: 120px; flex-shrink: 0; }
+.pm-filter-checks {
+  display: flex; align-items: center; gap: 14px;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+/* ── Online table wrap ───────────────────────────────────── */
+.pm-online-table-wrap {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: calc(100vh - 4vh - 56px - 57px - 57px - 60px);
+  min-height: 200px;
+  scrollbar-width: thin;
+}
+
+/* ── Compact page navigation (in dialog header) ──────────── */
+.dlg-page-nav { display: inline-flex; align-items: center; gap: 8px; }
+.toolbar-divider {
+  width: 1px; height: 20px;
+  background: linear-gradient(180deg, transparent, rgba(119,181,254,0.35), transparent);
+  flex-shrink: 0;
+}
+.page-nav { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.page-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 8px;
+  border: 1px solid rgba(119,181,254,0.22);
+  background: rgba(119,181,254,0.06);
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+  flex-shrink: 0;
+}
+.page-btn:not(:disabled):hover {
+  background: rgba(119,181,254,0.14); border-color: rgba(119,181,254,0.45);
+  color: var(--brand-primary); transform: scale(1.08);
+}
+.page-btn:disabled { opacity: 0.32; cursor: not-allowed; }
+:global(.dark) .page-btn { border-color: rgba(119,181,254,0.16); background: rgba(119,181,254,0.04); }
+.page-indicator {
+  font-size: 12px; font-weight: 700; color: var(--el-text-color-regular);
+  font-variant-numeric: tabular-nums; min-width: 36px; text-align: center; user-select: none;
+}
+.page-sep { color: var(--el-text-color-placeholder); margin: 0 1px; font-weight: 400; }
+
+/* ── Install Confirm Dialog ──────────────────────────────── */
+:global(.pm-install-dialog) {
+  border-radius: 20px !important;
+  overflow: hidden;
+  background: rgba(255,255,255,0.88) !important;
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119,181,254,0.18) !important;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.18), 0 4px 20px rgba(119,181,254,0.12) !important;
+}
+:global(.dark .pm-install-dialog) {
+  background: rgba(15,23,42,0.88) !important;
+  border-color: rgba(119,181,254,0.14) !important;
+}
+:global(.pm-install-dialog .el-dialog__header) { padding: 0 !important; margin-right: 0 !important; }
+:global(.pm-install-dialog .el-dialog__body)   { padding: 0 !important; }
+:global(.pm-install-dialog .el-dialog__footer) { padding: 0 !important; }
+
+.dlg-icon--install { background: linear-gradient(135deg, var(--brand-primary) 0%, #a78bfa 100%); }
+
+.dlg-btn-ghost {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 16px; border-radius: 10px;
+  border: 1px solid rgba(119,181,254,0.22);
+  background: transparent; color: var(--el-text-color-regular);
+  font-size: 13px; font-weight: 500; font-family: inherit; cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+.dlg-btn-ghost:hover { background: rgba(119,181,254,0.07); border-color: rgba(119,181,254,0.40); }
+
+.dlg-btn-primary {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 18px; border-radius: 10px; border: none;
+  cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit; color: #fff;
+  background: linear-gradient(135deg, var(--brand-primary) 0%, #a78bfa 100%);
+  box-shadow: 0 4px 14px rgba(119,181,254,0.35);
+  transition: box-shadow 0.2s ease, transform 0.2s cubic-bezier(.34,1.56,.64,1);
+}
+.dlg-btn-primary:hover:not(:disabled) { box-shadow: 0 6px 22px rgba(119,181,254,0.55); transform: translateY(-1px); }
+.dlg-btn-primary:active:not(:disabled) { transform: scale(0.97); }
+.dlg-btn-primary:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; }
+
+/* Install list body */
+.pm-install-list {
+  padding: 16px 20px;
+  display: flex; flex-direction: column; gap: 10px;
+  max-height: 60vh; overflow-y: auto; scrollbar-width: thin;
+}
+.pm-install-item {
+  border: 1px solid rgba(119,181,254,0.14);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.50);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+.pm-install-item:hover { border-color: rgba(119,181,254,0.28); }
+:global(.dark) .pm-install-item {
+  background: rgba(15,23,42,0.50);
+  border-color: rgba(119,181,254,0.10);
+}
+.pm-install-item-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(119,181,254,0.08);
+}
+.pm-install-status { flex-shrink: 0; }
+.pm-install-item-meta {
+  display: flex; flex-direction: column;
+  padding: 0;
+}
+.pm-install-meta-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 16px;
+  border-bottom: 1px solid rgba(119,181,254,0.06);
+}
+.pm-install-meta-row:last-child { border-bottom: none; }
+.pm-install-meta-label {
+  flex-shrink: 0; width: 68px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--el-text-color-secondary); opacity: 0.7;
+}
+.pm-install-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.pm-install-none { font-size: 12px; color: var(--el-text-color-placeholder); }
+.pm-version-select { width: 160px; }
+
+/* Install footer */
+.pm-install-footer {
+  display: flex; justify-content: flex-end; align-items: center; gap: 10px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid rgba(119,181,254,0.09);
+}
+
+/* ── Add-from-DB Dialog ──────────────────────────────────── */
+:global(.pm-db-dialog) {
+  border-radius: 20px !important; overflow: hidden;
+  background: rgba(255,255,255,0.88) !important;
+  -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119,181,254,0.18) !important;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.18), 0 4px 20px rgba(119,181,254,0.12) !important;
+}
+:global(.dark .pm-db-dialog) { background: rgba(15,23,42,0.88) !important; border-color: rgba(119,181,254,0.14) !important; }
+:global(.pm-db-dialog .el-dialog__header) { padding: 0 !important; margin-right: 0 !important; }
+:global(.pm-db-dialog .el-dialog__body)   { padding: 0 !important; }
+:global(.pm-db-dialog .el-dialog__footer) { padding: 0 !important; }
+
+/* ── Delete Confirm Dialog ───────────────────────────────── */
+:global(.pm-delete-dialog) {
+  border-radius: 20px !important; overflow: hidden;
+  background: rgba(255,255,255,0.92) !important;
+  -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(248,113,113,0.20) !important;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.18), 0 4px 20px rgba(239,68,68,0.12) !important;
+}
+:global(.dark .pm-delete-dialog) { background: rgba(15,23,42,0.92) !important; border-color: rgba(248,113,113,0.18) !important; }
+:global(.pm-delete-dialog .el-dialog__header) { padding: 0 !important; margin-right: 0 !important; }
+:global(.pm-delete-dialog .el-dialog__body)   { padding: 0 !important; }
+:global(.pm-delete-dialog .el-dialog__footer) { padding: 0 !important; }
+
+/* Shared new icon colors */
+.dlg-icon--db     { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
+.dlg-icon--danger { background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); }
+
+/* Shared footer (for db + delete dialogs) */
+.dlg-footer {
+  display: flex; justify-content: flex-end; align-items: center; gap: 10px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid rgba(119,181,254,0.09);
+}
+
+/* Danger button */
+.dlg-btn-danger {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 18px; border-radius: 10px; border: none; font-family: inherit;
+  cursor: pointer; font-size: 13px; font-weight: 600; color: #fff;
+  background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
+  box-shadow: 0 4px 14px rgba(239,68,68,0.30);
+  transition: box-shadow 0.2s ease, transform 0.2s cubic-bezier(.34,1.56,.64,1);
+}
+.dlg-btn-danger:hover { box-shadow: 0 6px 22px rgba(239,68,68,0.50); transform: translateY(-1px); }
+.dlg-btn-danger:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; }
+
+/* Search in dialog header */
+.dlg-search :deep(.el-input__wrapper) {
+  border-radius: 18px !important; background: rgba(255,255,255,0.55) !important;
+  border: 1px solid rgba(119,181,254,0.20) !important; box-shadow: none !important;
+}
+:global(.dark) .dlg-search :deep(.el-input__wrapper) {
+  background: rgba(15,23,42,0.55) !important; border-color: rgba(119,181,254,0.16) !important;
+}
+
+/* DB table */
+.pm-db-table-wrap {
+  min-height: 0; max-height: 55vh; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin;
+}
+.pm-db-checkbox {
+  width: 15px; height: 15px; cursor: pointer; accent-color: var(--brand-primary);
+}
+.tbl-row--checked { background: rgba(119,181,254,0.07); }
+.tbl-row--checked:hover { background: rgba(119,181,254,0.11); }
+
+/* Delete dialog body */
+.dlg-delete-body {
+  padding: 20px 24px 16px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.dlg-delete-plugin-name {
+  font-size: 15px; font-weight: 700; color: var(--color-text);
+}
+.dlg-delete-hint { font-size: 12px; color: var(--el-text-color-secondary); }
+.dlg-delete-file {
+  font-family: 'Maple Mono', ui-monospace, monospace;
+  font-size: 11px; color: var(--el-text-color-regular);
+  background: rgba(248,113,113,0.08); border-radius: 4px; padding: 1px 5px;
+}
+
+/* ── Detail Drawer ──────────────────────────────────────── */
+:global(.pm-detail-drawer) { --el-drawer-padding-primary: 0; }
+:global(.pm-detail-drawer .el-drawer__header) { margin-bottom: 0; padding: 0; border-bottom: none; }
+:global(.pm-detail-drawer .el-drawer__body) { padding: 0; overflow: hidden; }
+
+.drw-header {
+  position: relative; overflow: hidden;
+  background: linear-gradient(135deg, rgba(119,181,254,0.12) 0%, rgba(167,139,250,0.08) 100%);
+  border-bottom: 1px solid rgba(119,181,254,0.14);
+}
+.drw-header-shimmer {
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(119,181,254,0.7), rgba(167,139,250,0.6), transparent);
+  background-size: 200% 100%;
+  animation: shimmer-slide 4s linear infinite;
+}
+@keyframes shimmer-slide { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+.drw-header-body { display: flex; align-items: center; gap: 12px; padding: 16px 20px 14px; }
+.drw-header-icon {
+  flex-shrink: 0; width: 38px; height: 38px; border-radius: 12px;
+  background: linear-gradient(135deg, var(--brand-primary), #a78bfa);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; box-shadow: 0 4px 12px rgba(119,181,254,0.35);
+}
+.drw-title-group { min-width: 0; flex: 1; }
+.drw-title {
+  font-size: 15px; font-weight: 700; color: var(--color-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;
+}
+.drw-subtitle { display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.drw-id {
+  font-family: 'Maple Mono', ui-monospace, monospace;
+  font-size: 11px; color: var(--el-text-color-secondary);
+  background: rgba(119,181,254,0.10); border: 1px solid rgba(119,181,254,0.18);
+  border-radius: 6px; padding: 1px 6px;
+}
+.drw-body {
+  height: calc(100% - 72px); overflow-y: auto; overflow-x: hidden;
+  scrollbar-width: thin; padding: 20px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.drw-card {
+  background: rgba(255,255,255,0.55); border: 1px solid rgba(119,181,254,0.14);
+  border-radius: 14px; overflow: hidden;
+  backdrop-filter: saturate(160%) blur(12px); -webkit-backdrop-filter: saturate(160%) blur(12px);
+}
+:global(.dark) .drw-card { background: rgba(15,23,42,0.55); border-color: rgba(119,181,254,0.10); }
+.drw-card--deps { margin-top: 0; }
+.drw-info-grid { display: flex; flex-direction: column; }
+.drw-info-row {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 16px; border-bottom: 1px solid rgba(119,181,254,0.07);
+}
+.drw-info-row:last-child { border-bottom: none; }
+.drw-info-label {
+  flex-shrink: 0; width: 68px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--el-text-color-secondary); opacity: 0.7; padding-top: 2px;
+}
+.drw-info-value { flex: 1; min-width: 0; font-size: 13px; color: var(--color-text); }
+.drw-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.drw-stats { display: flex; align-items: center; gap: 6px; }
+.drw-link { color: var(--brand-primary); text-decoration: none; font-size: 13px; transition: opacity 0.15s; }
+.drw-link:hover { opacity: 0.75; text-decoration: underline; }
+.drw-none { color: var(--el-text-color-placeholder); font-size: 13px; }
+.drw-section { display: flex; flex-direction: column; gap: 10px; }
+.drw-section-title {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--el-text-color-secondary); opacity: 0.8;
+}
+.drw-section-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--brand-primary); box-shadow: 0 0 6px rgba(119,181,254,0.6);
+}
+.drw-section-dot--purple { background: #a78bfa; box-shadow: 0 0 6px rgba(167,139,250,0.6); }
+.drw-section-dot--green  { background: #34d399; box-shadow: 0 0 6px rgba(52,211,153,0.5); }
+.drw-section-badge {
+  font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none;
+  color: var(--el-text-color-placeholder);
+  background: rgba(119,181,254,0.08); border: 1px solid rgba(119,181,254,0.14);
+  border-radius: 99px; padding: 1px 7px;
+}
+.drw-intro {
+  font-size: 13px; line-height: 1.7; color: var(--el-text-color-regular); white-space: pre-wrap;
+  background: rgba(255,255,255,0.45); border: 1px solid rgba(119,181,254,0.10);
+  border-radius: 12px; padding: 14px 16px;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+:global(.dark) .drw-intro { background: rgba(15,23,42,0.45); border-color: rgba(119,181,254,0.08); }
+.drw-timeline { display: flex; flex-direction: column; gap: 0; }
+.drw-release-card {
+  display: flex; gap: 14px; padding: 12px 0;
+  border-bottom: 1px solid rgba(119,181,254,0.07); position: relative;
+}
+.drw-release-card:last-child { border-bottom: none; }
+.drw-release-dot {
+  flex-shrink: 0; width: 10px; height: 10px; border-radius: 50%;
+  margin-top: 5px; position: relative; z-index: 1;
+}
+.drw-release-dot--ok   { background: #34d399; box-shadow: 0 0 6px rgba(52,211,153,0.55); }
+.drw-release-dot--warn { background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.55); }
+.drw-release-body { flex: 1; min-width: 0; }
+.drw-release-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+}
+.drw-release-name {
+  font-size: 13px; font-weight: 600; color: var(--color-text);
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.drw-pre-tag { vertical-align: middle; }
+.drw-release-actions { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.drw-release-meta { display: flex; align-items: baseline; gap: 10px; margin-top: 4px; flex-wrap: wrap; }
+.drw-release-time { font-size: 11px; color: var(--el-text-color-placeholder); font-variant-numeric: tabular-nums; }
+.drw-release-desc {
+  font-size: 12px; color: var(--el-text-color-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;
+}
+.drw-empty { text-align: center; padding: 32px 0; color: var(--el-text-color-placeholder); font-size: 13px; }
 
 </style>

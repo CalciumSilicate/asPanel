@@ -17,20 +17,34 @@
         class="tasks-toggle"
         aria-label="后台任务"
         title="后台任务"
-        circle
-        text
       >
-        <el-icon :size="18">
-          <Operation />
-        </el-icon>
+        <span class="tasks-toggle-glow"></span>
+        <span class="tasks-toggle-icon-wrap">
+          <el-icon :size="18" class="tasks-toggle-icon">
+            <Operation />
+          </el-icon>
+        </span>
+        <span class="tasks-toggle-copy">
+          <span class="tasks-toggle-label">后台任务</span>
+          <span class="tasks-toggle-meta">{{ tasksToggleMeta }}</span>
+        </span>
       </el-button>
     </el-badge>
     <template #dropdown>
       <el-dropdown-menu class="tasks-menu">
         <el-dropdown-item class="tasks-menu-actions-item">
           <div class="tasks-menu-actions">
-            <span class="tasks-menu-header">后台任务</span>
+            <div class="tasks-menu-title-group">
+              <span class="tasks-menu-icon">
+                <el-icon><Operation /></el-icon>
+              </span>
+              <div>
+                <span class="tasks-menu-header">后台任务</span>
+                <p class="tasks-menu-subtitle">实时查看执行进度与结果回执</p>
+              </div>
+            </div>
             <el-button
+              class="tasks-clear-btn"
               size="small"
               text
               :disabled="clearTasksDisabled"
@@ -41,7 +55,7 @@
           </div>
         </el-dropdown-item>
         <el-dropdown-item v-for="t in tasks" :key="t.id" disabled>
-          <div class="task-row">
+          <div class="task-row" :class="`is-${(t.status || '').toLowerCase()}`">
             <div class="task-row-header">
               <span class="task-name">{{ taskTitle(t) }}</span>
               <span class="task-state">{{ statusLabel(t.status) }}</span>
@@ -59,7 +73,9 @@
             />
           </div>
         </el-dropdown-item>
-        <el-dropdown-item v-if="tasks.length === 0" disabled>暂无任务</el-dropdown-item>
+        <el-dropdown-item v-if="tasks.length === 0" disabled>
+          <div class="tasks-empty">暂无任务</div>
+        </el-dropdown-item>
       </el-dropdown-menu>
     </template>
   </el-dropdown>
@@ -124,6 +140,12 @@ const progressPercent = (t: Task): number => (t.status === 'SUCCESS' || t.status
 
 const clearTasksText = computed(() => failedTasksCount.value > 0 ? '清除失败任务' : '清除已完成任务')
 const clearTasksDisabled = computed(() => failedTasksCount.value === 0 && successTasksCount.value === 0)
+const tasksToggleMeta = computed(() => {
+  if (activeTasksCount.value > 0) return `${activeTasksCount.value} 个进行中`
+  if (failedTasksCount.value > 0) return `${failedTasksCount.value} 个失败`
+  if (successTasksCount.value > 0) return `${successTasksCount.value} 个已完成`
+  return '实时状态'
+})
 
 const handleClearTasks = async () => {
   if (clearTasksDisabled.value) return
@@ -138,26 +160,131 @@ const handleClearTasks = async () => {
 </script>
 
 <style scoped>
-.tasks-dropdown { margin-right: 8px; }
+.tasks-dropdown {
+  margin-right: 10px;
+  position: relative;
+}
 
-/* 触发按钮 hover 辉光 */
 .tasks-toggle {
-  border-radius: 50% !important;
-  transition: box-shadow 0.25s ease, transform 0.25s cubic-bezier(.34,1.56,.64,1) !important;
-}
-.tasks-toggle:hover {
-  box-shadow: 0 0 0 1px rgba(119,181,254,0.3), 0 0 14px rgba(119,181,254,0.32) !important;
-  transform: scale(1.10) !important;
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 5px 14px 5px 6px !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(119,181,254,0.18) !important;
+  background: rgba(255,255,255,0.5) !important;
+  -webkit-backdrop-filter: saturate(160%) blur(16px);
+  backdrop-filter: saturate(160%) blur(16px);
+  box-shadow:
+    0 10px 24px rgba(119,181,254,0.12),
+    inset 0 1px 0 rgba(255,255,255,0.85) !important;
+  transition:
+    transform 0.25s cubic-bezier(.34,1.56,.64,1),
+    box-shadow 0.25s ease,
+    border-color 0.25s ease,
+    background 0.25s ease !important;
 }
 
-/* 面板容器 */
+.tasks-toggle:hover {
+  transform: translateY(-1px) scale(1.01) !important;
+  border-color: rgba(119,181,254,0.28) !important;
+  box-shadow:
+    0 14px 30px rgba(119,181,254,0.18),
+    0 0 0 1px rgba(119,181,254,0.16),
+    inset 0 1px 0 rgba(255,255,255,0.92) !important;
+}
+
+:global(.dark) .tasks-toggle {
+  background: rgba(15,23,42,0.58) !important;
+  border-color: rgba(119,181,254,0.14) !important;
+  box-shadow:
+    0 14px 28px rgba(0,0,0,0.34),
+    inset 0 1px 0 rgba(255,255,255,0.04) !important;
+}
+
+:global(.dark) .tasks-toggle:hover {
+  border-color: rgba(119,181,254,0.24) !important;
+  box-shadow:
+    0 18px 34px rgba(0,0,0,0.42),
+    0 0 0 1px rgba(119,181,254,0.14),
+    0 0 22px rgba(119,181,254,0.18) !important;
+}
+
+.tasks-toggle-glow {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top left, rgba(119,181,254,0.18), transparent 52%),
+    radial-gradient(circle at right center, rgba(239,183,186,0.14), transparent 46%);
+  opacity: 0.95;
+  pointer-events: none;
+}
+
+.tasks-toggle-icon-wrap {
+  position: relative;
+  z-index: 1;
+  width: 30px;
+  height: 30px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #77b5fe;
+  background: rgba(119,181,254,0.12);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+}
+
+.tasks-toggle-icon {
+  filter: drop-shadow(0 0 8px rgba(119,181,254,0.35));
+}
+
+.tasks-toggle-copy {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.tasks-toggle-label {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--color-text);
+}
+
+.tasks-toggle-meta {
+  font-size: 11px;
+  line-height: 1.1;
+  color: var(--color-text-secondary);
+}
+
 .tasks-menu {
   width: 460px;
   max-width: min(560px, 92vw);
   padding: 0;
   overflow-x: hidden;
   box-sizing: border-box;
-  /* 玻璃态（el-dropdown__popper 已设背景，这里补充内部分区样式） */
+  border: 1px solid rgba(119,181,254,0.18);
+  border-radius: 20px;
+  background: rgba(255,255,255,0.78);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  box-shadow:
+    0 20px 60px rgba(119,181,254,0.18),
+    0 4px 16px rgba(0,0,0,0.06);
+}
+
+:global(.dark) .tasks-menu {
+  background: rgba(8,14,26,0.92);
+  border-color: rgba(119,181,254,0.14);
+  box-shadow:
+    0 28px 80px rgba(0,0,0,0.72),
+    inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
 .tasks-menu :deep(.el-dropdown-menu__item) {
@@ -167,65 +294,218 @@ const handleClearTasks = async () => {
   padding: 0 !important;
   display: block !important;
   align-items: initial !important;
-  border-radius: 10px !important;
-  margin: 2px 8px !important;
+  border-radius: 16px !important;
+  margin: 6px 10px !important;
 }
+
 .tasks-menu :deep(.el-dropdown-menu__item:hover) {
   background: rgba(119,181,254,0.08) !important;
 }
 
-/* 标题行 */
 .tasks-menu-actions {
-  padding: 12px 16px 10px;
+  position: relative;
+  padding: 16px 18px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid rgba(119,181,254,0.12);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
-.tasks-menu-actions-item { cursor: default; }
-.tasks-menu-actions-item:hover { background-color: transparent !important; }
+
+.tasks-menu-actions::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 18px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(119,181,254,0.5) 32%, rgba(239,183,186,0.45) 68%, transparent 100%);
+}
+
+.tasks-menu-actions-item {
+  cursor: default;
+}
+
+.tasks-menu-actions-item:hover {
+  background-color: transparent !important;
+}
+
+.tasks-menu-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tasks-menu-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(119,181,254,0.12);
+  color: #77b5fe;
+}
+
 .tasks-menu .tasks-menu-header {
+  display: block;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 14px;
   letter-spacing: 0.03em;
-  background: linear-gradient(135deg, #77B5FE, #a78bfa);
+  background: linear-gradient(135deg, #77b5fe, #a78bfa);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
-/* 任务行 */
+.tasks-menu-subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.tasks-clear-btn {
+  border-radius: 10px;
+  border: 1px solid rgba(119,181,254,0.2);
+  background: rgba(128,128,128,0.06);
+  color: var(--color-text-secondary);
+  padding: 0 12px;
+}
+
+.tasks-clear-btn:hover {
+  color: var(--brand-primary);
+  border-color: rgba(119,181,254,0.28);
+  background: rgba(119,181,254,0.08);
+}
+
 .task-row {
-  padding: 10px 14px;
+  position: relative;
+  overflow: hidden;
+  padding: 14px 14px 12px;
   display: block;
   width: 100%;
   box-sizing: border-box;
+  border: 1px solid rgba(119,181,254,0.1);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.36), rgba(119,181,254,0.05));
 }
-.task-row-header { display: grid; grid-template-columns: 1fr auto auto; column-gap: 12px; align-items: baseline; margin-bottom: 4px; }
-.task-name { font-size: 13px; color: var(--color-text); font-weight: 600; text-align: left; }
-.task-state { font-size: 12px; color: var(--el-text-color-secondary); text-align: right; }
-.task-percent { font-size: 12px; color: var(--el-text-color-secondary); text-align: right; }
+
+:global(.dark) .task-row {
+  background: linear-gradient(180deg, rgba(18,28,46,0.74), rgba(10,16,32,0.92));
+  border-color: rgba(119,181,254,0.1);
+}
+
+.task-row::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  border-radius: 16px 0 0 16px;
+  background: linear-gradient(180deg, rgba(119,181,254,0.9), rgba(239,183,186,0.7));
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+
+.task-row.is-running::before,
+.task-row.is-failed::before,
+.task-row.is-success::before {
+  opacity: 1;
+}
+
+.task-row-header {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  column-gap: 12px;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.task-name {
+  font-size: 13px;
+  color: var(--color-text);
+  font-weight: 600;
+  text-align: left;
+}
+
+.task-state {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  text-align: right;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(119,181,254,0.08);
+}
+
+.task-percent {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .task-row-desc {
   font-size: 11px;
-  color: var(--el-text-color-secondary);
-  margin: 2px 0 6px;
+  color: var(--color-text-secondary);
+  margin: 6px 0 10px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.task-progress { display: block; width: 96%; margin: 0 auto; }
+
+.task-progress {
+  display: block;
+  width: 100%;
+  margin: 0;
+}
+
 .task-progress :deep(.el-progress-bar__outer) {
-  background: rgba(119,181,254,0.12) !important;
+  background: rgba(119,181,254,0.1) !important;
   border-radius: 99px !important;
 }
+
 .task-progress :deep(.el-progress-bar__inner) {
   border-radius: 99px !important;
-  box-shadow: 0 0 6px currentColor;
+  box-shadow: 0 0 8px currentColor;
 }
-.task-progress.running :deep(.el-progress-bar__outer) { background-color: rgba(119,181,254,0.12) !important; }
-.task-progress.failed :deep(.el-progress-bar__outer),
-.task-progress.failed :deep(.el-progress-bar__inner) { background-color: var(--el-color-danger) !important; }
 
-.tasks-badge :deep(.el-badge__content) { transform: translate(4px, -6px); }
+.task-progress.running :deep(.el-progress-bar__outer) {
+  background-color: rgba(119,181,254,0.12) !important;
+}
+
+.task-progress.failed :deep(.el-progress-bar__outer),
+.task-progress.failed :deep(.el-progress-bar__inner) {
+  background-color: var(--el-color-danger) !important;
+}
+
+.tasks-empty {
+  padding: 18px 16px;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.tasks-badge :deep(.el-badge__content) {
+  transform: translate(6px, -6px);
+  border: none;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #f4516c, #ef8aa0);
+  box-shadow: 0 6px 14px rgba(244,81,108,0.34);
+}
+
+@media (max-width: 900px) {
+  .tasks-toggle {
+    padding-right: 10px !important;
+  }
+
+  .tasks-toggle-copy {
+    display: none;
+  }
+
+  .tasks-menu {
+    width: min(92vw, 460px);
+  }
+}
 </style>

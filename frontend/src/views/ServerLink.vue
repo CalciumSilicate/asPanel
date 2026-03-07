@@ -1,5 +1,10 @@
 <template>
   <div class="sl-page">
+    <div class="page-orbs" aria-hidden="true">
+      <span class="page-orb page-orb-1"></span>
+      <span class="page-orb page-orb-2"></span>
+      <span class="page-orb page-orb-3"></span>
+    </div>
     <!-- Toolbar -->
     <LinkToolbar
       :groups="groups"
@@ -9,7 +14,7 @@
     />
 
     <!-- Main area: grid lets skeleton & content overlap -->
-    <div class="sl-main-wrap">
+    <div class="sl-main-wrap aurora-stage">
 
       <!-- Skeleton while loading -->
       <Transition name="pg-skeleton">
@@ -32,7 +37,7 @@
         <div v-if="loaded" class="sl-content-wrap">
 
           <!-- Non-admin placeholder -->
-          <div v-if="!isPlatformAdmin" class="sl-glass-card">
+          <div v-if="!isPlatformAdmin" class="sl-glass-card pg-item" style="--delay: 0ms">
             <div class="shimmer-line" aria-hidden="true" />
             <div class="sl-empty">
               <el-empty description="此页面仅对平台管理员开放" />
@@ -40,12 +45,12 @@
           </div>
 
           <!-- Group picker (no selection) -->
-          <div v-else-if="!activeGroup" class="sl-placeholder">
+          <div v-else-if="!activeGroup" class="sl-placeholder pg-item" style="--delay: 0ms">
             <LinkGroupPicker :groups="groups" @select="selectGroup" />
           </div>
 
           <!-- Group editor -->
-          <div v-else class="sl-glass-card is-editor">
+          <div v-else class="sl-glass-card is-editor pg-item" style="--delay: 0ms">
             <div class="shimmer-line" aria-hidden="true" />
             <LinkGroupEditor
               :group="activeGroup"
@@ -92,6 +97,7 @@ const {
 <style scoped>
 /* ─── Page layout ─────────────────────────────────────────── */
 .sl-page {
+  position: relative;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -100,8 +106,52 @@ const {
   min-height: 0;
 }
 
+.page-orbs {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.page-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.42;
+}
+
+.page-orb-1 {
+  width: 280px;
+  height: 280px;
+  top: -80px;
+  right: -20px;
+  background: rgba(119,181,254,0.20);
+}
+
+.page-orb-2 {
+  width: 220px;
+  height: 220px;
+  left: -40px;
+  bottom: 10%;
+  background: rgba(239,183,186,0.18);
+}
+
+.page-orb-3 {
+  width: 180px;
+  height: 180px;
+  right: 18%;
+  bottom: -30px;
+  background: rgba(166,200,240,0.18);
+}
+
+.aurora-stage {
+  position: relative;
+  z-index: 1;
+}
+
 /* ─── Placeholder (group picker) ──────────────────────────── */
 .sl-placeholder {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
@@ -111,6 +161,13 @@ const {
   backdrop-filter: saturate(180%) blur(16px);
   border: 1px solid rgba(119, 181, 254, 0.14);
   box-shadow: 0 4px 24px rgba(119, 181, 254, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.80);
+}
+.sl-placeholder::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.10), rgba(119,181,254,0.04) 45%, rgba(239,183,186,0.08));
+  pointer-events: none;
 }
 :global(.dark) .sl-placeholder {
   background: rgba(15, 23, 42, 0.60);
@@ -210,11 +267,12 @@ const {
   opacity: 0;
   transform: translateY(-10px);
 }
-.pg-content-enter-active {
-  animation: pg-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+.pg-content-enter-active .pg-item {
+  animation: pg-rise 0.65s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation-delay: var(--delay, 0ms);
 }
 @keyframes pg-rise {
-  from { opacity: 0; transform: translateY(24px) scale(0.98); }
+  from { opacity: 0; transform: translateY(20px) scale(0.98); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 

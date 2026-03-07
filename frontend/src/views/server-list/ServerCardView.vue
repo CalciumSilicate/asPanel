@@ -8,10 +8,11 @@
     <!-- Card grid -->
     <div v-else class="card-grid">
       <div
-        v-for="s in servers"
+        v-for="(s, index) in servers"
         :key="s.id"
         class="server-card"
         :class="[getServerAccent(s), { 'is-running': s.status === 'running' }]"
+        :style="{ '--i': Math.min(index, 8) }"
       >
         <div class="card-deco" aria-hidden="true" />
 
@@ -224,6 +225,13 @@ defineEmits<{
   flex-direction: column;
   gap: 8px;
   transition: transform 0.28s cubic-bezier(.34,1.56,.64,1), box-shadow 0.28s ease, border-color 0.28s ease;
+  animation: card-rise 0.65s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation-delay: calc(var(--i, 0) * 50ms);
+}
+@keyframes card-rise {
+  from { opacity: 0; transform: translateY(28px) scale(0.95); filter: blur(8px); }
+  60%  { filter: blur(0px); }
+  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0px); }
 }
 .server-card:hover {
   transform: translateY(-6px);

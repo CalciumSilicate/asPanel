@@ -28,6 +28,18 @@
         </div>
       </div>
       <div class="mcdr-toolbar-right">
+        <template v-if="filtered.length > pageSize">
+          <div class="page-nav">
+            <button class="page-btn" :disabled="page <= 1" @click="page--">
+              <el-icon :size="12"><ArrowLeft /></el-icon>
+            </button>
+            <span class="page-indicator">{{ page }}<span class="page-sep">/</span>{{ Math.ceil(filtered.length / pageSize) }}</span>
+            <button class="page-btn" :disabled="page >= Math.ceil(filtered.length / pageSize)" @click="page++">
+              <el-icon :size="12"><ArrowRight /></el-icon>
+            </button>
+          </div>
+          <div class="toolbar-divider" />
+        </template>
         <button class="btn-refresh" :class="{ 'is-loading': loading }" @click="load">
           <el-icon :size="13"><Refresh /></el-icon>
           <span>刷新</span>
@@ -109,178 +121,216 @@
           </tbody>
         </table>
       </div>
-
-      <!-- Footer pagination -->
-      <div class="mcdr-footer">
-        <el-pagination
-          background
-          layout="prev, pager, next, sizes, total"
-          :page-sizes="[10, 20, 50, 100]"
-          :page-size="pageSize"
-          :current-page="page"
-          :total="filtered.length"
-          @current-change="(p:number) => page = p"
-          @size-change="(s:number) => { pageSize = s; page = 1 }"
-        />
-      </div>
     </div>
 
     <!-- Detail Drawer -->
-    <el-drawer v-model="detailVisible" size="50%" direction="rtl" :destroy-on-close="true">
+    <el-drawer v-model="detailVisible" size="50%" direction="rtl" :destroy-on-close="true" append-to-body class="mcdr-detail-drawer">
       <template #header>
-        <div class="flex items-center gap-2">
-          <div class="text-base font-medium">{{ detail?.meta?.name }}<span class="text-gray-500">（{{
-              detail?.meta?.id
-            }}）</span></div>
-          <el-tag size="small" :type="detail?.latest?.prerelease ? 'warning' : 'success'">
-            {{ detail?.release?.latest_version }}
-          </el-tag>
-          <el-tag v-if="detail?.repository?.archived" size="small" type="danger">Archived</el-tag>
-        </div>
-      </template>
-
-      <div class="table-card">
-        <el-descriptions :column="2" border size="small">
-        <el-descriptions-item label="Repo">
-          <el-link v-if="detail?.repository?.html_url" :href="detail?.repository?.html_url" target="_blank"
-                   type="primary">{{ detail?.repository?.full_name }}
-          </el-link>
-          <span v-else>-</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="Labels">
-          <el-space wrap>
-            <el-tag v-for="t in detail?.plugin?.labels || []" :key="t" size="small" effect="plain">{{ t }}</el-tag>
-          </el-space>
-        </el-descriptions-item>
-        <el-descriptions-item label="Authors" :span="2">
-          <el-space wrap>
-            <el-tag v-for="a in detail?.meta?.authors || []" :key="a" size="small">{{ a }}</el-tag>
-          </el-space>
-        </el-descriptions-item>
-        </el-descriptions>
-      </div>
-
-      <el-divider>简介</el-divider>
-      <div class="text-sm leading-6 text-gray-700 whitespace-pre-wrap">
-        {{
-          detail?.plugin?.introduction?.zh_cn || detail?.plugin?.introduction?.en_us || detail?.meta?.description?.zh_cn || detail?.meta?.description?.en_us || '无'
-        }}
-      </div>
-
-      <template v-if="hasDependenciesInDetail">
-        <el-divider>依赖信息 (最新版本)</el-divider>
-        <div class="table-card" style="margin-bottom: 20px;">
-          <el-descriptions :column="1" border size="small">
-          <el-descriptions-item label="插件依赖" v-if="detail?.latest?.meta?.dependencies">
-            <el-space wrap v-if="Object.keys(detail?.latest?.meta?.dependencies || {}).length > 0">
-              <el-tag v-for="(version, name) in (detail?.latest?.meta?.dependencies || {})" :key="name" size="small"
-                      type="primary" effect="dark">
-                {{ name }}: {{ version }}
-              </el-tag>
-            </el-space>
-            <span v-else>无</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="Python库依赖" v-if="detail?.latest?.meta?.requirements">
-            <el-space wrap v-if="(detail?.latest?.meta?.requirements || []).length > 0">
-              <el-tag v-for="req in (detail?.latest?.meta?.requirements || [])" :key="req" size="small" type="success"
-                      effect="plain">
-                {{ req }}
-              </el-tag>
-            </el-space>
-            <span v-else>无</span>
-          </el-descriptions-item>
-          </el-descriptions>
-        </div>
-      </template>
-
-      <el-divider>发布历史（最多 10 条）</el-divider>
-      <el-timeline>
-        <el-timeline-item v-for="(r, idx) in (detail?.release?.releases || []).slice(0, 10)" :key="idx"
-                          :timestamp="formatDate(r.created_at)" :type="r.prerelease ? 'warning' : 'primary'">
-          <div class="flex items-center justify-between gap-2">
-            <div>
-              <div class="font-medium">{{ r.name || r.tag_name }}</div>
-              <div class="text-xs text-gray-500">{{ r.description || '——' }}</div>
+        <div class="drw-header">
+          <div class="drw-header-shimmer" aria-hidden="true" />
+          <div class="drw-header-body">
+            <div class="drw-header-icon">
+              <el-icon :size="18"><Coin /></el-icon>
             </div>
-            <div class="flex items-center gap-2">
-              <el-button-group>
-                <el-button v-if="r.asset?.browser_download_url" size="small" type="primary"
-                           @click="go(r.asset.browser_download_url)">下载
-                </el-button>
-                <el-button v-if="r.url" size="small" @click="go(r.url)">发布页</el-button>
-                <el-button size="small" type="success" :icon="Upload" @click="detail && handleInstallClick(detail, r)">
-                  为服务器安装
-                </el-button>
-              </el-button-group>
+            <div class="drw-title-group">
+              <div class="drw-title">{{ detail?.meta?.name }}</div>
+              <div class="drw-subtitle">
+                <span class="drw-id">{{ detail?.meta?.id }}</span>
+                <el-tag size="small" :type="detail?.latest?.prerelease ? 'warning' : 'success'" effect="light">
+                  {{ detail?.release?.latest_version }}
+                </el-tag>
+                <el-tag v-if="detail?.repository?.archived" size="small" type="danger" effect="light">Archived</el-tag>
+              </div>
             </div>
           </div>
-        </el-timeline-item>
-      </el-timeline>
+        </div>
+      </template>
+
+      <div class="drw-body">
+        <!-- Meta info card -->
+        <div class="drw-card">
+          <div class="drw-info-grid">
+            <div class="drw-info-row">
+              <span class="drw-info-label">Repo</span>
+              <span class="drw-info-value">
+                <a v-if="detail?.repository?.html_url" :href="detail?.repository?.html_url" target="_blank" class="drw-link">
+                  {{ detail?.repository?.full_name }}
+                </a>
+                <span v-else class="drw-none">—</span>
+              </span>
+            </div>
+            <div class="drw-info-row" v-if="(detail?.repository?.stargazers_count ?? 0) > 0 || (detail?.latest?.asset?.download_count ?? 0) > 0">
+              <span class="drw-info-label">统计</span>
+              <span class="drw-info-value drw-stats">
+                <span class="stat-chip stat-star">
+                  <el-icon :size="11"><Star /></el-icon>
+                  {{ detail?.repository?.stargazers_count ?? 0 }}
+                </span>
+                <span class="stat-chip stat-dl">
+                  <el-icon :size="11"><Download /></el-icon>
+                  {{ detail?.latest?.asset?.download_count ?? 0 }}
+                </span>
+              </span>
+            </div>
+            <div class="drw-info-row" v-if="(detail?.plugin?.labels || []).length > 0">
+              <span class="drw-info-label">标签</span>
+              <span class="drw-info-value drw-tags">
+                <el-tag v-for="t in detail?.plugin?.labels || []" :key="t" size="small" effect="plain">{{ t }}</el-tag>
+              </span>
+            </div>
+            <div class="drw-info-row" v-if="(detail?.meta?.authors || []).length > 0">
+              <span class="drw-info-label">作者</span>
+              <span class="drw-info-value drw-tags">
+                <el-tag v-for="a in detail?.meta?.authors || []" :key="a" size="small" type="primary" effect="light">{{ a }}</el-tag>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Introduction -->
+        <div class="drw-section">
+          <div class="drw-section-title">
+            <span class="drw-section-dot" />简介
+          </div>
+          <div class="drw-intro">
+            {{ detail?.plugin?.introduction?.zh_cn || detail?.plugin?.introduction?.en_us || detail?.meta?.description?.zh_cn || detail?.meta?.description?.en_us || '暂无介绍' }}
+          </div>
+        </div>
+
+        <!-- Dependencies -->
+        <template v-if="hasDependenciesInDetail">
+          <div class="drw-section">
+            <div class="drw-section-title">
+              <span class="drw-section-dot drw-section-dot--purple" />依赖信息
+              <span class="drw-section-badge">最新版本</span>
+            </div>
+            <div class="drw-card drw-card--deps">
+              <div class="drw-info-row" v-if="detail?.latest?.meta?.dependencies">
+                <span class="drw-info-label">插件依赖</span>
+                <span class="drw-info-value drw-tags">
+                  <template v-if="Object.keys(detail?.latest?.meta?.dependencies || {}).length > 0">
+                    <el-tag v-for="(version, name) in (detail?.latest?.meta?.dependencies || {})" :key="name"
+                            size="small" type="primary" effect="dark">{{ name }}: {{ version }}</el-tag>
+                  </template>
+                  <span v-else class="drw-none">无</span>
+                </span>
+              </div>
+              <div class="drw-info-row" v-if="detail?.latest?.meta?.requirements">
+                <span class="drw-info-label">Python 库</span>
+                <span class="drw-info-value drw-tags">
+                  <template v-if="(detail?.latest?.meta?.requirements || []).length > 0">
+                    <el-tag v-for="req in (detail?.latest?.meta?.requirements || [])" :key="req"
+                            size="small" type="success" effect="plain">{{ req }}</el-tag>
+                  </template>
+                  <span v-else class="drw-none">无</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Release history -->
+        <div class="drw-section">
+          <div class="drw-section-title">
+            <span class="drw-section-dot drw-section-dot--green" />发布历史
+            <span class="drw-section-badge">最多 10 条</span>
+          </div>
+          <div class="drw-timeline">
+            <div v-for="(r, idx) in (detail?.release?.releases || []).slice(0, 10)" :key="idx" class="drw-release-card">
+              <div class="drw-release-dot" :class="r.prerelease ? 'drw-release-dot--warn' : 'drw-release-dot--ok'" />
+              <div class="drw-release-body">
+                <div class="drw-release-head">
+                  <div class="drw-release-name">
+                    {{ r.name || r.tag_name }}
+                    <el-tag v-if="r.prerelease" size="small" type="warning" effect="plain" class="drw-pre-tag">预发布</el-tag>
+                  </div>
+                  <div class="drw-release-actions">
+                    <button v-if="r.asset?.browser_download_url" class="act-btn act-dl" @click="go(r.asset?.browser_download_url)">
+                      <el-icon :size="11"><Download /></el-icon>下载
+                    </button>
+                    <button v-if="r.url" class="act-btn act-detail" @click="go(r.url)">发布页</button>
+                    <button class="act-btn act-install" @click="detail && handleInstallClick(detail, r)">
+                      <el-icon :size="11"><Upload /></el-icon>安装
+                    </button>
+                  </div>
+                </div>
+                <div class="drw-release-meta">
+                  <span class="drw-release-time">{{ formatDate(r.created_at) }}</span>
+                  <span v-if="r.description" class="drw-release-desc">{{ r.description }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-if="!(detail?.release?.releases || []).length" class="drw-empty">暂无发布记录</div>
+          </div>
+        </div>
+      </div>
     </el-drawer>
 
     <!-- Install Dialog -->
-    <el-dialog v-model="installDialogVisible" title="安装插件到服务器" width="600px" destroy-on-close>
-      <div v-if="pluginToInstallInfo.plugin">
-        <div class="table-card">
-          <el-descriptions :column="1" border size="small">
-          <el-descriptions-item label="插件名称">{{ pluginToInstallInfo.plugin.meta.name }}</el-descriptions-item>
-          <el-descriptions-item label="安装版本">{{ pluginToInstallInfo.versionTag }}</el-descriptions-item>
-          <el-descriptions-item label="插件依赖">
-            <el-space wrap v-if="pluginToInstallInfo.dependencies.length > 0">
-              <el-tag v-for="dep in pluginToInstallInfo.dependencies" :key="dep" type="primary" effect="dark"
-                      size="small">{{ dep }}
-              </el-tag>
-            </el-space>
-            <span v-else>无</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="Python库依赖">
-            <el-space wrap v-if="pluginToInstallInfo.requirements.length > 0">
-              <el-tag v-for="req in pluginToInstallInfo.requirements" :key="req" type="success" effect="plain"
-                      size="small">{{ req }}
-              </el-tag>
-            </el-space>
-            <span v-else>无</span>
-          </el-descriptions-item>
-          </el-descriptions>
+    <el-dialog v-model="installDialogVisible" width="560px" destroy-on-close append-to-body
+               class="mcdr-action-dialog" :show-close="false">
+      <template #header>
+        <div class="adlg-head">
+          <div class="adlg-icon adlg-icon--install">
+            <el-icon :size="17"><Upload /></el-icon>
+          </div>
+          <div class="adlg-title-group">
+            <span class="adlg-title">安装插件到服务器</span>
+            <span class="adlg-subtitle" v-if="pluginToInstallInfo.plugin">
+              {{ pluginToInstallInfo.plugin.meta.name }}
+              <span class="adlg-version">{{ pluginToInstallInfo.versionTag }}</span>
+            </span>
+          </div>
+          <button class="adlg-close-btn" @click="installDialogVisible = false">
+            <el-icon :size="13"><Close /></el-icon>
+          </button>
+        </div>
+      </template>
+
+      <div v-if="pluginToInstallInfo.plugin" class="adlg-body">
+        <!-- Plugin info card -->
+        <div class="adlg-info-card">
+          <div class="adlg-info-row" v-if="pluginToInstallInfo.dependencies.length > 0">
+            <span class="adlg-info-label">插件依赖</span>
+            <div class="adlg-info-tags">
+              <el-tag v-for="dep in pluginToInstallInfo.dependencies" :key="dep" size="small" type="primary" effect="dark">{{ dep }}</el-tag>
+            </div>
+          </div>
+          <div class="adlg-info-row" v-if="pluginToInstallInfo.requirements.length > 0">
+            <span class="adlg-info-label">Python 库</span>
+            <div class="adlg-info-tags">
+              <el-tag v-for="req in pluginToInstallInfo.requirements" :key="req" size="small" type="success" effect="plain">{{ req }}</el-tag>
+            </div>
+          </div>
+          <div v-if="pluginToInstallInfo.dependencies.length === 0 && pluginToInstallInfo.requirements.length === 0" class="adlg-no-deps">
+            无额外依赖
+          </div>
         </div>
 
-        <div class="mt-4">
-          <p class="mb-2 font-medium">选择要安装的服务器:</p>
-          <el-select
-              v-model="selectedServers"
-              multiple
-              filterable
-              placeholder="请选择服务器"
-              style="width: 100%;"
-              :loading="isFetchingServerPlugins"
-          >
-            <el-option
-                v-for="server in servers"
-                :key="server.id"
-                :label="server.name"
-                :value="server.id"
-            >
-              <div class="flex justify-between items-center w-full">
-                <span>{{ server.name }}</span>
-                <el-tag
-                    size="small"
-                    :type="getPluginStatusForServer(server, pluginToInstallInfo.plugin.meta.id).type"
-                    effect="light"
-                >
-                  {{ getPluginStatusForServer(server, pluginToInstallInfo.plugin.meta.id).text }}
-                </el-tag>
-              </div>
-            </el-option>
-          </el-select>
-        </div>
+        <!-- Server select -->
+        <div class="adlg-section-label">选择目标服务器</div>
+        <el-select v-model="selectedServers" multiple filterable placeholder="请选择服务器"
+                   style="width:100%" :loading="isFetchingServerPlugins">
+          <el-option v-for="server in servers" :key="server.id" :label="server.name" :value="server.id">
+            <div class="adlg-server-opt">
+              <span>{{ server.name }}</span>
+              <el-tag size="small" :type="getPluginStatusForServer(server, pluginToInstallInfo.plugin.meta.id).type" effect="light">
+                {{ getPluginStatusForServer(server, pluginToInstallInfo.plugin.meta.id).text }}
+              </el-tag>
+            </div>
+          </el-option>
+        </el-select>
       </div>
+
       <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="installDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="confirmInstall" :loading="isInstalling">
-            确认安装
-          </el-button>
-        </span>
+        <div class="adlg-footer">
+          <button class="adlg-btn-ghost" @click="installDialogVisible = false">取消</button>
+          <button class="adlg-btn-primary" :disabled="isInstalling || selectedServers.length === 0" @click="confirmInstall">
+            <el-icon v-if="isInstalling" class="is-loading" :size="13"><Refresh /></el-icon>
+            <el-icon v-else :size="13"><Upload /></el-icon>
+            {{ isInstalling ? '安装中…' : '确认安装' }}
+          </button>
+        </div>
       </template>
     </el-dialog>
   </div>
@@ -289,7 +339,7 @@
 <script lang="ts" setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import {ElMessage, ElNotification} from 'element-plus'
-import {Search, Star, Download, Upload, Refresh} from '@element-plus/icons-vue'
+import {Search, Star, Download, Upload, Refresh, ArrowLeft, ArrowRight, Coin, Close} from '@element-plus/icons-vue'
 import apiClient, { isRequestCanceled } from '@/api'
 import PluginNameCell from '@/components/PluginNameCell.vue'
 import AuthorTagsCell from '@/components/AuthorTagsCell.vue'
@@ -851,14 +901,29 @@ onMounted(() => {
   overflow-x: hidden;
   scrollbar-width: thin;
 }
-.mcdr-footer {
+/* ── Compact page navigation ─────────────────────────────── */
+.page-nav { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.page-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 9px;
+  border: 1px solid rgba(119,181,254,0.22);
+  background: rgba(119,181,254,0.06);
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 10px 20px;
-  border-top: 1px solid rgba(119, 181, 254, 0.12);
 }
+.page-btn:not(:disabled):hover {
+  background: rgba(119,181,254,0.14); border-color: rgba(119,181,254,0.45);
+  color: var(--brand-primary); transform: scale(1.08);
+}
+.page-btn:disabled { opacity: 0.32; cursor: not-allowed; }
+:global(.dark) .page-btn { border-color: rgba(119,181,254,0.16); background: rgba(119,181,254,0.04); }
+.page-indicator {
+  font-size: 12px; font-weight: 700; color: var(--el-text-color-regular);
+  font-variant-numeric: tabular-nums; min-width: 36px; text-align: center; user-select: none;
+}
+.page-sep { color: var(--el-text-color-placeholder); margin: 0 1px; font-weight: 400; }
 
 /* ── Native table ────────────────────────────────────────── */
 .native-table {
@@ -951,4 +1016,272 @@ thead { position: sticky; top: 0; z-index: 10; }
 .whitespace-pre-wrap { white-space: pre-wrap; }
 .text-gray-500 { color: #909399; }
 .text-gray-700 { color: #606266; }
+
+/* ── Action Dialog (install) ─────────────────────────────── */
+:global(.mcdr-action-dialog) {
+  border-radius: 20px !important; overflow: hidden;
+  background: rgba(255,255,255,0.90) !important;
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119,181,254,0.18) !important;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.16), 0 4px 20px rgba(119,181,254,0.12) !important;
+}
+:global(.dark .mcdr-action-dialog) { background: rgba(15,23,42,0.90) !important; border-color: rgba(119,181,254,0.14) !important; }
+:global(.mcdr-action-dialog .el-dialog__header) { padding: 0 !important; margin-right: 0 !important; }
+:global(.mcdr-action-dialog .el-dialog__body)   { padding: 0 !important; }
+:global(.mcdr-action-dialog .el-dialog__footer) { padding: 0 !important; }
+
+.adlg-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(119,181,254,0.10);
+}
+.adlg-icon {
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; color: #fff;
+}
+.adlg-icon--install { background: linear-gradient(135deg, var(--brand-primary) 0%, #a78bfa 100%); }
+.adlg-icon--uninstall { background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); }
+.adlg-title-group { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.adlg-title { font-size: 15px; font-weight: 700; color: var(--color-text); line-height: 1.2; }
+.adlg-subtitle { font-size: 12px; color: var(--el-text-color-secondary); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.adlg-version {
+  font-family: 'Maple Mono', ui-monospace, monospace; font-size: 11px;
+  background: rgba(119,181,254,0.10); border: 1px solid rgba(119,181,254,0.20);
+  border-radius: 5px; padding: 0 5px; color: var(--brand-primary);
+}
+.adlg-close-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+  border: 1px solid rgba(119,181,254,0.18); background: transparent;
+  color: var(--el-text-color-secondary); cursor: pointer; transition: all 0.15s ease;
+}
+.adlg-close-btn:hover { background: rgba(248,113,113,0.10); border-color: rgba(248,113,113,0.28); color: #ef4444; }
+
+.adlg-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+.adlg-info-card {
+  border: 1px solid rgba(119,181,254,0.13); border-radius: 12px; overflow: hidden;
+  background: rgba(248,250,255,0.70);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+:global(.dark) .adlg-info-card { background: rgba(15,23,42,0.50); border-color: rgba(119,181,254,0.10); }
+.adlg-info-row {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 9px 14px; border-bottom: 1px solid rgba(119,181,254,0.07);
+}
+.adlg-info-row:last-child { border-bottom: none; }
+.adlg-info-label {
+  flex-shrink: 0; width: 64px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--el-text-color-secondary); opacity: 0.7; padding-top: 2px;
+}
+.adlg-info-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.adlg-no-deps {
+  padding: 10px 14px; font-size: 12px; color: var(--el-text-color-placeholder);
+}
+.adlg-section-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--el-text-color-secondary); opacity: 0.7;
+}
+.adlg-server-opt { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+.adlg-footer {
+  display: flex; justify-content: flex-end; align-items: center; gap: 10px;
+  padding: 14px 20px 18px; border-top: 1px solid rgba(119,181,254,0.09);
+}
+.adlg-btn-ghost {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 16px; border-radius: 10px; font-family: inherit;
+  border: 1px solid rgba(119,181,254,0.22); background: transparent;
+  color: var(--el-text-color-regular); font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+.adlg-btn-ghost:hover { background: rgba(119,181,254,0.07); border-color: rgba(119,181,254,0.40); }
+.adlg-btn-primary {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 18px; border-radius: 10px; border: none; font-family: inherit;
+  cursor: pointer; font-size: 13px; font-weight: 600; color: #fff;
+  background: linear-gradient(135deg, var(--brand-primary) 0%, #a78bfa 100%);
+  box-shadow: 0 4px 14px rgba(119,181,254,0.35);
+  transition: box-shadow 0.2s ease, transform 0.2s cubic-bezier(.34,1.56,.64,1);
+}
+.adlg-btn-primary:hover:not(:disabled) { box-shadow: 0 6px 22px rgba(119,181,254,0.55); transform: translateY(-1px); }
+.adlg-btn-primary:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; }
+
+/* ── Detail Drawer ──────────────────────────────────────── */
+:global(.mcdr-detail-drawer) { --el-drawer-padding-primary: 0; }
+:global(.mcdr-detail-drawer .el-drawer__header) {
+  margin-bottom: 0;
+  padding: 0;
+  border-bottom: none;
+}
+:global(.mcdr-detail-drawer .el-drawer__body) { padding: 0; overflow: hidden; }
+
+.drw-header {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, rgba(119,181,254,0.12) 0%, rgba(167,139,250,0.08) 100%);
+  border-bottom: 1px solid rgba(119,181,254,0.14);
+}
+.drw-header-shimmer {
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(119,181,254,0.7), rgba(167,139,250,0.6), transparent);
+  background-size: 200% 100%;
+  animation: shimmer-slide 4s linear infinite;
+}
+.drw-header-body {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 20px 14px;
+}
+.drw-header-icon {
+  flex-shrink: 0;
+  width: 38px; height: 38px; border-radius: 12px;
+  background: linear-gradient(135deg, var(--brand-primary), #a78bfa);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(119,181,254,0.35);
+}
+.drw-title-group { min-width: 0; flex: 1; }
+.drw-title {
+  font-size: 15px; font-weight: 700;
+  color: var(--color-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  line-height: 1.3;
+}
+.drw-subtitle {
+  display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap;
+}
+.drw-id {
+  font-family: 'Maple Mono', ui-monospace, monospace;
+  font-size: 11px; color: var(--el-text-color-secondary);
+  background: rgba(119,181,254,0.10);
+  border: 1px solid rgba(119,181,254,0.18);
+  border-radius: 6px; padding: 1px 6px;
+}
+
+.drw-body {
+  height: calc(100% - 72px);
+  overflow-y: auto; overflow-x: hidden;
+  scrollbar-width: thin;
+  padding: 20px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+
+/* ── Info card ── */
+.drw-card {
+  background: rgba(255,255,255,0.55);
+  border: 1px solid rgba(119,181,254,0.14);
+  border-radius: 14px;
+  overflow: hidden;
+  backdrop-filter: saturate(160%) blur(12px);
+  -webkit-backdrop-filter: saturate(160%) blur(12px);
+}
+:global(.dark) .drw-card {
+  background: rgba(15,23,42,0.55);
+  border-color: rgba(119,181,254,0.10);
+}
+.drw-card--deps { margin-top: 0; }
+
+.drw-info-grid { display: flex; flex-direction: column; }
+.drw-info-row {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(119,181,254,0.07);
+}
+.drw-info-row:last-child { border-bottom: none; }
+.drw-info-label {
+  flex-shrink: 0; width: 68px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--el-text-color-secondary); opacity: 0.7;
+  padding-top: 2px;
+}
+.drw-info-value { flex: 1; min-width: 0; font-size: 13px; color: var(--color-text); }
+.drw-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.drw-stats { display: flex; align-items: center; gap: 6px; }
+.drw-link {
+  color: var(--brand-primary); text-decoration: none; font-size: 13px;
+  transition: opacity 0.15s;
+}
+.drw-link:hover { opacity: 0.75; text-decoration: underline; }
+.drw-none { color: var(--el-text-color-placeholder); font-size: 13px; }
+
+/* ── Section title ── */
+.drw-section { display: flex; flex-direction: column; gap: 10px; }
+.drw-section-title {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--el-text-color-secondary); opacity: 0.8;
+}
+.drw-section-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--brand-primary);
+  box-shadow: 0 0 6px rgba(119,181,254,0.6);
+}
+.drw-section-dot--purple { background: #a78bfa; box-shadow: 0 0 6px rgba(167,139,250,0.6); }
+.drw-section-dot--green  { background: #34d399; box-shadow: 0 0 6px rgba(52,211,153,0.5); }
+.drw-section-badge {
+  font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none;
+  color: var(--el-text-color-placeholder);
+  background: rgba(119,181,254,0.08);
+  border: 1px solid rgba(119,181,254,0.14); border-radius: 99px;
+  padding: 1px 7px;
+}
+
+/* ── Introduction ── */
+.drw-intro {
+  font-size: 13px; line-height: 1.7; color: var(--el-text-color-regular);
+  white-space: pre-wrap;
+  background: rgba(255,255,255,0.45);
+  border: 1px solid rgba(119,181,254,0.10);
+  border-radius: 12px; padding: 14px 16px;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+:global(.dark) .drw-intro {
+  background: rgba(15,23,42,0.45);
+  border-color: rgba(119,181,254,0.08);
+}
+
+/* ── Release timeline ── */
+.drw-timeline { display: flex; flex-direction: column; gap: 0; }
+.drw-release-card {
+  display: flex; gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(119,181,254,0.07);
+  position: relative;
+}
+.drw-release-card:last-child { border-bottom: none; }
+.drw-release-dot {
+  flex-shrink: 0;
+  width: 10px; height: 10px; border-radius: 50%;
+  margin-top: 5px;
+  position: relative; z-index: 1;
+}
+.drw-release-dot--ok   { background: #34d399; box-shadow: 0 0 6px rgba(52,211,153,0.55); }
+.drw-release-dot--warn { background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.55); }
+.drw-release-body { flex: 1; min-width: 0; }
+.drw-release-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  flex-wrap: wrap;
+}
+.drw-release-name {
+  font-size: 13px; font-weight: 600; color: var(--color-text);
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.drw-pre-tag { vertical-align: middle; }
+.drw-release-actions { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.drw-release-meta {
+  display: flex; align-items: baseline; gap: 10px; margin-top: 4px; flex-wrap: wrap;
+}
+.drw-release-time {
+  font-size: 11px; color: var(--el-text-color-placeholder);
+  font-variant-numeric: tabular-nums;
+}
+.drw-release-desc {
+  font-size: 12px; color: var(--el-text-color-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;
+}
+.drw-empty {
+  text-align: center; padding: 32px 0;
+  color: var(--el-text-color-placeholder); font-size: 13px;
+}
 </style>

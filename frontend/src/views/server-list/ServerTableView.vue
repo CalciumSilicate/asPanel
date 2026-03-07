@@ -89,8 +89,9 @@
         </tr>
 
         <tr
-          v-for="row in sortedRows"
+          v-for="(row, index) in sortedRows"
           :key="row.id"
+          :style="{ '--i': Math.min(index, 10) }"
           :class="[
             'srv-row',
             { 'row-running': row.status === 'running', 'row-selected': selectedIds.has(row.id) },
@@ -487,6 +488,12 @@ thead {
 .srv-row {
   transition: background 0.12s ease;
   border-bottom: 1px solid rgba(119, 181, 254, 0.07);
+  animation: row-rise 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation-delay: calc(var(--i, 0) * 30ms);
+}
+@keyframes row-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 .srv-row:last-child { border-bottom: none; }
 .srv-row:hover { background: rgba(119, 181, 254, 0.05); }

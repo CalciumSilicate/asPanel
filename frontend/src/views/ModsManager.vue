@@ -7,12 +7,17 @@
       :mods-count="mods.length"
       :total-mods-count="totalModsCount"
       :is-server-running="isServerRunning"
+      :current-page="page"
+      :page-size="pageSize"
+      :total-filtered="filteredMods.length"
       @select-server="selectServerById"
       @modrinth="openModrinthDialog"
       @curseforge="openCurseforgeDialog"
       @upload="openUploadDialog"
       @copy="openCopyDialog"
       @check-updates="checkUpdates"
+      @prev-page="page > 1 && page--"
+      @next-page="page < Math.ceil(filteredMods.length / pageSize) && page++"
     />
 
     <!-- No server selected: Picker -->
@@ -49,10 +54,10 @@
       <div class="mm-table-wrap" v-loading="modsLoading" element-loading-background="transparent">
         <table class="native-table">
           <colgroup>
-            <col style="min-width:240px" />
+            <col />
             <col style="width:120px" />
             <col style="width:160px" />
-            <col style="min-width:140px" />
+            <col style="width:140px" />
             <col style="width:120px" />
             <col style="width:250px" />
           </colgroup>
@@ -135,20 +140,6 @@
             </tr>
           </tbody>
         </table>
-      </div>
-
-      <!-- Footer: pagination -->
-      <div class="mm-footer">
-        <el-pagination
-          background
-          layout="prev, pager, next, sizes, total"
-          :page-sizes="[15, 20, 50, 100]"
-          :page-size="pageSize"
-          :current-page="page"
-          :total="filteredMods.length"
-          @current-change="p => page = p"
-          @size-change="s => { pageSize = s; page = 1 }"
-        />
       </div>
     </div>
 
@@ -908,20 +899,35 @@ onMounted(initialLoad)
   padding: 0 4px;
 }
 
-.mm-footer {
+/* ── Compact page navigation ─────────────────────────────── */
+.page-nav { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.page-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 9px;
+  border: 1px solid rgba(167,139,250,0.22);
+  background: rgba(167,139,250,0.06);
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 10px 20px;
-  border-top: 1px solid rgba(167, 139, 250, 0.12);
 }
+.page-btn:not(:disabled):hover {
+  background: rgba(167,139,250,0.14); border-color: rgba(167,139,250,0.45);
+  color: #a78bfa; transform: scale(1.08);
+}
+.page-btn:disabled { opacity: 0.32; cursor: not-allowed; }
+:global(.dark) .page-btn { border-color: rgba(167,139,250,0.16); background: rgba(167,139,250,0.04); }
+.page-indicator {
+  font-size: 12px; font-weight: 700; color: var(--el-text-color-regular);
+  font-variant-numeric: tabular-nums; min-width: 36px; text-align: center; user-select: none;
+}
+.page-sep { color: var(--el-text-color-placeholder); margin: 0 1px; font-weight: 400; }
 
 /* ── Native table ────────────────────────────────────────── */
 .native-table {
   width: 100%;
   border-collapse: collapse;
-  table-layout: auto;
+  table-layout: fixed;
 }
 thead { position: sticky; top: 0; z-index: 10; }
 .thead-row {
@@ -975,7 +981,7 @@ thead { position: sticky; top: 0; z-index: 10; }
 .stat-dl-chip { background: rgba(167,139,250,0.10); color: #a78bfa; border: 1px solid rgba(167,139,250,0.22); }
 
 /* ── Row action buttons ──────────────────────────────────── */
-.row-actions { display: inline-flex; align-items: center; gap: 4px; }
+.row-actions { display: inline-flex; align-items: center; gap: 4px; flex-wrap: nowrap; }
 .act-btn {
   display: inline-flex; align-items: center; gap: 4px;
   height: 26px; padding: 0 10px; border-radius: 8px;
@@ -983,6 +989,7 @@ thead { position: sticky; top: 0; z-index: 10; }
   background: transparent;
   color: var(--el-text-color-regular);
   font-size: 12px; font-weight: 500; font-family: inherit;
+  white-space: nowrap; flex-shrink: 0;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }

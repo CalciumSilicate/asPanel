@@ -14,6 +14,18 @@
         </div>
       </div>
       <div class="db-toolbar-right">
+        <template v-if="filtered.length > pageSize">
+          <div class="page-nav">
+            <button class="page-btn" :disabled="page <= 1" @click="page--">
+              <el-icon :size="12"><ArrowLeft /></el-icon>
+            </button>
+            <span class="page-indicator">{{ page }}<span class="page-sep">/</span>{{ Math.ceil(filtered.length / pageSize) }}</span>
+            <button class="page-btn" :disabled="page >= Math.ceil(filtered.length / pageSize)" @click="page++">
+              <el-icon :size="12"><ArrowRight /></el-icon>
+            </button>
+          </div>
+          <div class="toolbar-divider" />
+        </template>
         <button class="btn-ghost" @click="load">
           <el-icon :size="13"><Refresh /></el-icon><span>刷新</span>
         </button>
@@ -78,30 +90,14 @@
                   <button class="act-btn act-uninstall" @click="handleUninstallClick(row)">
                     <el-icon :size="11"><Remove /></el-icon>卸载
                   </button>
-                  <el-popconfirm title="确定要从数据库中永久删除这个插件吗？" width="250" @confirm="handleDelete(row)">
-                    <template #reference>
-                      <button class="act-btn act-delete"><el-icon :size="11"><Delete /></el-icon>删除</button>
-                    </template>
-                  </el-popconfirm>
+                  <button class="act-btn act-delete" @click="openDeleteConfirm(row)">
+                    <el-icon :size="11"><Delete /></el-icon>删除
+                  </button>
                 </div>
               </td>
             </tr>
           </tbody>
         </table>
-      </div>
-
-      <!-- Footer pagination -->
-      <div class="db-footer">
-        <el-pagination
-          background
-          layout="prev, pager, next, sizes, total"
-          :page-sizes="[10, 20, 50, 100]"
-          :page-size="pageSize"
-          :current-page="page"
-          :total="filtered.length"
-          @current-change="(p) => page = p"
-          @size-change="(s) => { pageSize = s; page = 1; }"
-        />
       </div>
     </div>
 
@@ -138,119 +134,139 @@
     </el-dialog>
 
     <!-- Install Dialog -->
-    <el-dialog v-model="installDialogVisible" title="安装插件到服务器" width="600px" destroy-on-close>
-      <div v-if="activePlugin">
-        <el-descriptions :column="1" border size="small">
-          <el-descriptions-item label="插件名称">{{
-              activePlugin.meta.name || activePlugin.file_name
-            }}
-          </el-descriptions-item>
-          <el-descriptions-item label="安装版本">{{ activePlugin.meta.version || '未知' }}</el-descriptions-item>
-        </el-descriptions>
-
-        <div class="mt-4">
-          <p class="mb-2 font-medium">选择要安装的服务器:</p>
-          <el-select
-              v-model="selectedServersForInstall"
-              multiple
-              filterable
-              placeholder="请选择服务器"
-              style="width: 100%;"
-              :loading="isFetchingServerPlugins"
-          >
-            <el-option
-                v-for="server in servers"
-                :key="server.id"
-                :label="server.name"
-                :value="server.id"
-            >
-              <div class="flex justify-between items-center w-full">
-                <span>{{ server.name }}</span>
-                <el-tag
-                    size="small"
-                    :type="getPluginStatusForServer(server, activePlugin.meta.id).type"
-                    effect="light"
-                >
-                  {{ getPluginStatusForServer(server, activePlugin.meta.id).text }}
-                </el-tag>
-              </div>
-            </el-option>
-          </el-select>
+    <el-dialog v-model="installDialogVisible" width="540px" destroy-on-close append-to-body
+               class="db-action-dialog" :show-close="false">
+      <template #header>
+        <div class="adlg-head">
+          <div class="adlg-icon adlg-icon--install">
+            <el-icon :size="17"><Upload /></el-icon>
+          </div>
+          <div class="adlg-title-group">
+            <span class="adlg-title">安装插件到服务器</span>
+            <span class="adlg-subtitle" v-if="activePlugin">
+              {{ activePlugin.meta.name || activePlugin.file_name }}
+              <span class="adlg-version">{{ activePlugin.meta.version || '未知版本' }}</span>
+            </span>
+          </div>
+          <button class="adlg-close-btn" @click="installDialogVisible = false">
+            <el-icon :size="13"><Close /></el-icon>
+          </button>
         </div>
+      </template>
+
+      <div v-if="activePlugin" class="adlg-body">
+        <div class="adlg-section-label">选择目标服务器</div>
+        <el-select v-model="selectedServersForInstall" multiple filterable placeholder="请选择服务器"
+                   style="width:100%" :loading="isFetchingServerPlugins">
+          <el-option v-for="server in servers" :key="server.id" :label="server.name" :value="server.id">
+            <div class="adlg-server-opt">
+              <span>{{ server.name }}</span>
+              <el-tag size="small" :type="getPluginStatusForServer(server, activePlugin.meta.id).type" effect="light">
+                {{ getPluginStatusForServer(server, activePlugin.meta.id).text }}
+              </el-tag>
+            </div>
+          </el-option>
+        </el-select>
       </div>
+
       <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="installDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="confirmInstall" :loading="isInstalling">
-            确认安装
-          </el-button>
-        </span>
+        <div class="adlg-footer">
+          <button class="adlg-btn-ghost" @click="installDialogVisible = false">取消</button>
+          <button class="adlg-btn-primary" :disabled="isInstalling || selectedServersForInstall.length === 0" @click="confirmInstall">
+            <el-icon v-if="isInstalling" class="is-loading" :size="13"><Refresh /></el-icon>
+            <el-icon v-else :size="13"><Upload /></el-icon>
+            {{ isInstalling ? '安装中…' : '确认安装' }}
+          </button>
+        </div>
       </template>
     </el-dialog>
 
-    <!-- [NEW] Uninstall Dialog -->
-    <el-dialog v-model="uninstallDialogVisible" title="从服务器卸载插件" width="600px" destroy-on-close>
-      <div v-if="activePlugin">
-        <el-descriptions :column="1" border size="small">
-          <el-descriptions-item label="插件名称">{{
-              activePlugin.meta.name || activePlugin.file_name
-            }}
-          </el-descriptions-item>
-          <el-descriptions-item label="插件ID">{{ activePlugin.meta.id || '未知' }}</el-descriptions-item>
-        </el-descriptions>
+    <!-- Uninstall Dialog -->
+    <el-dialog v-model="uninstallDialogVisible" width="540px" destroy-on-close append-to-body
+               class="db-action-dialog" :show-close="false">
+      <template #header>
+        <div class="adlg-head">
+          <div class="adlg-icon adlg-icon--uninstall">
+            <el-icon :size="17"><Remove /></el-icon>
+          </div>
+          <div class="adlg-title-group">
+            <span class="adlg-title">从服务器卸载插件</span>
+            <span class="adlg-subtitle" v-if="activePlugin">
+              {{ activePlugin.meta.name || activePlugin.file_name }}
+              <span v-if="activePlugin.meta.id" class="adlg-version">{{ activePlugin.meta.id }}</span>
+            </span>
+          </div>
+          <button class="adlg-close-btn" @click="uninstallDialogVisible = false">
+            <el-icon :size="13"><Close /></el-icon>
+          </button>
+        </div>
+      </template>
 
-        <div class="mt-4">
-          <p class="mb-2 font-medium">选择要卸载此插件的服务器:</p>
-          <el-alert v-if="serversWithPluginInstalled.length === 0 && !isFetchingServerPlugins"
-                    title="当前没有服务器安装了此插件。" type="info" :closable="false" show-icon/>
-          <el-select
-              v-else
-              v-model="selectedServersForUninstall"
-              multiple
-              filterable
-              placeholder="请选择服务器"
-              style="width: 100%;"
-              :loading="isFetchingServerPlugins"
-          >
-            <el-option
-                v-for="server in servers"
-                :key="server.id"
-                :label="server.name"
-                :value="server.id"
-            >
-              <div class="flex justify-between items-center w-full">
+      <div v-if="activePlugin" class="adlg-body">
+        <el-alert v-if="serversWithPluginInstalled.length === 0 && !isFetchingServerPlugins"
+                  title="当前没有服务器安装了此插件。" type="info" :closable="false" show-icon />
+        <template v-else>
+          <div class="adlg-section-label">选择要卸载此插件的服务器</div>
+          <el-select v-model="selectedServersForUninstall" multiple filterable placeholder="请选择服务器"
+                     style="width:100%" :loading="isFetchingServerPlugins">
+            <el-option v-for="server in servers" :key="server.id" :label="server.name" :value="server.id">
+              <div class="adlg-server-opt">
                 <span>{{ server.name }}</span>
-                <el-tag
-                    size="small"
-                    :type="getPluginStatusForServer(server, activePlugin.meta.id).type"
-                    effect="light"
-                >
+                <el-tag size="small" :type="getPluginStatusForServer(server, activePlugin.meta.id).type" effect="light">
                   {{ getPluginStatusForServer(server, activePlugin.meta.id).text }}
                 </el-tag>
               </div>
             </el-option>
           </el-select>
-          <!--          <el-checkbox-group v-model="selectedServersForUninstall" v-loading="isFetchingServerPlugins">-->
-          <!--              <el-checkbox-->
-          <!--                v-for="server in serversWithPluginInstalled"-->
-          <!--                :key="server.id"-->
-          <!--                :label="server.id"-->
-          <!--                border-->
-          <!--                class="w-full mb-2"-->
-          <!--              >-->
-          <!--                {{ server.name }} (文件名: {{ server.fileName }})-->
-          <!--              </el-checkbox>-->
-          <!--          </el-checkbox-group>-->
+        </template>
+      </div>
+
+      <template #footer>
+        <div class="adlg-footer">
+          <button class="adlg-btn-ghost" @click="uninstallDialogVisible = false">取消</button>
+          <button class="adlg-btn-danger" :disabled="isUninstalling || serversWithPluginInstalled.length === 0" @click="confirmUninstall">
+            <el-icon v-if="isUninstalling" class="is-loading" :size="13"><Refresh /></el-icon>
+            <el-icon v-else :size="13"><Remove /></el-icon>
+            {{ isUninstalling ? '卸载中…' : '确认卸载' }}
+          </button>
+        </div>
+      </template>
+    </el-dialog>
+    <!-- Delete Confirm Dialog -->
+    <el-dialog v-if="deleteConfirmVisible" v-model="deleteConfirmVisible"
+               width="420px" top="30vh" destroy-on-close append-to-body
+               class="db-action-dialog" :show-close="false">
+      <template #header>
+        <div class="adlg-head">
+          <div class="adlg-icon adlg-icon--uninstall">
+            <el-icon :size="17"><Delete /></el-icon>
+          </div>
+          <div class="adlg-title-group">
+            <span class="adlg-title">永久删除插件</span>
+            <span class="adlg-subtitle">插件文件将从数据库中移除，不可撤销</span>
+          </div>
+          <button class="adlg-close-btn" @click="deleteConfirmVisible = false">
+            <el-icon :size="13"><Close /></el-icon>
+          </button>
+        </div>
+      </template>
+      <div class="adlg-body" style="gap:6px">
+        <div style="font-size:14px;font-weight:700;color:var(--color-text)">
+          {{ pluginToDelete?.meta?.name || pluginToDelete?.file_name }}
+        </div>
+        <div style="font-size:12px;color:var(--el-text-color-secondary)">
+          文件：<span style="font-family:'Maple Mono',ui-monospace,monospace;font-size:11px;background:rgba(248,113,113,0.08);border-radius:4px;padding:1px 5px">{{ pluginToDelete?.file_name }}</span>
         </div>
       </div>
       <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="uninstallDialogVisible = false">取消</el-button>
-          <el-button type="danger" @click="confirmUninstall" :loading="isUninstalling"
-                     :disabled="serversWithPluginInstalled.length === 0">
-            确认卸载
-          </el-button>
-        </span>
+        <div class="adlg-footer">
+          <button class="adlg-btn-ghost" @click="deleteConfirmVisible = false">取消</button>
+          <button class="adlg-btn-danger" :disabled="isDeleting" @click="executeDelete">
+            <el-icon v-if="isDeleting" class="is-loading" :size="13"><Refresh /></el-icon>
+            <el-icon v-else :size="13"><Delete /></el-icon>
+            {{ isDeleting ? '删除中…' : '确认删除' }}
+          </button>
+        </div>
       </template>
     </el-dialog>
   </div>
@@ -259,7 +275,7 @@
 <script setup>
 import {ref, computed, onMounted} from 'vue';
 import {ElMessage, ElNotification} from 'element-plus';
-import {Search, Refresh, UploadFilled, Download, Delete, Remove} from '@element-plus/icons-vue';
+import {Search, Refresh, UploadFilled, Upload, Download, Delete, Remove, ArrowLeft, ArrowRight, Close} from '@element-plus/icons-vue';
 import PluginNameCell from '@/components/PluginNameCell.vue';
 import AuthorTagsCell from '@/components/AuthorTagsCell.vue';
 import apiClient, { isRequestCanceled } from '@/api';
@@ -424,6 +440,21 @@ const handleDelete = async (plugin) => {
     ElMessage.error('删除失败: ' + (error.response?.data?.detail || error.message));
   }
 };
+
+const deleteConfirmVisible = ref(false);
+const pluginToDelete = ref(null);
+const isDeleting = ref(false);
+function openDeleteConfirm(plugin) {
+  pluginToDelete.value = plugin;
+  deleteConfirmVisible.value = true;
+}
+async function executeDelete() {
+  if (!pluginToDelete.value) return;
+  isDeleting.value = true;
+  await handleDelete(pluginToDelete.value);
+  isDeleting.value = false;
+  deleteConfirmVisible.value = false;
+}
 
 // Common plugin status logic
 const fetchAllServerPlugins = async () => {
@@ -703,14 +734,29 @@ onMounted(() => {
   overflow-x: hidden;
   scrollbar-width: thin;
 }
-.db-footer {
+/* ── Compact page navigation ─────────────────────────────── */
+.page-nav { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.page-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 9px;
+  border: 1px solid rgba(119,181,254,0.22);
+  background: rgba(119,181,254,0.06);
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 10px 20px;
-  border-top: 1px solid rgba(119, 181, 254, 0.12);
 }
+.page-btn:not(:disabled):hover {
+  background: rgba(119,181,254,0.14); border-color: rgba(119,181,254,0.45);
+  color: var(--brand-primary); transform: scale(1.08);
+}
+.page-btn:disabled { opacity: 0.32; cursor: not-allowed; }
+:global(.dark) .page-btn { border-color: rgba(119,181,254,0.16); background: rgba(119,181,254,0.04); }
+.page-indicator {
+  font-size: 12px; font-weight: 700; color: var(--el-text-color-regular);
+  font-variant-numeric: tabular-nums; min-width: 36px; text-align: center; user-select: none;
+}
+.page-sep { color: var(--el-text-color-placeholder); margin: 0 1px; font-weight: 400; }
 
 /* ── Native table ────────────────────────────────────────── */
 .native-table {
@@ -787,4 +833,83 @@ thead { position: sticky; top: 0; z-index: 10; }
 .mt-4 { margin-top: 16px; }
 .mb-2 { margin-bottom: 8px; }
 .font-medium { font-weight: 500; }
+
+/* ── Action Dialogs (install / uninstall) ────────────────── */
+:global(.db-action-dialog) {
+  border-radius: 20px !important; overflow: hidden;
+  background: rgba(255,255,255,0.90) !important;
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(119,181,254,0.18) !important;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.16), 0 4px 20px rgba(119,181,254,0.12) !important;
+}
+:global(.dark .db-action-dialog) { background: rgba(15,23,42,0.90) !important; border-color: rgba(119,181,254,0.14) !important; }
+:global(.db-action-dialog .el-dialog__header) { padding: 0 !important; margin-right: 0 !important; }
+:global(.db-action-dialog .el-dialog__body)   { padding: 0 !important; }
+:global(.db-action-dialog .el-dialog__footer) { padding: 0 !important; }
+
+.adlg-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(119,181,254,0.10);
+}
+.adlg-icon {
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; color: #fff;
+}
+.adlg-icon--install   { background: linear-gradient(135deg, var(--brand-primary) 0%, #a78bfa 100%); }
+.adlg-icon--uninstall { background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); }
+.adlg-title-group { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.adlg-title { font-size: 15px; font-weight: 700; color: var(--color-text); line-height: 1.2; }
+.adlg-subtitle { font-size: 12px; color: var(--el-text-color-secondary); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.adlg-version {
+  font-family: 'Maple Mono', ui-monospace, monospace; font-size: 11px;
+  background: rgba(119,181,254,0.10); border: 1px solid rgba(119,181,254,0.20);
+  border-radius: 5px; padding: 0 5px; color: var(--brand-primary);
+}
+.adlg-close-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+  border: 1px solid rgba(119,181,254,0.18); background: transparent;
+  color: var(--el-text-color-secondary); cursor: pointer; transition: all 0.15s ease;
+}
+.adlg-close-btn:hover { background: rgba(248,113,113,0.10); border-color: rgba(248,113,113,0.28); color: #ef4444; }
+.adlg-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+.adlg-section-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--el-text-color-secondary); opacity: 0.7;
+}
+.adlg-server-opt { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+.adlg-footer {
+  display: flex; justify-content: flex-end; align-items: center; gap: 10px;
+  padding: 14px 20px 18px; border-top: 1px solid rgba(119,181,254,0.09);
+}
+.adlg-btn-ghost {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 16px; border-radius: 10px; font-family: inherit;
+  border: 1px solid rgba(119,181,254,0.22); background: transparent;
+  color: var(--el-text-color-regular); font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+.adlg-btn-ghost:hover { background: rgba(119,181,254,0.07); border-color: rgba(119,181,254,0.40); }
+.adlg-btn-primary {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 18px; border-radius: 10px; border: none; font-family: inherit;
+  cursor: pointer; font-size: 13px; font-weight: 600; color: #fff;
+  background: linear-gradient(135deg, var(--brand-primary) 0%, #a78bfa 100%);
+  box-shadow: 0 4px 14px rgba(119,181,254,0.35);
+  transition: box-shadow 0.2s ease, transform 0.2s cubic-bezier(.34,1.56,.64,1);
+}
+.adlg-btn-primary:hover:not(:disabled) { box-shadow: 0 6px 22px rgba(119,181,254,0.55); transform: translateY(-1px); }
+.adlg-btn-primary:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; }
+.adlg-btn-danger {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 18px; border-radius: 10px; border: none; font-family: inherit;
+  cursor: pointer; font-size: 13px; font-weight: 600; color: #fff;
+  background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+  box-shadow: 0 4px 14px rgba(239,68,68,0.30);
+  transition: box-shadow 0.2s ease, transform 0.2s cubic-bezier(.34,1.56,.64,1);
+}
+.adlg-btn-danger:hover:not(:disabled) { box-shadow: 0 6px 22px rgba(239,68,68,0.45); transform: translateY(-1px); }
+.adlg-btn-danger:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; }
 </style>

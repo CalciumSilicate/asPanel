@@ -21,48 +21,70 @@
     </div>
 
     <!-- Scrollable list -->
-    <div class="list-wrap" v-loading="loading" element-loading-background="transparent">
-      <el-empty
-        v-if="!loading && filteredServers.length === 0"
-        description="暂无匹配服务器"
-        :image-size="56"
-      />
+    <div class="list-wrap">
+      <div class="list-view-grid">
 
-      <button
-        v-for="s in filteredServers"
-        :key="s.id"
-        class="srv-row"
-        :class="{
-          'is-active': activeServerId === s.id,
-          'is-muted': !isAllowed(s),
-        }"
-        @click="handleRowClick(s)"
-      >
-        <div class="srv-avatar" :style="{ background: avatarColor(s.id) }">
-          {{ (s.name || '?')[0].toUpperCase() }}
-        </div>
-        <span class="srv-name">{{ s.name }}</span>
-        <div class="srv-status" @click.stop>
-          <span v-if="!isAllowed(s)" class="status-chip chip-unsupported">
-            <el-icon :size="10"><Remove /></el-icon>不支持
-          </span>
-          <template v-else>
-            <span v-if="installedMap.get(s.id)" class="status-chip chip-installed">
-              <el-icon :size="10"><Check /></el-icon>已安装
-            </span>
+        <!-- Skeleton while loading -->
+        <Transition name="pk-skeleton">
+          <div v-if="loading" class="sk-list" aria-hidden="true">
+            <div v-for="i in 6" :key="i" class="sk-row">
+              <div class="sk-avatar shimmer"></div>
+              <div class="sk-lines">
+                <div class="sk-line shimmer" :style="{ width: (55 + (i * 17) % 40) + '%' }"></div>
+              </div>
+              <div class="sk-chip shimmer"></div>
+            </div>
+          </div>
+        </Transition>
+
+        <!-- Real content once loaded -->
+        <Transition name="pk-content">
+          <div v-if="!loading" class="pk-items">
+            <el-empty
+              v-if="filteredServers.length === 0"
+              description="暂无匹配服务器"
+              :image-size="56"
+            />
             <button
-              v-else
-              class="install-btn"
-              :disabled="installingServerId === s.id"
-              @click="$emit('install', s)"
+              v-for="(s, idx) in filteredServers"
+              :key="s.id"
+              class="srv-row pk-item"
+              :style="{ '--item-delay': idx * 40 + 'ms' }"
+              :class="{
+                'is-active': activeServerId === s.id,
+                'is-muted': !isAllowed(s),
+              }"
+              @click="handleRowClick(s)"
             >
-              <el-icon v-if="installingServerId !== s.id" :size="10"><Download /></el-icon>
-              <el-icon v-else :size="10" class="spin"><Loading /></el-icon>
-              安装
+              <div class="srv-avatar" :style="{ background: avatarColor(s.id) }">
+                {{ (s.name || '?')[0].toUpperCase() }}
+              </div>
+              <span class="srv-name">{{ s.name }}</span>
+              <div class="srv-status" @click.stop>
+                <span v-if="!isAllowed(s)" class="status-chip chip-unsupported">
+                  <el-icon :size="10"><Remove /></el-icon>不支持
+                </span>
+                <template v-else>
+                  <span v-if="installedMap.get(s.id)" class="status-chip chip-installed">
+                    <el-icon :size="10"><Check /></el-icon>已安装
+                  </span>
+                  <button
+                    v-else
+                    class="install-btn"
+                    :disabled="installingServerId === s.id"
+                    @click="$emit('install', s)"
+                  >
+                    <el-icon v-if="installingServerId !== s.id" :size="10"><Download /></el-icon>
+                    <el-icon v-else :size="10" class="spin"><Loading /></el-icon>
+                    安装
+                  </button>
+                </template>
+              </div>
             </button>
-          </template>
-        </div>
-      </button>
+          </div>
+        </Transition>
+
+      </div>
     </div>
 
   </div>
@@ -180,6 +202,108 @@ const avatarColor = (id: number) => COLORS[id % COLORS.length]
   overflow-x: hidden;
   scrollbar-width: thin;
   padding: 8px 12px 12px;
+}
+
+/* Grid overlay: skeleton & content share same cell */
+.list-view-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+}
+.sk-list,
+.pk-items {
+  grid-area: 1 / 1;
+  min-width: 0;
+  width: 100%;
+}
+
+/* ── Skeleton rows ───────────────────────────────────────── */
+.sk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0;
+}
+.sk-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+}
+.sk-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.sk-lines {
+  flex: 1 1 auto;
+}
+.sk-line {
+  height: 11px;
+  border-radius: 6px;
+  display: block;
+}
+.sk-chip {
+  width: 52px;
+  height: 22px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+/* ── Shimmer ─────────────────────────────────────────────── */
+@keyframes shimmer-move {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg,
+    rgba(128,128,128,0.08) 25%,
+    rgba(128,128,128,0.18) 50%,
+    rgba(128,128,128,0.08) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer-move 1.5s linear infinite;
+  border-radius: 8px;
+}
+:global(.dark) .shimmer {
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0.04) 25%,
+    rgba(255,255,255,0.10) 50%,
+    rgba(255,255,255,0.04) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer-move 1.5s linear infinite;
+}
+
+/* ── Transitions ─────────────────────────────────────────── */
+.pk-skeleton-leave-active {
+  transition: opacity 0.32s ease, transform 0.32s ease, filter 0.32s ease;
+  pointer-events: none;
+  z-index: 1;
+}
+.pk-skeleton-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+  filter: blur(4px);
+}
+
+.pk-content-enter-active .pk-item {
+  animation: pk-rise 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation-delay: var(--item-delay, 0ms);
+}
+@keyframes pk-rise {
+  from {
+    opacity: 0;
+    transform: translateX(-12px) scale(0.97);
+    filter: blur(4px);
+  }
+  60% { filter: blur(0); }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
 }
 
 /* Server row */

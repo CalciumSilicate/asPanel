@@ -31,6 +31,18 @@
 
     <div class="toolbar-right">
       <template v-if="selectedServer">
+        <template v-if="totalFiltered > pageSize">
+          <div class="page-nav">
+            <button class="page-btn" :disabled="currentPage <= 1" @click="$emit('prev-page')">
+              <el-icon :size="12"><ArrowLeft /></el-icon>
+            </button>
+            <span class="page-indicator">{{ currentPage }}<span class="page-sep">/</span>{{ Math.ceil(totalFiltered / pageSize) }}</span>
+            <button class="page-btn" :disabled="currentPage >= Math.ceil(totalFiltered / pageSize)" @click="$emit('next-page')">
+              <el-icon :size="12"><ArrowRight /></el-icon>
+            </button>
+          </div>
+          <div class="toolbar-divider" />
+        </template>
         <el-tooltip content="检查更新" placement="top" :show-after="400">
           <button class="btn-icon" @click="$emit('check-updates')" :disabled="modsCount === 0">
             <el-icon :size="14"><Refresh /></el-icon>
@@ -58,13 +70,16 @@
 </template>
 
 <script setup lang="ts">
-import { Refresh, Upload, CopyDocument, Plus, Link, ArrowLeft } from '@element-plus/icons-vue'
+import { Refresh, Upload, CopyDocument, Plus, Link, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 
 defineProps<{
   selectedServer: any | null
   modsCount: number
   totalModsCount: number | string
   isServerRunning: boolean
+  currentPage: number
+  pageSize: number
+  totalFiltered: number
 }>()
 
 defineEmits<{
@@ -74,6 +89,8 @@ defineEmits<{
   'upload': []
   'copy': []
   'check-updates': []
+  'prev-page': []
+  'next-page': []
 }>()
 </script>
 
@@ -232,4 +249,28 @@ defineEmits<{
 .btn-create:not(:disabled):hover { box-shadow: 0 6px 22px rgba(167, 139, 250, 0.65); transform: translateY(-1px) scale(1.04); }
 .btn-create:active:not(:disabled) { transform: scale(0.97); box-shadow: 0 2px 8px rgba(167, 139, 250, 0.30); }
 .btn-create:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
+
+/* ── Compact page navigation ─────────────────────────────── */
+.page-nav { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.page-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 9px;
+  border: 1px solid rgba(167,139,250,0.22);
+  background: rgba(167,139,250,0.06);
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+  flex-shrink: 0;
+}
+.page-btn:not(:disabled):hover {
+  background: rgba(167,139,250,0.14); border-color: rgba(167,139,250,0.45);
+  color: #a78bfa; transform: scale(1.08);
+}
+.page-btn:disabled { opacity: 0.32; cursor: not-allowed; }
+:global(.dark) .page-btn { border-color: rgba(167,139,250,0.16); background: rgba(167,139,250,0.04); }
+.page-indicator {
+  font-size: 12px; font-weight: 700; color: var(--el-text-color-regular);
+  font-variant-numeric: tabular-nums; min-width: 36px; text-align: center; user-select: none;
+}
+.page-sep { color: var(--el-text-color-placeholder); margin: 0 1px; font-weight: 400; }
 </style>
