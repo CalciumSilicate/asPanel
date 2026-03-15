@@ -186,7 +186,7 @@
       <el-table :data="editingGroupPerms" size="small" max-height="400">
         <el-table-column label="服务器组" prop="group_name" min-width="150" />
         <el-table-column label="权限" width="180" align="center">
-          <template #default="{ row, $index }">
+          <template #default="{ $index }">
             <el-select 
               v-model="editingGroupPerms[$index].role" 
               size="small" 
@@ -216,7 +216,7 @@ import AvatarUploader from '@/components/AvatarUploader.vue'
 import { useUserStore } from '@/store/user'
 import { storeToRefs } from 'pinia'
 const userStore = useUserStore()
-const { isOwner, isPlatformAdmin } = storeToRefs(userStore)
+const { isOwner } = storeToRefs(userStore)
 
 type GroupRole = 'USER' | 'HELPER' | 'ADMIN'
 
@@ -302,9 +302,6 @@ const groupRoleTagType = (role: string | null): 'primary' | 'success' | 'info' |
     default: return 'info'
   }
 }
-
-const currentUser = userStore.user
-const currentUserId = computed(() => currentUser.id)
 
 const canEditGlobalPerm = (row: UserRow): boolean => {
   if (row.is_owner) return false

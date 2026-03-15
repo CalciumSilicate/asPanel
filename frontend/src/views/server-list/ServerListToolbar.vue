@@ -434,4 +434,78 @@ const totalPages = computed(() => Math.ceil(props.totalFiltered / props.pageSize
   transform: translateY(-1px) scale(1.04);
 }
 .btn-create:active { transform: scale(0.97); box-shadow: 0 2px 8px rgba(119, 181, 254, 0.30); }
+
+@media (max-width: 1080px) {
+  .sl-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 14px 16px;
+  }
+
+  .toolbar-left,
+  .toolbar-right {
+    width: 100%;
+  }
+
+  .toolbar-right {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .search-wrap {
+    max-width: none;
+    min-width: 220px;
+  }
+}
+
+@media (max-width: 720px) {
+  .toolbar-left {
+    gap: 8px;
+  }
+
+  .toolbar-divider {
+    display: none;
+  }
+
+  .search-wrap,
+  .status-select {
+    width: 100%;
+    max-width: none;
+  }
+
+  .status-select {
+    flex: 1 1 100%;
+  }
+
+  .page-nav {
+    margin-left: auto;
+  }
+
+  .server-count {
+    width: 100%;
+  }
+
+  .btn-batch,
+  .btn-secondary,
+  .btn-create {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 520px) {
+  .toggle-btn span,
+  .btn-secondary span {
+    display: none;
+  }
+
+  .btn-create span {
+    font-size: 12px;
+  }
+
+  .page-nav {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
 </style>

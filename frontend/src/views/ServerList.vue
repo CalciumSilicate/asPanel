@@ -882,7 +882,7 @@ import ServerTableView from './server-list/ServerTableView.vue'
 
 const {
   viewMode, searchQuery, statusFilter,
-  serverList, filteredServerList, loading, loaded, selectedServers, isBatchProcessing, autoStartSaving,
+  serverList, loading, loaded, selectedServers, isBatchProcessing, autoStartSaving,
   tableRef, subServerSelectionTable, netherMapUploaderRef, endMapUploaderRef,
   currentPage, pageSize, pagedServerList, sortedFilteredList,
   serverLinkGroups, serverLinkGroupsLoading, selectableGroups,

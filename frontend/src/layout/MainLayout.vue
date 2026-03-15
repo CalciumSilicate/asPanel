@@ -1,29 +1,56 @@
 <template>
+  <a class="skip-link" href="#main-content">跳到主内容</a>
+
   <el-container class="main-layout">
-    <!-- 背景动态光球 -->
     <div class="bg-orbs" aria-hidden="true">
       <span class="orb orb-1"></span>
       <span class="orb orb-2"></span>
       <span class="orb orb-3"></span>
       <span class="orb orb-4"></span>
     </div>
-    <!-- 顶栏（跨全宽） -->
+
+    <button
+      v-if="showMobileOverlay"
+      class="mobile-backdrop"
+      type="button"
+      aria-label="关闭侧边栏"
+      @click="closeMobileAside"
+    />
+
     <el-header class="app-header">
       <div class="header-left">
-        <el-icon class="collapse-icon" @click="toggleCollapse">
-          <Fold v-if="!isCollapse"/>
-          <Expand v-else/>
-        </el-icon>
-        <span class="brand" v-show="!isCollapse">AS Panel</span>
+        <button
+          class="collapse-icon"
+          type="button"
+          :aria-label="isCollapse ? '展开导航' : '折叠导航'"
+          :aria-expanded="!isCollapse"
+          @click="toggleCollapse"
+        >
+          <el-icon>
+            <Fold v-if="!isCollapse" />
+            <Expand v-else />
+          </el-icon>
+        </button>
+
+        <div class="brand-block">
+          <span class="brand">AS Panel</span>
+          <span class="brand-caption">{{ currentSectionLabel }}</span>
+        </div>
       </div>
+
       <div class="header-right">
-        <!-- Group Context Selector: 只对非平台管理员显示 -->
+        <div class="context-pill" aria-hidden="true">
+          <span class="context-dot"></span>
+          <span>{{ currentSectionLabel }}</span>
+        </div>
+
         <div class="group-selector" v-if="user.id && !isPlatformAdmin && user.group_permissions.length > 0">
           <el-select
             :model-value="activeGroupIds[0]"
             @update:model-value="(val: number | undefined) => activeGroupIds = val ? [val] : []"
             placeholder="选择上下文"
             style="width: 180px;"
+            aria-label="选择上下文分组"
           >
             <el-option
               v-for="perm in user.group_permissions"
@@ -56,7 +83,7 @@
 
         <el-dropdown @command="handleCommand">
           <span class="user-info">
-            <el-avatar size="small" :src="fullAvatarUrl" :icon="UserFilled"/>
+            <el-avatar size="small" :src="fullAvatarUrl" :icon="UserFilled" />
             <span class="username">{{ user.username || 'User' }}</span>
           </span>
           <template #dropdown>
@@ -70,8 +97,11 @@
     </el-header>
 
     <el-container class="content-wrapper">
-      <!-- 侧边栏 -->
-      <el-aside :width="isCollapse ? '64px' : '220px'" class="app-aside" :class="{ 'is-collapsed': isCollapse, 'is-collapsing': isCollapsing }">
+      <el-aside
+        :width="isCollapse ? '64px' : '220px'"
+        class="app-aside"
+        :class="{ 'is-collapsed': isCollapse, 'is-collapsing': isCollapsing, 'is-mobile': isMobile }"
+      >
         <div class="sidebar-logo"></div>
         <el-scrollbar always>
           <el-menu
@@ -80,60 +110,55 @@
             :collapse="isCollapse"
             :router="true"
             @select="handleMenuSelect"
-        >
-          <template v-for="entry in visibleMenu" :key="entry.type === 'item' ? entry.path : entry.key">
-            <el-menu-item
-              v-if="entry.type === 'item'"
-              :index="entry.path"
-              :disabled="entry.disabled ?? false"
-            >
-              <el-icon><component :is="entry.icon" /></el-icon>
-              <span>{{ entry.label }}</span>
-            </el-menu-item>
-            <el-sub-menu v-else :index="entry.key">
-              <template #title>
+          >
+            <template v-for="entry in visibleMenu" :key="entry.type === 'item' ? entry.path : entry.key">
+              <el-menu-item
+                v-if="entry.type === 'item'"
+                :index="entry.path"
+                :disabled="entry.disabled ?? false"
+              >
                 <el-icon><component :is="entry.icon" /></el-icon>
                 <span>{{ entry.label }}</span>
-              </template>
-              <el-menu-item
-                v-for="child in entry.children"
-                :key="child.path"
-                :index="child.path"
-                :disabled="child.disabled ?? false"
-              >
-                <el-icon><component :is="child.icon" /></el-icon>
-                <span>{{ child.label }}</span>
               </el-menu-item>
-            </el-sub-menu>
-          </template>
-        </el-menu>
-      </el-scrollbar>
-    </el-aside>
+              <el-sub-menu v-else :index="entry.key">
+                <template #title>
+                  <el-icon><component :is="entry.icon" /></el-icon>
+                  <span>{{ entry.label }}</span>
+                </template>
+                <el-menu-item
+                  v-for="child in entry.children"
+                  :key="child.path"
+                  :index="child.path"
+                  :disabled="child.disabled ?? false"
+                >
+                  <el-icon><component :is="child.icon" /></el-icon>
+                  <span>{{ child.label }}</span>
+                </el-menu-item>
+              </el-sub-menu>
+            </template>
+          </el-menu>
+        </el-scrollbar>
+      </el-aside>
 
-    <el-container class="content-wrapper">
-      <!-- 主内容区域 -->
-      <el-main>
-        <div class="route-stage">
-          <router-view v-slot="{ Component, route }">
-            <transition name="fade-transform" mode="out-in">
-              <div :key="route.fullPath" class="route-page">
-                <component :is="Component" />
-              </div>
-            </transition>
-          </router-view>
-        </div>
-      </el-main>
+      <el-container class="content-wrapper">
+        <el-main id="main-content">
+          <div class="route-stage">
+            <router-view v-slot="{ Component, route }">
+              <transition name="fade-transform" mode="out-in">
+                <div :key="route.fullPath" class="route-page">
+                  <component :is="Component" />
+                </div>
+              </transition>
+            </router-view>
+          </div>
+        </el-main>
+      </el-container>
     </el-container>
-
-    <!-- 头像上传对话框组件（已移至个人中心页面） -->
-
-
-  </el-container>
   </el-container>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { computed, onMounted, onUnmounted, nextTick, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useUiStore } from '@/store/ui';
 import { useUserStore } from '@/store/user';
@@ -153,11 +178,39 @@ const router = useRouter();
 
 const uiStore = useUiStore()
 const { asideCollapsed: isCollapse, asideCollapsing: isCollapsing } = storeToRefs(uiStore)
-const toggleCollapse = uiStore.toggleAside
+const { toggleAside, setAsideCollapsed } = uiStore
 
-// Pause all expensive paint work while the sidebar is animating
+const isMobile = ref(false)
+
+const updateViewportState = () => {
+  isMobile.value = window.innerWidth <= 900
+}
+
+const toggleCollapse = () => {
+  toggleAside()
+}
+
+const closeMobileAside = () => {
+  if (isMobile.value && !isCollapse.value) setAsideCollapsed(true)
+}
+
+const showMobileOverlay = computed(() => isMobile.value && !isCollapse.value)
+
 watch(isCollapsing, (v) => {
   document.documentElement.classList.toggle('aside-animating', v)
+})
+
+watch(isMobile, (mobile, previous) => {
+  if (mobile && !previous) {
+    setAsideCollapsed(true)
+  }
+  if (!mobile && previous) {
+    setAsideCollapsed(false)
+  }
+})
+
+watch(() => route.fullPath, () => {
+  if (isMobile.value) closeMobileAside()
 })
 
 const userStore = useUserStore()
@@ -180,6 +233,12 @@ const visibleMenu = computed(() => {
     const groupVisible = !entry.requiredRole || hasRole(entry.requiredRole)
     return groupVisible ? [{ ...entry, children }] : []
   })
+})
+
+const currentSectionLabel = computed(() => {
+  const flatten = visibleMenu.value.flatMap((entry) => entry.type === 'item' ? [entry] : entry.children)
+  const current = flatten.find((item) => activeMenu.value === item.path || route.path === item.path)
+  return current?.label || '控制台'
 })
 
 const tasksStore = useTasksStore()
@@ -205,7 +264,6 @@ const TASK_TYPE_LABELS: Record<string, string> = {
 const taskTitle = (t: Partial<Task>): string => t?.name || TASK_TYPE_LABELS[t?.type ?? ''] || '任务'
 const taskDesc = (t: Partial<Task>): string => t?.error || t?.message || ''
 
-// 右上角合并通知：新增/完成/失败
 const NOTIFY_WINDOW_MS = 4500
 interface ToastBucket { count: number; version: number; handle: ReturnType<typeof ElNotification> | null; timer: ReturnType<typeof setTimeout> | null }
 interface ToastOpts { title: string; type: 'info' | 'success' | 'error'; single: string; multi: (n: number) => string }
@@ -248,8 +306,7 @@ const bumpToast = (bucketKey: string, opts: ToastOpts) => {
 }
 
 const activeMenu = computed(() => {
-  const {meta, path} = route;
-  // 如果路由的 meta 中有 activeMenu 字段，则用它来高亮父菜单
+  const { meta, path } = route;
   if (meta.activeMenu) {
     return meta.activeMenu;
   }
@@ -259,8 +316,6 @@ const activeMenu = computed(() => {
 const handleMenuSelect = () => {
   cancelPendingRequests()
 }
-
-// 折叠/展开逻辑改为使用全局 ui store 的 toggleAside（此处不再定义同名函数）
 
 const handleCommand = (command: string) => {
   if (command === 'logout') {
@@ -275,7 +330,6 @@ const handleCommand = (command: string) => {
 let offTaskEvents: (() => void) | null = null
 let removeCancelGuard: (() => void) | null = null
 
-// 预加载所有子页面组件，在浏览器空闲时执行
 const preloadRouteComponents = () => {
   const componentLoaders = [
     () => import('../views/Dashboard.vue'),
@@ -297,7 +351,6 @@ const preloadRouteComponents = () => {
     () => import('../views/Console.vue'),
     () => import('../views/Statistics.vue'),
     () => import('../views/Profile.vue'),
-    // 插件配置页面
     () => import('../views/plugin-config/ViaVersionConfig.vue'),
     () => import('../views/plugin-config/VelocityProxyConfig.vue'),
     () => import('../views/plugin-config/PrimeBackupConfig.vue'),
@@ -312,20 +365,21 @@ const preloadRouteComponents = () => {
   let index = 0
   const loadNext = () => {
     if (index >= componentLoaders.length) return
-    componentLoaders[index]().catch(() => {}) // 静默加载，忽略错误
+    componentLoaders[index]().catch(() => {})
     index++
-    // 使用 requestIdleCallback 或 setTimeout 在空闲时继续加载下一个
     if ('requestIdleCallback' in window) {
       requestIdleCallback(loadNext, { timeout: 2000 })
     } else {
       setTimeout(loadNext, 50)
     }
   }
-  // 延迟启动预加载，让当前页面先完成渲染
   setTimeout(loadNext, 500)
 }
 
 onMounted(() => {
+  updateViewportState()
+  window.addEventListener('resize', updateViewportState)
+
   removeCancelGuard = router.beforeEach((to, from) => {
     if (to.fullPath !== from.fullPath) cancelPendingRequests()
     return true
@@ -361,13 +415,14 @@ onMounted(() => {
     }
   })
 
-  // 预加载所有子页面组件
   nextTick(() => {
     preloadRouteComponents()
   })
 });
 
 onUnmounted(() => {
+  window.removeEventListener('resize', updateViewportState)
+  document.documentElement.classList.remove('aside-animating')
   try { offTaskEvents?.() } catch { /* ignore */ }
   try {
     removeCancelGuard?.()
@@ -379,7 +434,24 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* ─── 背景动态光球层 ─────────────────────────────────────── */
+.skip-link {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 60;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(8, 16, 29, 0.92);
+  color: #fff;
+  text-decoration: none;
+  transform: translateY(-140%);
+  transition: transform 0.18s ease;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
 .bg-orbs {
   position: fixed;
   inset: 0;
@@ -423,26 +495,25 @@ onUnmounted(() => {
 
 @keyframes orb-drift-1 {
   0%,100% { transform: translate(0, 0) scale(1); opacity: 0.45; }
-  33%      { transform: translate(60px, 40px) scale(1.08); opacity: 0.55; }
-  66%      { transform: translate(-30px, 70px) scale(0.94); opacity: 0.38; }
+  33% { transform: translate(60px, 40px) scale(1.08); opacity: 0.55; }
+  66% { transform: translate(-30px, 70px) scale(0.94); opacity: 0.38; }
 }
 @keyframes orb-drift-2 {
   0%,100% { transform: translate(0, 0) scale(1); opacity: 0.4; }
-  40%      { transform: translate(-50px, 55px) scale(1.1); opacity: 0.52; }
-  70%      { transform: translate(20px, -30px) scale(0.96); opacity: 0.36; }
+  40% { transform: translate(-50px, 55px) scale(1.1); opacity: 0.52; }
+  70% { transform: translate(20px, -30px) scale(0.96); opacity: 0.36; }
 }
 @keyframes orb-drift-3 {
   0%,100% { transform: translate(0, 0) scale(1); opacity: 0.3; }
-  45%      { transform: translate(40px, -45px) scale(1.12); opacity: 0.42; }
-  80%      { transform: translate(-20px, 25px) scale(0.92); opacity: 0.25; }
+  45% { transform: translate(40px, -45px) scale(1.12); opacity: 0.42; }
+  80% { transform: translate(-20px, 25px) scale(0.92); opacity: 0.25; }
 }
 @keyframes orb-drift-4 {
   0%,100% { transform: translate(0, 0) scale(1); opacity: 0.28; }
-  30%      { transform: translate(-35px, -40px) scale(1.06); opacity: 0.38; }
-  65%      { transform: translate(30px, 20px) scale(0.95); opacity: 0.22; }
+  30% { transform: translate(-35px, -40px) scale(1.06); opacity: 0.38; }
+  65% { transform: translate(30px, 20px) scale(0.95); opacity: 0.22; }
 }
 
-/* 深色模式：光球更鲜艳、更有力 */
 :global(.dark) .orb-1 {
   background: radial-gradient(circle, rgba(119,181,254,0.95), rgba(119,181,254,0) 70%);
   filter: blur(65px);
@@ -464,7 +535,16 @@ onUnmounted(() => {
   opacity: 0.46;
 }
 
-/* ─── 布局骨架 ─────────────────────────────────────────── */
+.mobile-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  border: 0;
+  background: rgba(6, 12, 24, 0.34);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
 .main-layout {
   height: 100vh;
   position: relative;
@@ -481,14 +561,14 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* ─── 顶栏 ─────────────────────────────────────────────── */
 .el-header {
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: 30;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 14px;
   padding: 0 20px;
   height: var(--el-header-height);
   background: rgba(255,255,255,0.60) !important;
@@ -507,7 +587,6 @@ onUnmounted(() => {
     inset 0 -1px 0 rgba(119,181,254,0.08);
 }
 
-/* 顶栏底部动态扫光线 */
 .el-header::after {
   content: '';
   position: absolute;
@@ -526,20 +605,36 @@ onUnmounted(() => {
 }
 
 @keyframes header-shimmer {
-  0%   { background-position: 200% 0; }
+  0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
 
-/* ─── Brand 品牌标题 ────────────────────────────────────── */
-.header-left { display: flex; align-items: center; height: var(--el-header-height); }
+.header-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--el-header-height);
+}
+
+.brand-block {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
 .header-right {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
+  min-width: 0;
 }
 
 .group-selector {
-  margin-right: 6px;
+  margin-right: 2px;
 }
 
 .group-selector :deep(.el-select__wrapper) {
@@ -561,12 +656,9 @@ onUnmounted(() => {
 }
 
 .brand {
-  margin-left: 8px;
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.04em;
-  line-height: var(--el-header-height);
-  height: var(--el-header-height);
   display: inline-flex;
   align-items: center;
   background: linear-gradient(135deg, #77B5FE 0%, #a78bfa 40%, #EFB7BA 80%);
@@ -576,55 +668,85 @@ onUnmounted(() => {
   background-size: 200% 200%;
   animation: brand-gradient-shift 8s ease-in-out infinite;
   filter: drop-shadow(0 0 8px rgba(119,181,254,0.45));
-  transition: filter 0.3s ease;
 }
-.brand:hover {
-  filter: drop-shadow(0 0 14px rgba(119,181,254,0.80));
+
+.brand-caption {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @keyframes brand-gradient-shift {
   0%,100% { background-position: 0% 50%; }
-  50%      { background-position: 100% 50%; }
+  50% { background-position: 100% 50%; }
 }
 
-/* ─── 折叠按钮 ──────────────────────────────────────────── */
+.context-pill {
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  background: rgba(255,255,255,0.42);
+  border: 1px solid rgba(119,181,254,0.12);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.72);
+}
+
+.context-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #77B5FE, #EFB7BA);
+  box-shadow: 0 0 14px rgba(119,181,254,0.5);
+}
+
 .collapse-icon {
+  appearance: none;
+  border: 0;
   font-size: 22px;
   cursor: pointer;
-  height: 36px;
-  width: 36px;
+  height: 40px;
+  width: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
+  border-radius: 12px;
   color: var(--color-text-secondary);
+  background: transparent;
   transition:
     color 0.25s ease,
     background 0.25s ease,
     box-shadow 0.25s ease,
     transform 0.3s cubic-bezier(.34,1.56,.64,1);
 }
+
 .collapse-icon:hover {
   color: var(--brand-primary);
   background: rgba(119,181,254,0.10);
   box-shadow: 0 0 0 1px rgba(119,181,254,0.25), 0 0 12px rgba(119,181,254,0.20);
-  transform: scale(1.10);
+  transform: scale(1.06);
 }
+
 .collapse-icon :deep(svg) { display: block; }
 
-/* ─── 主题切换按钮 ──────────────────────────────────────── */
 .theme-toggle {
-  margin-right: 8px;
   border-radius: 50% !important;
   transition: box-shadow 0.25s ease, transform 0.25s cubic-bezier(.34,1.56,.64,1) !important;
 }
+
 .theme-toggle:hover {
   box-shadow: 0 0 0 1px rgba(119,181,254,0.3), 0 0 16px rgba(119,181,254,0.35) !important;
   transform: rotate(20deg) scale(1.1) !important;
 }
 
-/* ─── 用户信息区 ────────────────────────────────────────── */
 .header-right .user-info {
+  min-height: 40px;
   display: flex;
   align-items: center;
   cursor: pointer;
@@ -632,31 +754,33 @@ onUnmounted(() => {
   border-radius: 24px;
   transition: background 0.25s ease, box-shadow 0.25s ease;
 }
+
 .header-right .user-info:hover {
   background: rgba(119,181,254,0.08);
   box-shadow: 0 0 0 1px rgba(119,181,254,0.20);
 }
-/* 头像辉光环 */
+
 .header-right .user-info :deep(.el-avatar) {
   box-shadow: 0 0 0 2px rgba(119,181,254,0.4), 0 0 10px rgba(119,181,254,0.22);
   transition: box-shadow 0.3s ease;
 }
+
 .header-right .user-info:hover :deep(.el-avatar) {
   box-shadow: 0 0 0 2px rgba(119,181,254,0.7), 0 0 18px rgba(119,181,254,0.45);
 }
+
 .header-right .username {
   margin-left: 10px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
-/* ─── 侧边栏 ────────────────────────────────────────────── */
 .el-aside {
   overflow: hidden;
   display: flex;
   flex-direction: column;
   border-right: none;
   position: relative;
-  z-index: 1;
+  z-index: 26;
   background: rgba(255,255,255,0.42) !important;
   box-shadow:
     1px 0 0 rgba(119,181,254,0.18),
@@ -670,7 +794,6 @@ onUnmounted(() => {
     4px 0 24px rgba(0,0,0,0.35);
 }
 
-/* 侧边栏右侧动态辉光分割线 */
 .app-aside::after {
   content: '';
   position: absolute;
@@ -690,18 +813,18 @@ onUnmounted(() => {
 
 @keyframes sidebar-shimmer {
   0%,100% { background-position: 0 -200%; opacity: 0.6; }
-  50%      { background-position: 0 200%; opacity: 1; }
+  50% { background-position: 0 200%; opacity: 1; }
 }
 
 .app-aside {
   transform: translateZ(0);
-  transition: width 0.30s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.30s var(--ease-standard);
+  transition: width 0.30s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.30s var(--ease-standard), transform 0.28s ease;
 }
+
 .app-aside.is-collapsing {
   will-change: width;
 }
 
-/* ─── Logo区域 ──────────────────────────────────────────── */
 .sidebar-logo {
   height: 16px;
   flex-shrink: 0;
@@ -711,17 +834,16 @@ onUnmounted(() => {
   background: transparent;
 }
 
-/* ─── 菜单 ──────────────────────────────────────────────── */
 .el-menu { border-right: none; padding: 8px; }
 .el-scrollbar { height: 100%; }
 .app-aside :deep(.el-scrollbar__bar) { opacity: 0.9; }
 
 .el-menu-item,
 :deep(.el-sub-menu__title) {
-  height: 40px;
-  line-height: 40px;
-  border-radius: 10px !important;
-  margin-bottom: 2px;
+  min-height: 44px;
+  line-height: 44px;
+  border-radius: 12px !important;
+  margin-bottom: 4px;
   transition:
     background 0.22s ease,
     color 0.22s ease,
@@ -729,7 +851,6 @@ onUnmounted(() => {
     transform 0.2s cubic-bezier(.34,1.56,.64,1) !important;
 }
 
-/* hover：左移 + 辉光描边 */
 :deep(.el-menu-item:hover),
 :deep(.el-sub-menu__title:hover) {
   background: rgba(119,181,254,0.10) !important;
@@ -737,21 +858,15 @@ onUnmounted(() => {
   transform: translateX(2px);
 }
 
-/* 激活：辉光光晕 + 渐变背景 + 左侧高亮条 */
 :deep(.el-menu-item.is-active) {
   color: var(--brand-primary) !important;
-  background: linear-gradient(
-    90deg,
-    rgba(119,181,254,0.18) 0%,
-    rgba(119,181,254,0.06) 100%
-  ) !important;
+  background: linear-gradient(90deg, rgba(119,181,254,0.18) 0%, rgba(119,181,254,0.06) 100%) !important;
   box-shadow:
     0 0 0 1px rgba(119,181,254,0.25),
     inset 3px 0 0 var(--brand-primary),
     0 4px 16px rgba(119,181,254,0.20) !important;
 }
 
-/* 激活图标脉冲辉光 */
 :deep(.el-menu-item.is-active .el-icon) {
   color: var(--brand-primary);
   animation: icon-pulse 3s ease-in-out infinite;
@@ -759,46 +874,41 @@ onUnmounted(() => {
 
 @keyframes icon-pulse {
   0%,100% { filter: drop-shadow(0 0 4px rgba(119,181,254,0.5)); }
-  50%      { filter: drop-shadow(0 0 10px rgba(119,181,254,0.9)); }
+  50% { filter: drop-shadow(0 0 10px rgba(119,181,254,0.9)); }
 }
 
-/* 暗色激活态 */
 :global(.dark) :deep(.el-menu-item.is-active) {
-  background: linear-gradient(
-    90deg,
-    rgba(119,181,254,0.22) 0%,
-    rgba(119,181,254,0.06) 100%
-  ) !important;
+  background: linear-gradient(90deg, rgba(119,181,254,0.22) 0%, rgba(119,181,254,0.06) 100%) !important;
   box-shadow:
     0 0 0 1px rgba(119,181,254,0.30),
     inset 3px 0 0 var(--brand-primary),
     0 4px 24px rgba(119,181,254,0.28) !important;
 }
 
-/* 子菜单折叠动画 */
 .app-aside :deep(.el-sub-menu.is-opened > .el-menu) {
   max-height: 800px;
   overflow: hidden;
   transform-origin: top center;
   will-change: max-height, transform, opacity;
 }
+
 .app-aside.is-collapsing :deep(.el-sub-menu.is-opened > .el-menu) {
   animation: submenu-collapse-bounce 380ms cubic-bezier(.34,1.56,.64,1) forwards;
 }
 
 @keyframes submenu-collapse-bounce {
-  0%   { max-height: 800px; opacity: 1; transform: translateY(0) scaleY(1); }
-  55%  { transform: translateY(-4px) scaleY(.98); }
-  85%  { opacity: 0.12; transform: translateY(-9px) scaleY(.94); }
+  0% { max-height: 800px; opacity: 1; transform: translateY(0) scaleY(1); }
+  55% { transform: translateY(-4px) scaleY(.98); }
+  85% { opacity: 0.12; transform: translateY(-9px) scaleY(.94); }
   100% { max-height: 0; opacity: 0; transform: translateY(-12px) scaleY(.92); }
 }
 
-/* 菜单文字展开/折叠 */
 :deep(.el-sub-menu__title span),
 :deep(.el-menu-item span) {
   transition: opacity 0.26s cubic-bezier(.34,1.56,.64,1) 0.04s, transform 0.26s cubic-bezier(.34,1.56,.64,1) 0.04s;
   will-change: opacity, transform;
 }
+
 :deep(.el-menu--collapse .el-sub-menu__title span),
 :deep(.el-menu--collapse .el-menu-item span),
 .app-aside.is-collapsing :deep(.el-sub-menu__title span),
@@ -806,18 +916,17 @@ onUnmounted(() => {
   display: none !important;
 }
 
-/* 展开弹入动画 */
 @keyframes pop-in {
-  0%   { transform: translateX(-8px) scale(.98); opacity: 0; }
-  60%  { transform: translateX(3px) scale(1.02); opacity: 1; }
+  0% { transform: translateX(-8px) scale(.98); opacity: 0; }
+  60% { transform: translateX(3px) scale(1.02); opacity: 1; }
   100% { transform: translateX(0) scale(1); opacity: 1; }
 }
+
 .app-aside:not(.is-collapsed) .sidebar-logo span { animation: pop-in 360ms cubic-bezier(.34,1.56,.64,1); }
 :deep(.el-menu:not(.el-menu--collapse) .el-sub-menu__title span),
 :deep(.el-menu:not(.el-menu--collapse) .el-menu-item span) { animation: pop-in 360ms cubic-bezier(.34,1.56,.64,1); }
 .app-aside.is-collapsed .sidebar-logo span { opacity: 0; transform: translateY(-2px); pointer-events: none; }
 
-/* ─── 主内容区 ──────────────────────────────────────────── */
 .el-main {
   padding: 20px 24px 24px 24px;
   position: relative;
@@ -846,7 +955,6 @@ onUnmounted(() => {
   will-change: transform, opacity, filter;
 }
 
-/* ─── 路由切换过渡（blur + scale） ─────────────────────── */
 .fade-transform-enter-active {
   transition: opacity 0.22s ease-out, transform 0.22s cubic-bezier(.34,1.56,.64,1), filter 0.22s ease-out;
 }
@@ -864,8 +972,6 @@ onUnmounted(() => {
   filter: blur(3px);
 }
 
-/* ─── 侧边栏动画期间：暂停所有重绘开销 ──────────────── */
-/* Freeze backdrop-filter (biggest single cost) */
 :global(.aside-animating) .el-aside {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
@@ -878,14 +984,8 @@ onUnmounted(() => {
   -webkit-backdrop-filter: blur(6px) !important;
   backdrop-filter: blur(6px) !important;
 }
-
-/* Pause all continuous paint animations */
-:global(.aside-animating) .orb {
-  animation-play-state: paused !important;
-}
-:global(.aside-animating) .app-aside::after {
-  animation-play-state: paused !important;
-}
+:global(.aside-animating) .orb,
+:global(.aside-animating) .app-aside::after,
 :global(.aside-animating) .el-header::after {
   animation-play-state: paused !important;
 }
@@ -897,12 +997,103 @@ onUnmounted(() => {
   animation: none !important;
   filter: none !important;
 }
-
-/* Disable the submenu collapse animation while sidebar itself is animating */
 :global(.aside-animating) .app-aside :deep(.el-sub-menu.is-opened > .el-menu) {
   animation: none !important;
   max-height: none !important;
   opacity: 1 !important;
   transform: none !important;
+}
+
+@media (max-width: 1100px) {
+  .context-pill {
+    display: none;
+  }
+
+  .header-right {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 900px) {
+  .el-header {
+    padding: 0 14px;
+  }
+
+  .group-selector {
+    flex: 1 1 100%;
+    order: 10;
+    margin-right: 0;
+  }
+
+  .group-selector :deep(.el-select),
+  .group-selector :deep(.el-select__wrapper) {
+    width: 100% !important;
+  }
+
+  .header-right {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 8px;
+  }
+
+  .header-right .username {
+    display: none;
+  }
+
+  .app-aside.is-mobile {
+    position: fixed;
+    top: var(--el-header-height);
+    left: 0;
+    bottom: 0;
+    width: min(82vw, 300px) !important;
+    max-width: 300px;
+    transform: translateX(0);
+    box-shadow: 0 24px 54px rgba(0,0,0,0.18);
+  }
+
+  .app-aside.is-mobile.is-collapsed {
+    transform: translateX(calc(-100% - 18px));
+    width: min(82vw, 300px) !important;
+  }
+
+  .content-wrapper {
+    height: calc(100vh - var(--el-header-height));
+  }
+
+  .el-main {
+    padding: 16px 14px 20px;
+  }
+}
+
+@media (max-width: 640px) {
+  .brand-caption {
+    display: none;
+  }
+
+  .el-header {
+    height: auto;
+    min-height: var(--el-header-height);
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .header-left,
+  .header-right {
+    min-height: 44px;
+  }
+
+  .app-aside.is-mobile {
+    width: min(88vw, 320px) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb,
+  .brand,
+  .app-aside::after,
+  .el-header::after,
+  :deep(.el-menu-item.is-active .el-icon) {
+    animation: none !important;
+  }
 }
 </style>

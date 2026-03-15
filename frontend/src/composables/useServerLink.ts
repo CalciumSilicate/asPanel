@@ -65,7 +65,7 @@ export function useServerLink() {
 
   // ── Group CRUD ──────────────────────────────────────────────
 
-  const selectGroup = (row: ServerLinkGroup) => {
+  const selectGroup = (row: ServerLinkGroup | null) => {
     activeGroup.value = row
   }
 

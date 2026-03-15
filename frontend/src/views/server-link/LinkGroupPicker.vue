@@ -84,11 +84,6 @@ const serverCount = (g: ServerLinkGroup): number => {
   const ids = g.serverIds
   return Array.isArray(ids) ? ids.length : 0
 }
-
-const barWidth = (g: ServerLinkGroup) => {
-  if (!serverCount(g)) return '0%'
-  return '100%'
-}
 </script>
 
 <style scoped>

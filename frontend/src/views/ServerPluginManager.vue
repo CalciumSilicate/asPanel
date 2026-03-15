@@ -616,18 +616,16 @@
 <script setup lang="ts">
 import {ref, onMounted, computed, watch} from 'vue';
 import {ElMessage, ElNotification} from 'element-plus';
-import {Search, Refresh, Plus, Coin, Close, Delete, Download, Star, Upload, ArrowLeft, ArrowRight} from '@element-plus/icons-vue';
+import {Search, Refresh, Coin, Close, Delete, Download, Star, Upload, ArrowLeft, ArrowRight} from '@element-plus/icons-vue';
 import PluginNameCell from '@/components/PluginNameCell.vue';
 import AuthorTagsCell from '@/components/AuthorTagsCell.vue';
 import apiClient, { isRequestCanceled } from '@/api';
 import PluginToolbar from './server-plugin-manager/PluginToolbar.vue';
 import PluginServerPicker from './server-plugin-manager/PluginServerPicker.vue';
-import { useUiStore } from '@/store/ui'
 import { useTasksStore } from '@/store/tasks'
 import { useTransfersStore } from '@/store/transfers'
 import { useUserStore } from '@/store/user'
 import { storeToRefs } from 'pinia'
-const { asideCollapsed, asideCollapsing } = storeToRefs(useUiStore())
 const { fetchTasks } = useTasksStore()
 const { startDownload } = useTransfersStore()
 const { activeGroupIds } = storeToRefs(useUserStore())
@@ -730,13 +728,7 @@ const serverPluginsMap = new Map();
 const currentPlugins = ref<any[]>([]);
 const pluginsLoading = ref(false);
 
-// Left panel search & aggregates
-const serverQuery = ref('');
-const filteredServers = computed(() => {
-  const q = serverQuery.value.trim().toLowerCase();
-  if (!q) return servers.value;
-  return servers.value.filter(s => s.name?.toLowerCase().includes(q) || String(s.id).includes(q));
-});
+// Left panel aggregates
 const totalPluginCount = computed(() => servers.value.reduce((sum, s) => sum + (Number(s.plugins_count) || 0), 0));
 
 // --- Filtering & Pagination State ---
@@ -984,8 +976,6 @@ const prefetchAllServerPlugins = async (serverList: any[] = []) => {
   await Promise.allSettled(workers);
 };
 
-const pluginRowClassName = ({row}: {row: any}) => row.enabled ? '' : 'disabled-plugin-row';
-
 const getAuthorsArray = (meta: any) => {
   if (!meta) return [];
   if (meta.authors && Array.isArray(meta.authors)) return meta.authors.filter(Boolean);
@@ -1093,8 +1083,6 @@ const getPluginInstallStatus = (pluginId: string) => {
   if (!installedPluginVersionMap.value.has(pluginId)) return null;
   return installedPluginVersionMap.value.get(pluginId) || '已安装';
 };
-
-const handleDbSelectionChange = (selection: any[]) => dbPluginsSelected.value = selection;
 
 // DB table selection helpers (for native table)
 function isDbRowSelected(row: any): boolean {

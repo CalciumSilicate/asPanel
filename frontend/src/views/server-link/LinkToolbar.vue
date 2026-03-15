@@ -48,7 +48,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Link, Plus, Monitor } from '@element-plus/icons-vue'
+import { Link, Plus } from '@element-plus/icons-vue'
 import type { ServerLinkGroup } from '@/composables/useServerLink'
 
 const props = defineProps<{

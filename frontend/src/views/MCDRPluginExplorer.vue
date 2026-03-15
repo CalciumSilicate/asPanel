@@ -112,7 +112,7 @@
                 <div class="row-actions">
                   <button class="act-btn act-detail" @click="openDetail(row)">详情</button>
                   <button class="act-btn act-dl" :disabled="!row.latest?.asset?.browser_download_url" @click="go(row.latest?.asset?.browser_download_url)">下载</button>
-                  <button class="act-btn act-install" @click="handleInstallClick(row, row.latest)">
+                  <button class="act-btn act-install" @click="handleInstallClick(row, row.latest ?? null)">
                     <el-icon :size="12"><Upload /></el-icon>安装
                   </button>
                 </div>

@@ -83,6 +83,13 @@ import { VueCropper } from 'vue-cropper'
 import 'vue-cropper/dist/index.css'
 import apiClient from '@/api'
 
+interface CropperInstance {
+  rotateLeft: () => void
+  rotateRight: () => void
+  changeScale: (delta: number) => void
+  getCropBlob: (callback: (blob: Blob | null) => void) => void
+}
+
 const props = defineProps<{
   visible: boolean
   targetUserId?: number | null
@@ -93,7 +100,7 @@ const emit = defineEmits<{
   'success': []
 }>()
 
-const cropperRef = ref<InstanceType<typeof VueCropper>>()
+const cropperRef = ref<CropperInstance | null>(null)
 const imageUrl = ref('')
 const isUploading = ref(false)
 
@@ -151,7 +158,7 @@ const uploadImage = async () => {
   try {
     // 获取裁剪后的图片 blob
     const blob = await new Promise<Blob>((resolve, reject) => {
-      cropperRef.value?.getCropBlob((blob: Blob) => {
+      cropperRef.value?.getCropBlob((blob) => {
         if (blob) {
           resolve(blob)
         } else {
@@ -196,6 +203,7 @@ watch(() => props.visible, (newVal) => {
 <style scoped>
 .avatar-uploader-container {
   min-height: 300px;
+  padding: 4px 2px;
 }
 
 .upload-area {
@@ -209,18 +217,47 @@ watch(() => props.visible, (newVal) => {
 
 .avatar-upload :deep(.el-upload-dragger) {
   width: 100%;
-  height: 200px;
+  min-height: 220px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
+  gap: 10px;
+  border-radius: 22px;
+  border: 1px solid rgba(119, 181, 254, 0.18);
+  background:
+    radial-gradient(circle at 16% 18%, rgba(119,181,254,0.16), transparent 24%),
+    radial-gradient(circle at 84% 82%, rgba(239,183,186,0.18), transparent 24%),
+    linear-gradient(180deg, rgba(255,255,255,0.76), rgba(255,255,255,0.56));
+  box-shadow:
+    0 20px 48px rgba(119,181,254,0.10),
+    inset 0 1px 0 rgba(255,255,255,0.88);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.avatar-upload :deep(.el-upload-dragger:hover) {
+  transform: translateY(-1px);
+  border-color: rgba(119, 181, 254, 0.3);
+  box-shadow:
+    0 26px 56px rgba(119,181,254,0.14),
+    inset 0 1px 0 rgba(255,255,255,0.92);
+}
+
+:global(.dark) .avatar-upload :deep(.el-upload-dragger) {
+  background:
+    radial-gradient(circle at 16% 18%, rgba(119,181,254,0.22), transparent 24%),
+    radial-gradient(circle at 84% 82%, rgba(239,183,186,0.18), transparent 24%),
+    linear-gradient(180deg, rgba(15,23,42,0.86), rgba(15,23,42,0.68));
+  border-color: rgba(119,181,254,0.14);
+  box-shadow:
+    0 20px 48px rgba(0,0,0,0.32),
+    inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
 .upload-icon {
   font-size: 48px;
-  color: var(--el-text-color-secondary);
-  margin-bottom: 16px;
+  color: var(--brand-primary);
+  margin-bottom: 4px;
 }
 
 .upload-text {
@@ -232,10 +269,15 @@ watch(() => props.visible, (newVal) => {
   color: var(--el-text-color-regular);
 }
 
+.upload-text p:first-child {
+  font-size: 15px;
+  font-weight: 700;
+}
+
 .upload-hint {
   font-size: 12px;
   color: var(--el-text-color-secondary);
-  margin-top: 8px !important;
+  margin-top: 2px !important;
 }
 
 .cropper-area {
@@ -247,21 +289,74 @@ watch(() => props.visible, (newVal) => {
 
 .cropper-wrapper {
   width: 100%;
-  height: 300px;
-  border-radius: 8px;
+  height: 320px;
+  border-radius: 22px;
   overflow: hidden;
-  background: var(--el-fill-color-darker);
+  border: 1px solid rgba(119, 181, 254, 0.16);
+  background: rgba(255,255,255,0.5);
+  box-shadow:
+    0 20px 48px rgba(119,181,254,0.08),
+    inset 0 1px 0 rgba(255,255,255,0.85);
+}
+
+:global(.dark) .cropper-wrapper {
+  background: rgba(15,23,42,0.68);
+  border-color: rgba(119,181,254,0.12);
+  box-shadow:
+    0 20px 48px rgba(0,0,0,0.28),
+    inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
 .cropper-actions {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 16px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.cropper-actions :deep(.el-button-group) {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cropper-actions :deep(.el-button-group > .el-button) {
+  border-radius: 14px !important;
 }
 
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .avatar-uploader-container {
+    min-height: auto;
+  }
+
+  .avatar-upload :deep(.el-upload-dragger) {
+    min-height: 192px;
+    border-radius: 18px;
+    padding: 18px;
+  }
+
+  .cropper-wrapper {
+    height: 260px;
+    border-radius: 18px;
+  }
+
+  .cropper-actions,
+  .dialog-footer {
+    justify-content: stretch;
+  }
+
+  .cropper-actions > :deep(*),
+  .dialog-footer > * {
+    width: 100%;
+  }
 }
 </style>

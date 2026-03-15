@@ -90,7 +90,7 @@ export function useChatRoom(chatMainRef: Ref<HTMLElement | null>) {
   const formatTime = (dt: string): string => {
     try {
       return new Date(dt).toLocaleString('zh-CN', {
-        timeZone: (settings as Record<string, string>).timezone || 'Asia/Shanghai',
+        timeZone: settings.timezone || 'Asia/Shanghai',
       })
     } catch {
       return ''
